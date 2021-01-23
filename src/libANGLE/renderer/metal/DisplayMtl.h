@@ -194,4 +194,11 @@ class DisplayMtl : public DisplayImpl
 
 }  // namespace rx
 
+#include <export.h>
+extern "C"
+{
+    ANGLE_EXPORT void hamarb123_SetMetalDevice(void* device);
+    ANGLE_EXPORT void* hamarb123_GetMetalDevice(void);
+}
+
 #endif /* LIBANGLE_RENDERER_METAL_DISPLAYMTL_H_ */
