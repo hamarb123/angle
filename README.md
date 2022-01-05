@@ -1,3 +1,17 @@
+# Note - To build arm64 on Windows:
+
+Must have `is_clang = true` in the ninja args.
+
+Modification to `third_party/VK-GL-CTS/src/framework/opengl/wrapper/glwTypes.inl`:
+```diff
+ typedef void				GLvoid;
+ 
+-#if (DE_OS == DE_OS_WIN32 && DE_CPU == DE_CPU_X86_64)
++#if (DE_OS == DE_OS_WIN32 && (DE_CPU == DE_CPU_X86_64 || defined(__aarch64__)))
+	typedef signed long long int	GLintptr;
+ 	typedef signed long long int	GLsizeiptr;
+```
+
 # ANGLE - Almost Native Graphics Layer Engine
 
 The goal of ANGLE is to allow users of multiple operating systems to seamlessly run WebGL and other
