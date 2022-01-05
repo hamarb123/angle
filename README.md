@@ -12,6 +12,29 @@ Modification to `third_party/VK-GL-CTS/src/framework/opengl/wrapper/glwTypes.inl
  	typedef signed long long int	GLsizeiptr;
 ```
 
+Modification to `third_party\libpng\BUILD.gn` (may be unnecessary in future, but is for now):
+```diff
+     "src/pngwtran.c",
+     "src/pngwutil.c",
+   ]
+-  if (target_cpu == "arm" || target_cpu == "arm64") {
+-    sources += [
+-      "src/arm/arm_init.c",
+-      "src/arm/filter_neon.S",
+-      "src/arm/filter_neon_intrinsics.c",
+-      "src/arm/palette_neon_intrinsics.c",
+-    ]
+-  }
+   if (is_win) {
+     cflags = [ "/wd4028" ]
+   }
+   configs -= [ "//build/config/compiler:chromium_code" ]
+   public_configs = [ ":libpng_config" ]
+   deps = [ "//third_party/zlib:zlib" ]
++  defines = [ "PNG_ARM_NEON_OPT=0" ]
+ }
+```
+
 # ANGLE - Almost Native Graphics Layer Engine
 
 The goal of ANGLE is to allow users of multiple operating systems to seamlessly run WebGL and other
