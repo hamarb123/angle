@@ -784,9 +784,6 @@ TEST_P(WebGLCompatibilityTest, EnableBlendMinMaxExtension)
 // Test enabling the query extensions
 TEST_P(WebGLCompatibilityTest, EnableQueryExtensions)
 {
-    // Seems to be causing a device lost. http://anglebug.com/2423
-    ANGLE_SKIP_TEST_IF(IsAMD() && IsWindows() && IsOpenGL());
-
     EXPECT_FALSE(IsGLExtensionEnabled("GL_EXT_occlusion_query_boolean"));
     EXPECT_FALSE(IsGLExtensionEnabled("GL_EXT_disjoint_timer_query"));
     EXPECT_FALSE(IsGLExtensionEnabled("GL_CHROMIUM_sync_query"));
@@ -2177,8 +2174,8 @@ void main(),
 {,
     gl_Position = vec4(1.0);,
 })";
-        GLuint program = CompileProgram(invalidVert.c_str(), essl1_shaders::fs::Red());
-        EXPECT_EQ(0u, program);
+        GLuint program_number = CompileProgram(invalidVert.c_str(), essl1_shaders::fs::Red());
+        EXPECT_EQ(0u, program_number);
     }
 }
 
@@ -2248,6 +2245,35 @@ TEST_P(WebGLCompatibilityTest, BindAttribLocationLimitation)
     EXPECT_GL_ERROR(GL_INVALID_OPERATION);
 
     glBindAttribLocation(0, 0, static_cast<const GLchar *>(tooLongString.c_str()));
+
+    EXPECT_GL_ERROR(GL_INVALID_VALUE);
+}
+
+// Tests getAttribLocation for reserved prefixes
+TEST_P(WebGLCompatibilityTest, GetAttribLocationNameLimitation)
+{
+    GLint attrLocation;
+
+    attrLocation = glGetAttribLocation(0, "gl_attr");
+    EXPECT_GL_NO_ERROR();
+    EXPECT_EQ(-1, attrLocation);
+
+    attrLocation = glGetAttribLocation(0, "webgl_attr");
+    EXPECT_GL_NO_ERROR();
+    EXPECT_EQ(-1, attrLocation);
+
+    attrLocation = glGetAttribLocation(0, "_webgl_attr");
+    EXPECT_GL_NO_ERROR();
+    EXPECT_EQ(-1, attrLocation);
+}
+
+// Tests getAttribLocation for length limits
+TEST_P(WebGLCompatibilityTest, GetAttribLocationLengthLimitation)
+{
+    constexpr int maxLocStringLength = 256;
+    const std::string tooLongString(maxLocStringLength + 1, '_');
+
+    glGetAttribLocation(0, static_cast<const GLchar *>(tooLongString.c_str()));
 
     EXPECT_GL_ERROR(GL_INVALID_VALUE);
 }
@@ -5285,7 +5311,7 @@ void main()
 
     constexpr char kVSArrayMuchTooLarge[] =
         R"(varying vec4 color;
-const int array_size = 795418649;
+const int array_size = 556007917;
 void main()
 {
     mat2 array[array_size];
@@ -5403,6 +5429,17 @@ TEST_P(WebGL2CompatibilityTest, BindAttribLocationLimitation)
     const std::string tooLongString(maxLocStringLength + 1, '_');
 
     glBindAttribLocation(0, 0, static_cast<const GLchar *>(tooLongString.c_str()));
+
+    EXPECT_GL_ERROR(GL_INVALID_VALUE);
+}
+
+// Tests getAttribLocation for length limit
+TEST_P(WebGL2CompatibilityTest, GetAttribLocationLengthLimitation)
+{
+    constexpr int maxLocStringLength = 1024;
+    const std::string tooLongString(maxLocStringLength + 1, '_');
+
+    glGetAttribLocation(0, static_cast<const GLchar *>(tooLongString.c_str()));
 
     EXPECT_GL_ERROR(GL_INVALID_VALUE);
 }
@@ -5615,9 +5652,8 @@ void main()
     EXPECT_NE(0u, program);
 }
 
-ANGLE_INSTANTIATE_TEST_ES2_AND_ES3_AND(WebGLCompatibilityTest,
-                                       WithDirectSPIRVGeneration(ES3_VULKAN()));
+ANGLE_INSTANTIATE_TEST_ES2_AND_ES3(WebGLCompatibilityTest);
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(WebGL2CompatibilityTest);
-ANGLE_INSTANTIATE_TEST_ES3_AND(WebGL2CompatibilityTest, WithDirectSPIRVGeneration(ES3_VULKAN()));
+ANGLE_INSTANTIATE_TEST_ES3(WebGL2CompatibilityTest);
 }  // namespace angle

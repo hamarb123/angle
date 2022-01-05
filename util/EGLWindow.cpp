@@ -102,19 +102,36 @@ bool EGLWindow::isContextVersion(EGLint glesMajorVersion, EGLint glesMinorVersio
     return mClientMajorVersion == glesMajorVersion && mClientMinorVersion == glesMinorVersion;
 }
 
+GLWindowResult EGLWindow::initializeGLWithResult(OSWindow *osWindow,
+                                                 angle::Library *glWindowingLibrary,
+                                                 angle::GLESDriverType driverType,
+                                                 const EGLPlatformParameters &platformParams,
+                                                 const ConfigParameters &configParams)
+{
+    if (!initializeDisplay(osWindow, glWindowingLibrary, driverType, platformParams))
+    {
+        return GLWindowResult::Error;
+    }
+    GLWindowResult res = initializeSurface(osWindow, glWindowingLibrary, configParams);
+    if (res != GLWindowResult::NoError)
+    {
+        return res;
+    }
+    if (!initializeContext())
+    {
+        return GLWindowResult::Error;
+    }
+    return GLWindowResult::NoError;
+}
+
 bool EGLWindow::initializeGL(OSWindow *osWindow,
                              angle::Library *glWindowingLibrary,
                              angle::GLESDriverType driverType,
                              const EGLPlatformParameters &platformParams,
                              const ConfigParameters &configParams)
 {
-    if (!initializeDisplay(osWindow, glWindowingLibrary, driverType, platformParams))
-        return false;
-    if (!initializeSurface(osWindow, glWindowingLibrary, configParams))
-        return false;
-    if (!initializeContext())
-        return false;
-    return true;
+    return initializeGLWithResult(osWindow, glWindowingLibrary, driverType, platformParams,
+                                  configParams) == GLWindowResult::NoError;
 }
 
 bool EGLWindow::initializeDisplay(OSWindow *osWindow,
@@ -169,23 +186,6 @@ bool EGLWindow::initializeDisplay(OSWindow *osWindow,
     {
         displayAttributes.push_back(EGL_PLATFORM_ANGLE_DEBUG_LAYERS_ENABLED_ANGLE);
         displayAttributes.push_back(params.debugLayersEnabled);
-    }
-
-    const bool hasFeatureVirtualizationANGLE =
-        strstr(extensionString, "EGL_ANGLE_platform_angle_context_virtualization") != nullptr;
-
-    if (params.contextVirtualization != EGL_DONT_CARE)
-    {
-        if (hasFeatureVirtualizationANGLE)
-        {
-            displayAttributes.push_back(EGL_PLATFORM_ANGLE_CONTEXT_VIRTUALIZATION_ANGLE);
-            displayAttributes.push_back(params.contextVirtualization);
-        }
-        else
-        {
-            fprintf(stderr,
-                    "EGL_ANGLE_platform_angle_context_virtualization extension not active\n");
-        }
     }
 
     if (params.platformMethods)
@@ -256,14 +256,12 @@ bool EGLWindow::initializeDisplay(OSWindow *osWindow,
 
     if (params.asyncCommandQueueFeatureVulkan == EGL_TRUE)
     {
-        // TODO(jmadill): Update feature names. b/172704839
-        enabledFeatureOverrides.push_back("commandProcessor");
-        enabledFeatureOverrides.push_back("asynchronousCommandProcessing");
+        enabledFeatureOverrides.push_back("asyncCommandQueue");
     }
 
-    if (params.directSPIRVGeneration == EGL_TRUE)
+    if (params.generateSPIRVThroughGlslang == EGL_TRUE)
     {
-        enabledFeatureOverrides.push_back("directSPIRVGeneration");
+        enabledFeatureOverrides.push_back("generateSPIRVThroughGlslang");
     }
 
     if (params.directMetalGeneration == EGL_TRUE)
@@ -304,6 +302,11 @@ bool EGLWindow::initializeDisplay(OSWindow *osWindow,
     if (params.forceInitShaderVariables == EGL_TRUE)
     {
         enabledFeatureOverrides.push_back("forceInitShaderVariables");
+    }
+
+    if (params.forceVulkanFallbackFormat == EGL_TRUE)
+    {
+        enabledFeatureOverrides.push_back("forceFallbackFormat");
     }
 
     const bool hasFeatureControlANGLE =
@@ -370,9 +373,9 @@ bool EGLWindow::initializeDisplay(OSWindow *osWindow,
     return true;
 }
 
-bool EGLWindow::initializeSurface(OSWindow *osWindow,
-                                  angle::Library *glWindowingLibrary,
-                                  const ConfigParameters &params)
+GLWindowResult EGLWindow::initializeSurface(OSWindow *osWindow,
+                                            angle::Library *glWindowingLibrary,
+                                            const ConfigParameters &params)
 {
     mConfigParams                 = params;
     const char *displayExtensions = eglQueryString(mDisplay, EGL_EXTENSIONS);
@@ -404,7 +407,7 @@ bool EGLWindow::initializeSurface(OSWindow *osWindow,
     {
         fprintf(stderr, "Mising EGL_EXT_pixel_format_float.\n");
         destroyGL();
-        return false;
+        return GLWindowResult::Error;
     }
     if (hasPixelFormatFloat)
     {
@@ -419,7 +422,7 @@ bool EGLWindow::initializeSurface(OSWindow *osWindow,
     {
         fprintf(stderr, "Could not find a suitable EGL config!\n");
         destroyGL();
-        return false;
+        return GLWindowResult::Error;
     }
 
     eglGetConfigAttrib(mDisplay, mConfig, EGL_RED_SIZE, &mConfigParams.redBits);
@@ -451,7 +454,7 @@ bool EGLWindow::initializeSurface(OSWindow *osWindow,
     {
         fprintf(stderr, "Mising EGL_KHR_gl_colorspace.\n");
         destroyGL();
-        return false;
+        return GLWindowResult::NoColorspaceSupport;
     }
     if (hasGLColorSpace)
     {
@@ -477,14 +480,14 @@ bool EGLWindow::initializeSurface(OSWindow *osWindow,
     {
         fprintf(stderr, "eglCreateWindowSurface failed: 0x%X\n", eglGetError());
         destroyGL();
-        return false;
+        return GLWindowResult::Error;
     }
 
 #if defined(ANGLE_USE_UTIL_LOADER)
     angle::LoadGLES(eglGetProcAddress);
 #endif  // defined(ANGLE_USE_UTIL_LOADER)
 
-    return true;
+    return GLWindowResult::NoError;
 }
 
 GLWindowContext EGLWindow::getCurrentContextGeneric()
@@ -495,10 +498,10 @@ GLWindowContext EGLWindow::getCurrentContextGeneric()
 GLWindowContext EGLWindow::createContextGeneric(GLWindowContext share)
 {
     EGLContext shareContext = reinterpret_cast<EGLContext>(share);
-    return reinterpret_cast<GLWindowContext>(createContext(shareContext));
+    return reinterpret_cast<GLWindowContext>(createContext(shareContext, nullptr));
 }
 
-EGLContext EGLWindow::createContext(EGLContext share)
+EGLContext EGLWindow::createContext(EGLContext share, EGLint *extraAttributes)
 {
     const char *displayExtensions = eglQueryString(mDisplay, EGL_EXTENSIONS);
 
@@ -585,6 +588,13 @@ EGLContext EGLWindow::createContext(EGLContext share)
     }
 
     std::vector<EGLint> contextAttributes;
+    for (EGLint *extraAttrib = extraAttributes;
+         extraAttrib != nullptr && extraAttrib[0] != EGL_NONE; extraAttrib += 2)
+    {
+        contextAttributes.push_back(extraAttrib[0]);
+        contextAttributes.push_back(extraAttrib[1]);
+    }
+
     if (hasKHRCreateContext)
     {
         contextAttributes.push_back(EGL_CONTEXT_MAJOR_VERSION_KHR);
@@ -683,7 +693,7 @@ EGLContext EGLWindow::createContext(EGLContext share)
 
 bool EGLWindow::initializeContext()
 {
-    mContext = createContext(EGL_NO_CONTEXT);
+    mContext = createContext(EGL_NO_CONTEXT, nullptr);
     if (mContext == EGL_NO_CONTEXT)
     {
         destroyGL();

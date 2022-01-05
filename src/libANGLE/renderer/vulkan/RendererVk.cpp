@@ -135,16 +135,6 @@ constexpr const char *kSkippedMessages[] = {
     "UNASSIGNED-CoreValidation-Shader-PointSizeMissing",
     // http://anglebug.com/3832
     "VUID-VkPipelineInputAssemblyStateCreateInfo-topology-00428",
-    // http://anglebug.com/4063
-    "VUID-VkDeviceCreateInfo-pNext-pNext",
-    "VUID-VkPipelineRasterizationStateCreateInfo-pNext-pNext",
-    "VUID_Undefined",
-    // https://issuetracker.google.com/issues/159493191
-    "VUID-vkCmdDraw-None-02690",
-    "VUID-vkCmdDrawIndexed-None-02690",
-    // http://anglebug.com/4975
-    "VUID-vkCmdDraw-None-02687",
-    "VUID-vkCmdDrawIndexed-None-02687",
     // Best Practices Skips https://issuetracker.google.com/issues/166641492
     // https://issuetracker.google.com/issues/166793850
     "UNASSIGNED-BestPractices-vkCreateCommandPool-command-buffer-reset",
@@ -185,24 +175,254 @@ constexpr const char *kSkippedMessages[] = {
     "VUID-vkCmdClearAttachments-baseArrayLayer-00018",
     // http://anglebug.com/6355
     "VUID-vkCmdDraw-blendEnable-04727",
+    // http://anglebug.com/6442
+    "UNASSIGNED-CoreValidation-Shader-InterfaceTypeMismatch",
+    // http://anglebug.com/6514
+    "vkEnumeratePhysicalDevices: One or more layers modified physical devices",
 };
 
-// Suppress validation errors that are known
-//  return "true" if given code/prefix/message is known, else return "false"
-bool IsIgnoredDebugMessage(const char *message)
+struct SkippedSyncvalMessage
 {
-    if (!message)
+    const char *messageId;
+    const char *messageContents1;
+    const char *messageContents2;
+    bool resolvedWithStoreOpNone;
+};
+constexpr SkippedSyncvalMessage kSkippedSyncvalMessages[] = {
+    // This error is generated for multiple reasons:
+    //
+    // - http://anglebug.com/6411
+    // - http://anglebug.com/5371: This is resolved with storeOp=NONE
+    {"SYNC-HAZARD-WRITE_AFTER_WRITE",
+     "Access info (usage: SYNC_IMAGE_LAYOUT_TRANSITION, prior_usage: "
+     "SYNC_LATE_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_WRITE, write_barriers: 0, command: "
+     "vkCmdEndRenderPass",
+     "", false},
+    // http://anglebug.com/6411
+    {"SYNC-HAZARD-WRITE_AFTER_WRITE",
+     "aspect depth during load with loadOp VK_ATTACHMENT_LOAD_OP_DONT_CARE. Access info (usage: "
+     "SYNC_EARLY_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_WRITE, prior_usage: "
+     "SYNC_IMAGE_LAYOUT_TRANSITION, write_barriers: "
+     "SYNC_EARLY_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_READ|SYNC_LATE_FRAGMENT_TESTS_DEPTH_"
+     "STENCIL_ATTACHMENT_READ, command: vkCmdPipelineBarrier",
+     "", false},
+    {"SYNC-HAZARD-WRITE_AFTER_WRITE",
+     "aspect stencil during load with loadOp VK_ATTACHMENT_LOAD_OP_DONT_CARE. Access info (usage: "
+     "SYNC_EARLY_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_WRITE, prior_usage: "
+     "SYNC_IMAGE_LAYOUT_TRANSITION, write_barriers: "
+     "SYNC_EARLY_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_READ|SYNC_LATE_FRAGMENT_TESTS_DEPTH_"
+     "STENCIL_ATTACHMENT_READ, command: vkCmdPipelineBarrier",
+     "", false},
+    // http://angkebug.com/6584
+    {"SYNC-HAZARD-WRITE_AFTER_WRITE",
+     "aspect depth during load with loadOp VK_ATTACHMENT_LOAD_OP_DONT_CARE. Access info (usage: "
+     "SYNC_EARLY_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_WRITE, prior_usage: "
+     "SYNC_IMAGE_LAYOUT_TRANSITION, write_barriers: "
+     "SYNC_EARLY_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_READ|SYNC_LATE_FRAGMENT_TESTS_DEPTH_"
+     "STENCIL_ATTACHMENT_READ|SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_READ|SYNC_COLOR_"
+     "ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, command: vkCmdPipelineBarrier",
+     "", false},
+    // http://anglebug.com/6416
+    // http://anglebug.com/6421
+    {"SYNC-HAZARD-WRITE_AFTER_WRITE",
+     "Access info (usage: SYNC_IMAGE_LAYOUT_TRANSITION, prior_usage: SYNC_IMAGE_LAYOUT_TRANSITION, "
+     "write_barriers: 0, command: vkCmdEndRenderPass",
+     "", false},
+    // These errors are generated when simultaneously using a read-only depth/stencil attachment as
+    // sampler.  This is valid Vulkan.
+    //
+    // When storeOp=NONE is not present, ANGLE uses storeOp=STORE, but considers the image read-only
+    // and produces a hazard.  ANGLE relies on storeOp=NONE and so this is not expected to be worked
+    // around.
+    //
+    // With storeOp=NONE, there is another bug where a depth/stencil attachment may use storeOp=NONE
+    // for depth while storeOp=DONT_CARE for stencil, and the latter causes a synchronization error
+    // (similarly to the previous case as DONT_CARE is also a write operation).
+    // http://anglebug.com/5962
+    {"SYNC-HAZARD-WRITE_AFTER_READ",
+     "depth aspect during store with storeOp VK_ATTACHMENT_STORE_OP_STORE. Access info (usage: "
+     "SYNC_LATE_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_WRITE, prior_usage: "
+     "SYNC_FRAGMENT_SHADER_SHADER_STORAGE_READ, read_barriers: VK_PIPELINE_STAGE_2_NONE_KHR, "
+     "command: vkCmdDraw",
+     "", true},
+    {"SYNC-HAZARD-READ_AFTER_WRITE",
+     "type: VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageLayout: "
+     "VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, binding ",
+     "Access info (usage: "
+     "SYNC_FRAGMENT_SHADER_SHADER_STORAGE_READ, prior_usage: "
+     "SYNC_LATE_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_WRITE, write_barriers: 0, command: "
+     "vkCmdEndRenderPass",
+     true},
+    {"SYNC-HAZARD-READ_AFTER_WRITE",
+     "type: VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageLayout: "
+     "VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, binding ",
+     "Access info (usage: "
+     "SYNC_FRAGMENT_SHADER_SHADER_STORAGE_READ, prior_usage: "
+     "SYNC_LATE_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_WRITE, write_barriers: "
+     "SYNC_EARLY_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_READ|SYNC_EARLY_FRAGMENT_TESTS_DEPTH_"
+     "STENCIL_ATTACHMENT_WRITE|SYNC_LATE_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_READ|SYNC_LATE_"
+     "FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_WRITE, command: "
+     "vkCmdEndRenderPass",
+     true},
+    {"SYNC-HAZARD-WRITE_AFTER_WRITE",
+     "aspect stencil during load with loadOp VK_ATTACHMENT_LOAD_OP_DONT_CARE. Access info (usage: "
+     "SYNC_EARLY_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_WRITE, prior_usage: "
+     "SYNC_IMAGE_LAYOUT_TRANSITION, write_barriers: "
+     "SYNC_EARLY_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_READ|SYNC_FRAGMENT_SHADER_SHADER_SAMPLED_"
+     "READ|SYNC_FRAGMENT_SHADER_SHADER_STORAGE_READ|SYNC_FRAGMENT_SHADER_UNIFORM_READ|SYNC_LATE_"
+     "FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_READ, command: vkCmdPipelineBarrier",
+     "", false},
+    {"SYNC-HAZARD-WRITE_AFTER_WRITE",
+     "aspect stencil during load with loadOp VK_ATTACHMENT_LOAD_OP_DONT_CARE. Access info (usage: "
+     "SYNC_EARLY_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_WRITE, prior_usage: "
+     "SYNC_IMAGE_LAYOUT_TRANSITION, write_barriers: "
+     "SYNC_EARLY_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_READ|SYNC_LATE_FRAGMENT_TESTS_DEPTH_"
+     "STENCIL_ATTACHMENT_READ|SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_READ|SYNC_COLOR_"
+     "ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, command: vkCmdPipelineBarrier",
+     "", false},
+    // http://anglebug.com/6422
+    {"VUID-vkCmdWaitEvents-srcStageMask-01158",
+     "vkCmdWaitEvents: srcStageMask 0x2000 contains stages not present in pEvents stageMask. Extra "
+     "stages are VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT.",
+     "", false},
+    // http://anglebug.com/6424
+    {"SYNC-HAZARD-READ_AFTER_WRITE",
+     "Access info (usage: SYNC_VERTEX_ATTRIBUTE_INPUT_VERTEX_ATTRIBUTE_READ, prior_usage: "
+     "SYNC_COMPUTE_SHADER_SHADER_STORAGE_WRITE, write_barriers: 0, command: vkCmdDispatch",
+     "", false},
+    // These errors are caused by a feedback loop tests that don't produce correct Vulkan to begin
+    // with.  The message to check is made more specific (by checking the exact set/binding and part
+    // of seq_no) to reduce the chances of it suppressing a bug in other valid tests.
+    // http://anglebug.com/6417
+    //
+    // From: Texture2DBaseMaxTestES3.Fuzz545ImmutableTexRenderFeedback/ES3_Vulkan
+    {"SYNC-HAZARD-READ_AFTER_WRITE",
+     "type: VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageLayout: VK_IMAGE_LAYOUT_GENERAL, "
+     "binding #0, index 0. Access info (usage: SYNC_FRAGMENT_SHADER_SHADER_STORAGE_READ, "
+     "prior_usage: SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, write_barriers: 0, "
+     "command: vkCmdBeginRenderPass, seq_no: 6",
+     "", false},
+    {"SYNC-HAZARD-READ_AFTER_WRITE",
+     "type: VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageLayout: VK_IMAGE_LAYOUT_GENERAL, "
+     "binding #0, index 0. Access info (usage: SYNC_FRAGMENT_SHADER_SHADER_STORAGE_READ, "
+     "prior_usage: SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, write_barriers: 0, "
+     "command: vkCmdBeginRenderPass, seq_no: 7",
+     "", false},
+    {"SYNC-HAZARD-READ_AFTER_WRITE",
+     "type: VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageLayout: VK_IMAGE_LAYOUT_GENERAL, "
+     "binding #0, index 0. Access info (usage: SYNC_FRAGMENT_SHADER_SHADER_STORAGE_READ, "
+     "prior_usage: SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, write_barriers: 0, "
+     "command: vkCmdDraw, seq_no: 6",
+     "", false},
+    {"SYNC-HAZARD-READ_AFTER_WRITE",
+     "type: VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageLayout: VK_IMAGE_LAYOUT_GENERAL, "
+     "binding #0, index 0. Access info (usage: SYNC_FRAGMENT_SHADER_SHADER_STORAGE_READ, "
+     "prior_usage: SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, write_barriers: 0, "
+     "command: vkCmdDraw, seq_no: 7",
+     "", false},
+    // From: FramebufferTest_ES3.FramebufferBindToNewLevelAfterMaxIncreaseShouldntCrash/ES3_Vulkan
+    {"SYNC-HAZARD-READ_AFTER_WRITE",
+     "type: VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageLayout: VK_IMAGE_LAYOUT_GENERAL, "
+     "binding #0, index 0. Access info (usage: SYNC_FRAGMENT_SHADER_SHADER_STORAGE_READ, "
+     "prior_usage: SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, write_barriers: 0, "
+     "command: vkCmdBeginRenderPass, seq_no: 3,",
+     "", false},
+    {"SYNC-HAZARD-READ_AFTER_WRITE",
+     "type: VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageLayout: VK_IMAGE_LAYOUT_GENERAL, "
+     "binding #0, index 0. Access info (usage: SYNC_FRAGMENT_SHADER_SHADER_STORAGE_READ, "
+     "prior_usage: SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, write_barriers: 0, "
+     "command: vkCmdBeginRenderPass, seq_no: 10,",
+     "", false},
+    // From: FramebufferTest_ES3.SampleFromAttachedTextureWithDifferentLOD/ES3_Vulkan
+    {"SYNC-HAZARD-READ_AFTER_WRITE",
+     "type: VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageLayout: VK_IMAGE_LAYOUT_GENERAL, "
+     "binding #0, index 0. Access info (usage: SYNC_FRAGMENT_SHADER_SHADER_STORAGE_READ, "
+     "prior_usage: SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, write_barriers: 0, "
+     "command: vkCmdBeginRenderPass, seq_no: 8,",
+     "", false},
+    // From: TracePerfTest.Run/vulkan_aztec_ruins
+    {"SYNC-HAZARD-READ_AFTER_WRITE",
+     "type: VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageLayout: VK_IMAGE_LAYOUT_GENERAL, "
+     "binding #0, index 0. Access info (usage: SYNC_FRAGMENT_SHADER_SHADER_STORAGE_READ, "
+     "prior_usage: SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, write_barriers: 0, "
+     "command: vkCmdBeginRenderPass, seq_no: 11",
+     "", false},
+    // http://anglebug.com/6551
+    {"SYNC-HAZARD-WRITE_AFTER_WRITE",
+     "Access info (usage: SYNC_IMAGE_LAYOUT_TRANSITION, prior_usage: "
+     "SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, write_barriers: "
+     "SYNC_EARLY_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_READ|SYNC_EARLY_FRAGMENT_TESTS_DEPTH_"
+     "STENCIL_ATTACHMENT_WRITE|SYNC_LATE_FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_READ|SYNC_LATE_"
+     "FRAGMENT_TESTS_DEPTH_STENCIL_ATTACHMENT_WRITE|SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_"
+     "READ|SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, command: vkCmdEndRenderPass",
+     "", false},
+    {"SYNC-HAZARD-WRITE_AFTER_WRITE",
+     "Access info (usage: SYNC_IMAGE_LAYOUT_TRANSITION, prior_usage: "
+     "SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, write_barriers: "
+     "SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_READ|SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_"
+     "ATTACHMENT_WRITE, command: vkCmdEndRenderPass",
+     "", false},
+    {"SYNC-HAZARD-WRITE_AFTER_WRITE",
+     "Access info (usage: SYNC_IMAGE_LAYOUT_TRANSITION, prior_usage: "
+     "SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_WRITE, write_barriers: "
+     "SYNC_TRANSFORM_FEEDBACK_EXT_TRANSFORM_FEEDBACK_COUNTER_READ_EXT|SYNC_TRANSFORM_FEEDBACK_EXT_"
+     "TRANSFORM_FEEDBACK_COUNTER_WRITE_EXT|SYNC_TRANSFORM_FEEDBACK_EXT_TRANSFORM_FEEDBACK_WRITE_"
+     "EXT|SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_ATTACHMENT_READ|SYNC_COLOR_ATTACHMENT_OUTPUT_COLOR_"
+     "ATTACHMENT_WRITE, command: vkCmdEndRenderPass",
+     "", false},
+};
+
+enum class DebugMessageReport
+{
+    Ignore,
+    Print,
+};
+
+// Suppress validation errors that are known.  Returns DebugMessageReport::Ignore in that case.
+DebugMessageReport ShouldReportDebugMessage(RendererVk *renderer,
+                                            const char *messageId,
+                                            const char *message)
+{
+    if (message == nullptr)
     {
-        return false;
+        return DebugMessageReport::Print;
     }
+
+    // Check with non-syncval messages:
     for (const char *msg : kSkippedMessages)
     {
         if (strstr(message, msg) != nullptr)
         {
-            return true;
+            return DebugMessageReport::Ignore;
         }
     }
-    return false;
+
+    // Then check with syncval messages:
+    const bool isStoreOpNoneSupported =
+        renderer->getFeatures().supportsRenderPassLoadStoreOpNone.enabled ||
+        renderer->getFeatures().supportsRenderPassStoreOpNoneQCOM.enabled;
+    for (const SkippedSyncvalMessage &msg : kSkippedSyncvalMessages)
+    {
+        if (strstr(messageId, msg.messageId) == nullptr ||
+            strstr(message, msg.messageContents1) == nullptr ||
+            strstr(message, msg.messageContents2) == nullptr)
+        {
+            continue;
+        }
+
+        // If storeOp=NONE is supported, we expected the error to be resolved by it, and yet we
+        // still get this error, report it.
+        if (msg.resolvedWithStoreOpNone && isStoreOpNoneSupported)
+        {
+            return DebugMessageReport::Print;
+        }
+
+        // Otherwise ignore the message; they are either not resolved by storeOp=NONE, or they are
+        // but the platform doesn't support the extension yet.
+        return DebugMessageReport::Ignore;
+    }
+
+    return DebugMessageReport::Print;
 }
 
 const char *GetVkObjectTypeName(VkObjectType type)
@@ -294,8 +514,11 @@ DebugUtilsMessenger(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                     const VkDebugUtilsMessengerCallbackDataEXT *callbackData,
                     void *userData)
 {
+    RendererVk *rendererVk = static_cast<RendererVk *>(userData);
+
     // See if it's an issue we are aware of and don't want to be spammed about.
-    if (IsIgnoredDebugMessage(callbackData->pMessageIdName))
+    if (ShouldReportDebugMessage(rendererVk, callbackData->pMessageIdName,
+                                 callbackData->pMessage) == DebugMessageReport::Ignore)
     {
         return VK_FALSE;
     }
@@ -359,7 +582,6 @@ DebugUtilsMessenger(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
     bool isError    = (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0;
     std::string msg = log.str();
 
-    RendererVk *rendererVk = static_cast<RendererVk *>(userData);
     rendererVk->onNewValidationMessage(msg);
 
     if (isError)
@@ -383,7 +605,9 @@ VKAPI_ATTR VkBool32 VKAPI_CALL DebugReportCallback(VkDebugReportFlagsEXT flags,
                                                    const char *message,
                                                    void *userData)
 {
-    if (IsIgnoredDebugMessage(message))
+    RendererVk *rendererVk = static_cast<RendererVk *>(userData);
+
+    if (ShouldReportDebugMessage(rendererVk, message, message) == DebugMessageReport::Ignore)
     {
         return VK_FALSE;
     }
@@ -780,12 +1004,9 @@ void RendererVk::onDestroy(vk::Context *context)
     mYuvConversionCache.destroy(this);
     mVkFormatDescriptorCountMap.clear();
 
-    for (vk::CommandBufferHelper *commandBufferHelper : mCommandBufferHelperFreeList)
-    {
-        SafeDelete(commandBufferHelper);
-    }
-    mCommandBufferHelperFreeList.clear();
+    mCommandBufferRecycler.onDestroy();
 
+    mBufferMemoryAllocator.destroy(this);
     mAllocator.destroy();
 
     sh::FinalizeGlslang();
@@ -1181,13 +1402,16 @@ angle::Result RendererVk::initialize(DisplayVk *displayVk,
         preferredLargeHeapBlockSize = 4 * 1024 * 1024;
     }
 
+    // Store the physical device memory properties so we can find the right memory pools.
+    mMemoryProperties.init(mPhysicalDevice);
+
     // Create VMA allocator
     ANGLE_VK_TRY(displayVk,
                  mAllocator.init(mPhysicalDevice, mDevice, mInstance, applicationInfo.apiVersion,
                                  preferredLargeHeapBlockSize));
 
-    // Store the physical device memory properties so we can find the right memory pools.
-    mMemoryProperties.init(mPhysicalDevice);
+    // Create buffer memory allocator
+    ANGLE_VK_TRY(displayVk, mBufferMemoryAllocator.initialize(this, preferredLargeHeapBlockSize));
 
     {
         ANGLE_TRACE_EVENT0("gpu.angle,startup", "GlslangWarmup");
@@ -1502,10 +1726,9 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
         std::sort(deviceExtensionNames.begin(), deviceExtensionNames.end(), StrLess);
     }
 
-    vk::ExtensionNameList enabledDeviceExtensions;
     if (displayVk->isUsingSwapchain())
     {
-        enabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     }
 
     // Query extensions and their features.
@@ -1517,14 +1740,14 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
     // Enable VK_EXT_depth_clip_enable, if supported
     if (ExtensionFound(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME, deviceExtensionNames))
     {
-        enabledDeviceExtensions.push_back(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME);
     }
 
     // Enable VK_KHR_get_memory_requirements2, if supported
     bool hasGetMemoryRequirements2KHR = false;
     if (ExtensionFound(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME, deviceExtensionNames))
     {
-        enabledDeviceExtensions.push_back(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME);
         hasGetMemoryRequirements2KHR = true;
     }
 
@@ -1533,30 +1756,30 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
     if (ExtensionFound(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME, deviceExtensionNames))
     {
         hasBindMemory2KHR = true;
-        enabledDeviceExtensions.push_back(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME);
     }
 
     // Enable KHR_MAINTENANCE1 to support viewport flipping.
     if (mPhysicalDeviceProperties.apiVersion < VK_MAKE_VERSION(1, 1, 0))
     {
-        enabledDeviceExtensions.push_back(VK_KHR_MAINTENANCE1_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_MAINTENANCE1_EXTENSION_NAME);
     }
 
     if (getFeatures().supportsRenderpass2.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME);
     }
 
     if (getFeatures().supportsIncrementalPresent.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
     }
 
 #if defined(ANGLE_PLATFORM_ANDROID)
     if (getFeatures().supportsAndroidHardwareBuffer.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
-        enabledDeviceExtensions.push_back(
+        mEnabledDeviceExtensions.push_back(VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(
             VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME);
 #    if !defined(ANGLE_SHARED_LIBVULKAN)
         InitExternalMemoryHardwareBufferANDROIDFunctions(mInstance);
@@ -1569,7 +1792,7 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
 #if defined(ANGLE_PLATFORM_GGP)
     if (getFeatures().supportsGGPFrameToken.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_GGP_FRAME_TOKEN_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_GGP_FRAME_TOKEN_EXTENSION_NAME);
     }
     ANGLE_VK_CHECK(displayVk, getFeatures().supportsGGPFrameToken.enabled,
                    VK_ERROR_EXTENSION_NOT_PRESENT);
@@ -1581,23 +1804,23 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
         getFeatures().supportsExternalMemoryFd.enabled ||
         getFeatures().supportsExternalMemoryFuchsia.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
     }
 
     if (getFeatures().supportsExternalMemoryFd.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
     }
 
     if (getFeatures().supportsExternalMemoryFuchsia.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_FUCHSIA_EXTERNAL_MEMORY_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_FUCHSIA_EXTERNAL_MEMORY_EXTENSION_NAME);
     }
 
     if (getFeatures().supportsExternalSemaphoreFd.enabled ||
         getFeatures().supportsExternalSemaphoreFuchsia.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME);
 #if !defined(ANGLE_SHARED_LIBVULKAN)
         InitExternalSemaphoreFdFunctions(mInstance);
 #endif  // !defined(ANGLE_SHARED_LIBVULKAN)
@@ -1605,22 +1828,22 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
 
     if (getFeatures().supportsExternalSemaphoreCapabilities.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME);
     }
 
     if (getFeatures().supportsExternalFenceCapabilities.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME);
     }
 
     if (getFeatures().supportsExternalSemaphoreFd.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
     }
 
     if (getFeatures().supportsExternalSemaphoreCapabilities.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME);
 #if !defined(ANGLE_SHARED_LIBVULKAN)
         InitExternalSemaphoreCapabilitiesFunctions(mInstance);
 #endif  // !defined(ANGLE_SHARED_LIBVULKAN)
@@ -1628,7 +1851,7 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
 
     if (getFeatures().supportsExternalFenceFd.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME);
 #if !defined(ANGLE_SHARED_LIBVULKAN)
         InitExternalFenceFdFunctions(mInstance);
 #endif  // !defined(ANGLE_SHARED_LIBVULKAN)
@@ -1636,7 +1859,7 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
 
     if (getFeatures().supportsExternalFenceCapabilities.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME);
 #if !defined(ANGLE_SHARED_LIBVULKAN)
         InitExternalFenceCapabilitiesFunctions(mInstance);
 #endif  // !defined(ANGLE_SHARED_LIBVULKAN)
@@ -1644,26 +1867,31 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
 
     if (getFeatures().supportsExternalSemaphoreFuchsia.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_FUCHSIA_EXTERNAL_SEMAPHORE_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_FUCHSIA_EXTERNAL_SEMAPHORE_EXTENSION_NAME);
     }
 
     if (getFeatures().supportsShaderStencilExport.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
     }
 
-    if (getFeatures().supportsRenderPassStoreOpNoneQCOM.enabled)
+    if (getFeatures().supportsRenderPassLoadStoreOpNone.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_QCOM_RENDER_PASS_STORE_OPS_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME);
+    }
+    else if (getFeatures().supportsRenderPassStoreOpNoneQCOM.enabled)
+    {
+        mEnabledDeviceExtensions.push_back(VK_QCOM_RENDER_PASS_STORE_OPS_EXTENSION_NAME);
     }
 
     if (getFeatures().supportsImageFormatList.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME);
     }
 
-    std::sort(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(), StrLess);
-    ANGLE_VK_TRY(displayVk, VerifyExtensionsPresent(deviceExtensionNames, enabledDeviceExtensions));
+    std::sort(mEnabledDeviceExtensions.begin(), mEnabledDeviceExtensions.end(), StrLess);
+    ANGLE_VK_TRY(displayVk,
+                 VerifyExtensionsPresent(deviceExtensionNames, mEnabledDeviceExtensions));
 
     // Select additional features to be enabled.
     VkPhysicalDeviceFeatures2KHR enabledFeatures = {};
@@ -1722,19 +1950,19 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
 
     if (mLineRasterizationFeatures.bresenhamLines)
     {
-        enabledDeviceExtensions.push_back(VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME);
         vk::AddToPNextChain(&createInfo, &mLineRasterizationFeatures);
     }
 
     if (mProvokingVertexFeatures.provokingVertexLast)
     {
-        enabledDeviceExtensions.push_back(VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME);
         vk::AddToPNextChain(&createInfo, &mProvokingVertexFeatures);
     }
 
     if (mVertexAttributeDivisorFeatures.vertexAttributeInstanceRateDivisor)
     {
-        enabledDeviceExtensions.push_back(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME);
         vk::AddToPNextChain(&createInfo, &mVertexAttributeDivisorFeatures);
 
         // We only store 8 bit divisor in GraphicsPipelineDesc so capping value & we emulate if
@@ -1746,30 +1974,30 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
 
     if (getFeatures().supportsTransformFeedbackExtension.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
         vk::AddToPNextChain(&createInfo, &mTransformFeedbackFeatures);
     }
 
     if (getFeatures().supportsCustomBorderColorEXT.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
         vk::AddToPNextChain(&createInfo, &mCustomBorderColorFeatures);
     }
 
     if (getFeatures().supportsIndexTypeUint8.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_EXT_INDEX_TYPE_UINT8_EXTENSION_NAME);
         vk::AddToPNextChain(&createInfo, &mIndexTypeUint8Features);
     }
 
     if (getFeatures().supportsDepthStencilResolve.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME);
     }
 
     if (getFeatures().supportsMultisampledRenderToSingleSampled.enabled)
     {
-        enabledDeviceExtensions.push_back(
+        mEnabledDeviceExtensions.push_back(
             VK_EXT_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_EXTENSION_NAME);
         vk::AddToPNextChain(&createInfo, &mMultisampledRenderToSingleSampledFeatures);
     }
@@ -1780,7 +2008,7 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
         // features.
         mMultiviewFeatures.multiviewGeometryShader     = VK_FALSE;
         mMultiviewFeatures.multiviewTessellationShader = VK_FALSE;
-        enabledDeviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
         vk::AddToPNextChain(&createInfo, &mMultiviewFeatures);
     }
 
@@ -1789,7 +2017,7 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
     {
         if (mMemoryReportFeatures.deviceMemoryReport)
         {
-            enabledDeviceExtensions.push_back(VK_EXT_DEVICE_MEMORY_REPORT_EXTENSION_NAME);
+            mEnabledDeviceExtensions.push_back(VK_EXT_DEVICE_MEMORY_REPORT_EXTENSION_NAME);
 
             mMemoryReportCallback = {};
             mMemoryReportCallback.sType =
@@ -1815,9 +2043,15 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
         }
     }
 
+    if (getFeatures().supportsExternalMemoryDmaBufAndModifiers.enabled)
+    {
+        mEnabledDeviceExtensions.push_back(VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME);
+    }
+
     if (getFeatures().supportsExternalMemoryHost.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
         mMinImportedHostPointerAlignment =
             mExternalMemoryHostProperties.minImportedHostPointerAlignment;
 #if !defined(ANGLE_SHARED_LIBVULKAN)
@@ -1827,13 +2061,13 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
 
     if (getFeatures().supportsYUVSamplerConversion.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME);
         vk::AddToPNextChain(&createInfo, &mSamplerYcbcrConversionFeatures);
     }
 
     if (getFeatures().supportsShaderFloat16.enabled)
     {
-        enabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+        mEnabledDeviceExtensions.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
         vk::AddToPNextChain(&createInfo, &mShaderFloat16Int8Features);
     }
 
@@ -1868,9 +2102,9 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
     createInfo.pQueueCreateInfos     = queueCreateInfo;
     createInfo.enabledLayerCount     = static_cast<uint32_t>(enabledDeviceLayerNames.size());
     createInfo.ppEnabledLayerNames   = enabledDeviceLayerNames.data();
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(enabledDeviceExtensions.size());
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(mEnabledDeviceExtensions.size());
     createInfo.ppEnabledExtensionNames =
-        enabledDeviceExtensions.empty() ? nullptr : enabledDeviceExtensions.data();
+        mEnabledDeviceExtensions.empty() ? nullptr : mEnabledDeviceExtensions.data();
 
     // Enable core features without assuming VkPhysicalDeviceFeatures2KHR is accepted in the
     // pNext chain of VkDeviceCreateInfo.
@@ -1950,7 +2184,7 @@ angle::Result RendererVk::initializeDevice(DisplayVk *displayVk, uint32_t queueF
         unsupportedStages |= VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT;
     }
     mSupportedVulkanPipelineStageMask = ~unsupportedStages;
-
+    mEnabledDeviceExtensions.push_back(nullptr);
     return angle::Result::Continue;
 }
 
@@ -2242,9 +2476,6 @@ void RendererVk::initFeatures(DisplayVk *displayVk,
     // is enabled.
     ANGLE_FEATURE_CONDITION(&mFeatures, supportsSurfaceProtectedSwapchains, IsAndroid());
 
-    // http://anglebug.com/2838
-    ANGLE_FEATURE_CONDITION(&mFeatures, extraCopyBufferRegion, IsWindows() && isIntel);
-
     // Work around incorrect NVIDIA point size range clamping.
     // http://anglebug.com/2970#c10
     // Clamp if driver version is:
@@ -2354,8 +2585,13 @@ void RendererVk::initFeatures(DisplayVk *displayVk,
         ExtensionFound(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME, deviceExtensionNames));
 
     ANGLE_FEATURE_CONDITION(
+        &mFeatures, supportsRenderPassLoadStoreOpNone,
+        ExtensionFound(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME, deviceExtensionNames));
+
+    ANGLE_FEATURE_CONDITION(
         &mFeatures, supportsRenderPassStoreOpNoneQCOM,
-        ExtensionFound(VK_QCOM_RENDER_PASS_STORE_OPS_EXTENSION_NAME, deviceExtensionNames));
+        !mFeatures.supportsRenderPassLoadStoreOpNone.enabled &&
+            ExtensionFound(VK_QCOM_RENDER_PASS_STORE_OPS_EXTENSION_NAME, deviceExtensionNames));
 
     ANGLE_FEATURE_CONDITION(&mFeatures, supportsTransformFeedbackExtension,
                             mTransformFeedbackFeatures.transformFeedback == VK_TRUE);
@@ -2414,10 +2650,26 @@ void RendererVk::initFeatures(DisplayVk *displayVk,
 
     ANGLE_FEATURE_CONDITION(&mFeatures, shadowBuffers, false);
 
+    // ARM does buffer copy on geometry pipeline, which may create a GPU pipeline bubble that
+    // prevents vertex shader to overlap with fragment shader. For now we always choose CPU to do
+    // copy on ARM. This may need to test with future ARM GPU architecture as well.
+    ANGLE_FEATURE_CONDITION(&mFeatures, preferCPUForBufferSubData, isARM);
+
+    // On android, we usually are GPU limited, we try to use CPU to do data copy when other
+    // conditions are the same. Set to zero will use GPU to do copy. This is subject to further
+    // tuning for each platform https://issuetracker.google.com/201826021
+    mMaxCopyBytesUsingCPUWhenPreservingBufferData =
+        IsAndroid() ? std::numeric_limits<uint32_t>::max() : 0;
+
     ANGLE_FEATURE_CONDITION(&mFeatures, persistentlyMappedBuffers, true);
 
     ANGLE_FEATURE_CONDITION(&mFeatures, logMemoryReportCallbacks, false);
     ANGLE_FEATURE_CONDITION(&mFeatures, logMemoryReportStats, false);
+
+    ANGLE_FEATURE_CONDITION(
+        &mFeatures, supportsExternalMemoryDmaBufAndModifiers,
+        ExtensionFound(VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME, deviceExtensionNames) &&
+            ExtensionFound(VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME, deviceExtensionNames));
 
     ANGLE_FEATURE_CONDITION(
         &mFeatures, supportsExternalMemoryHost,
@@ -2473,8 +2725,7 @@ void RendererVk::initFeatures(DisplayVk *displayVk,
 
     ANGLE_FEATURE_CONDITION(
         &mFeatures, supportsImageFormatList,
-        (ExtensionFound(VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME, deviceExtensionNames)) &&
-            !isSwiftShader);
+        ExtensionFound(VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME, deviceExtensionNames));
 
     // Feature disabled due to driver bugs:
     //
@@ -3040,34 +3291,37 @@ angle::Result RendererVk::submitFrame(vk::Context *context,
                                       const vk::Semaphore *signalSemaphore,
                                       std::vector<vk::ResourceUseList> &&resourceUseLists,
                                       vk::GarbageList &&currentGarbage,
-                                      vk::CommandPool *commandPool)
+                                      vk::CommandPool *commandPool,
+                                      Serial *submitSerialOut)
 {
     std::lock_guard<std::mutex> commandQueueLock(mCommandQueueMutex);
 
-    Serial submitQueueSerial;
-
     if (mFeatures.asyncCommandQueue.enabled)
     {
-        submitQueueSerial = mCommandProcessor.reserveSubmitSerial();
+        *submitSerialOut = mCommandProcessor.reserveSubmitSerial();
 
         ANGLE_TRY(mCommandProcessor.submitFrame(
             context, hasProtectedContent, contextPriority, waitSemaphores, waitSemaphoreStageMasks,
-            signalSemaphore, std::move(currentGarbage), commandPool, submitQueueSerial));
+            signalSemaphore, std::move(currentGarbage),
+            std::move(mCommandBufferRecycler.getCommandBuffersToReset()), commandPool,
+            *submitSerialOut));
     }
     else
     {
-        submitQueueSerial = mCommandQueue.reserveSubmitSerial();
+        *submitSerialOut = mCommandQueue.reserveSubmitSerial();
 
         ANGLE_TRY(mCommandQueue.submitFrame(
             context, hasProtectedContent, contextPriority, waitSemaphores, waitSemaphoreStageMasks,
-            signalSemaphore, std::move(currentGarbage), commandPool, submitQueueSerial));
+            signalSemaphore, std::move(currentGarbage),
+            std::move(mCommandBufferRecycler.getCommandBuffersToReset()), commandPool,
+            *submitSerialOut));
     }
 
     waitSemaphores.clear();
     waitSemaphoreStageMasks.clear();
     for (vk::ResourceUseList &it : resourceUseLists)
     {
-        it.releaseResourceUsesAndUpdateSerials(submitQueueSerial);
+        it.releaseResourceUsesAndUpdateSerials(*submitSerialOut);
     }
     resourceUseLists.clear();
 
@@ -3126,7 +3380,18 @@ angle::Result RendererVk::waitForSerialWithUserTimeout(vk::Context *context,
 
 angle::Result RendererVk::finish(vk::Context *context, bool hasProtectedContent)
 {
-    return finishToSerial(context, getLastSubmittedQueueSerial());
+    std::lock_guard<std::mutex> lock(mCommandQueueMutex);
+
+    if (mFeatures.asyncCommandQueue.enabled)
+    {
+        ANGLE_TRY(mCommandProcessor.waitIdle(context, getMaxFenceWaitTimeNs()));
+    }
+    else
+    {
+        ANGLE_TRY(mCommandQueue.waitIdle(context, getMaxFenceWaitTimeNs()));
+    }
+
+    return angle::Result::Continue;
 }
 
 angle::Result RendererVk::checkCompletedCommands(vk::Context *context)
@@ -3214,34 +3479,23 @@ VkResult RendererVk::queuePresent(vk::Context *context,
     return result;
 }
 
-vk::CommandBufferHelper *RendererVk::getCommandBufferHelper(bool hasRenderPass)
+angle::Result RendererVk::getCommandBufferHelper(vk::Context *context,
+                                                 bool hasRenderPass,
+                                                 vk::CommandPool *commandPool,
+                                                 vk::CommandBufferHelper **commandBufferHelperOut)
 {
     ANGLE_TRACE_EVENT0("gpu.angle", "RendererVk::getCommandBufferHelper");
-    std::unique_lock<std::mutex> lock(mCommandBufferHelperFreeListMutex);
-
-    if (mCommandBufferHelperFreeList.empty())
-    {
-        vk::CommandBufferHelper *commandBuffer = new vk::CommandBufferHelper();
-        commandBuffer->initialize(hasRenderPass);
-        return commandBuffer;
-    }
-    else
-    {
-        vk::CommandBufferHelper *commandBuffer = mCommandBufferHelperFreeList.back();
-        mCommandBufferHelperFreeList.pop_back();
-        commandBuffer->setHasRenderPass(hasRenderPass);
-        return commandBuffer;
-    }
+    std::unique_lock<std::mutex> lock(mCommandBufferRecyclerMutex);
+    return mCommandBufferRecycler.getCommandBufferHelper(context, hasRenderPass, commandPool,
+                                                         commandBufferHelperOut);
 }
 
-void RendererVk::recycleCommandBufferHelper(vk::CommandBufferHelper *commandBuffer)
+void RendererVk::recycleCommandBufferHelper(VkDevice device,
+                                            vk::CommandBufferHelper **commandBuffer)
 {
     ANGLE_TRACE_EVENT0("gpu.angle", "RendererVk::recycleCommandBufferHelper");
-    std::lock_guard<std::mutex> lock(mCommandBufferHelperFreeListMutex);
-
-    ASSERT(commandBuffer->empty());
-    commandBuffer->markOpen();
-    mCommandBufferHelperFreeList.push_back(commandBuffer);
+    std::lock_guard<std::mutex> lock(mCommandBufferRecyclerMutex);
+    mCommandBufferRecycler.recycleCommandBufferHelper(device, commandBuffer);
 }
 
 void RendererVk::logCacheStats() const
@@ -3316,15 +3570,17 @@ angle::Result RendererVk::getFormatDescriptorCountForExternalFormat(ContextVk *c
     return angle::Result::Stop;
 }
 
-vk::MemoryReport::MemoryReport()
+namespace vk
+{
+MemoryReport::MemoryReport()
     : mCurrentTotalAllocatedMemory(0),
       mMaxTotalAllocatedMemory(0),
       mCurrentTotalImportedMemory(0),
       mMaxTotalImportedMemory(0)
 {}
 
-void vk::MemoryReport::processCallback(const VkDeviceMemoryReportCallbackDataEXT &callbackData,
-                                       bool logCallback)
+void MemoryReport::processCallback(const VkDeviceMemoryReportCallbackDataEXT &callbackData,
+                                   bool logCallback)
 {
     std::lock_guard<std::mutex> lock(mMemoryReportMutex);
     VkDeviceSize size = 0;
@@ -3402,7 +3658,7 @@ void vk::MemoryReport::processCallback(const VkDeviceMemoryReportCallbackDataEXT
     }
 }
 
-void vk::MemoryReport::logMemoryReportStats() const
+void MemoryReport::logMemoryReportStats() const
 {
     std::lock_guard<std::mutex> lock(mMemoryReportMutex);
 
@@ -3425,4 +3681,58 @@ void vk::MemoryReport::logMemoryReportStats() const
                << " (max=" << std::setw(10) << importedMemoryMax << ")";
     }
 }
+
+// BufferMemoryAllocator implementation.
+BufferMemoryAllocator::BufferMemoryAllocator() {}
+
+BufferMemoryAllocator::~BufferMemoryAllocator() {}
+
+VkResult BufferMemoryAllocator::initialize(RendererVk *renderer,
+                                           VkDeviceSize preferredLargeHeapBlockSize)
+{
+    ASSERT(renderer->getAllocator().valid());
+    return VK_SUCCESS;
+}
+
+void BufferMemoryAllocator::destroy(RendererVk *renderer) {}
+
+VkResult BufferMemoryAllocator::createBuffer(RendererVk *renderer,
+                                             const VkBufferCreateInfo &bufferCreateInfo,
+                                             VkMemoryPropertyFlags requiredFlags,
+                                             VkMemoryPropertyFlags preferredFlags,
+                                             bool persistentlyMappedBuffers,
+                                             uint32_t *memoryTypeIndexOut,
+                                             Buffer *bufferOut,
+                                             Allocation *allocationOut)
+{
+    ASSERT(bufferOut && !bufferOut->valid());
+    ASSERT(allocationOut && !allocationOut->valid());
+    const Allocator &allocator = renderer->getAllocator();
+    return vma::CreateBuffer(allocator.getHandle(), &bufferCreateInfo, requiredFlags,
+                             preferredFlags, persistentlyMappedBuffers, memoryTypeIndexOut,
+                             &bufferOut->mHandle, &allocationOut->mHandle);
+}
+
+void BufferMemoryAllocator::getMemoryTypeProperties(RendererVk *renderer,
+                                                    uint32_t memoryTypeIndex,
+                                                    VkMemoryPropertyFlags *flagsOut) const
+{
+    const Allocator &allocator = renderer->getAllocator();
+    vma::GetMemoryTypeProperties(allocator.getHandle(), memoryTypeIndex, flagsOut);
+}
+
+VkResult BufferMemoryAllocator::findMemoryTypeIndexForBufferInfo(
+    RendererVk *renderer,
+    const VkBufferCreateInfo &bufferCreateInfo,
+    VkMemoryPropertyFlags requiredFlags,
+    VkMemoryPropertyFlags preferredFlags,
+    bool persistentlyMappedBuffers,
+    uint32_t *memoryTypeIndexOut) const
+{
+    const Allocator &allocator = renderer->getAllocator();
+    return vma::FindMemoryTypeIndexForBufferInfo(allocator.getHandle(), &bufferCreateInfo,
+                                                 requiredFlags, preferredFlags,
+                                                 persistentlyMappedBuffers, memoryTypeIndexOut);
+}
+}  // namespace vk
 }  // namespace rx

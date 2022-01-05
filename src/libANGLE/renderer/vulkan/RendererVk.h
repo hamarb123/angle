@@ -82,6 +82,38 @@ class MemoryReport final : angle::NonCopyable
     VkDeviceSize mMaxTotalImportedMemory;
     angle::HashMap<uint64_t, int> mUniqueIDCounts;
 };
+
+class BufferMemoryAllocator : angle::NonCopyable
+{
+  public:
+    BufferMemoryAllocator();
+    ~BufferMemoryAllocator();
+
+    VkResult initialize(RendererVk *renderer, VkDeviceSize preferredLargeHeapBlockSize);
+    void destroy(RendererVk *renderer);
+
+    // Initializes the buffer handle and memory allocation.
+    VkResult createBuffer(RendererVk *renderer,
+                          const VkBufferCreateInfo &bufferCreateInfo,
+                          VkMemoryPropertyFlags requiredFlags,
+                          VkMemoryPropertyFlags preferredFlags,
+                          bool persistentlyMapped,
+                          uint32_t *memoryTypeIndexOut,
+                          Buffer *bufferOut,
+                          Allocation *allocationOut);
+
+    void getMemoryTypeProperties(RendererVk *renderer,
+                                 uint32_t memoryTypeIndex,
+                                 VkMemoryPropertyFlags *flagsOut) const;
+    VkResult findMemoryTypeIndexForBufferInfo(RendererVk *renderer,
+                                              const VkBufferCreateInfo &bufferCreateInfo,
+                                              VkMemoryPropertyFlags requiredFlags,
+                                              VkMemoryPropertyFlags preferredFlags,
+                                              bool persistentlyMappedBuffers,
+                                              uint32_t *memoryTypeIndexOut) const;
+
+  private:
+};
 }  // namespace vk
 
 // Supports one semaphore from current surface, and one semaphore passed to
@@ -161,6 +193,7 @@ class RendererVk : angle::NonCopyable
     }
     VkDevice getDevice() const { return mDevice; }
 
+    vk::BufferMemoryAllocator &getBufferMemoryAllocator() { return mBufferMemoryAllocator; }
     const vk::Allocator &getAllocator() const { return mAllocator; }
 
     angle::Result selectPresentQueueForSurface(DisplayVk *displayVk,
@@ -222,13 +255,48 @@ class RendererVk : angle::NonCopyable
 
     ANGLE_INLINE egl::ContextPriority getDriverPriority(egl::ContextPriority priority)
     {
-        return mCommandQueue.getDriverPriority(priority);
+        if (mFeatures.asyncCommandQueue.enabled)
+        {
+            return mCommandProcessor.getDriverPriority(priority);
+        }
+        else
+        {
+            return mCommandQueue.getDriverPriority(priority);
+        }
+    }
+    ANGLE_INLINE uint32_t getDeviceQueueIndex()
+    {
+        if (mFeatures.asyncCommandQueue.enabled)
+        {
+            return mCommandProcessor.getDeviceQueueIndex();
+        }
+        else
+        {
+            return mCommandQueue.getDeviceQueueIndex();
+        }
+    }
+
+    VkQueue getQueue(egl::ContextPriority priority)
+    {
+        if (mFeatures.asyncCommandQueue.enabled)
+        {
+            return mCommandProcessor.getQueue(priority);
+        }
+        else
+        {
+            return mCommandQueue.getQueue(priority);
+        }
     }
 
     // This command buffer should be submitted immediately via queueSubmitOneOff.
     angle::Result getCommandBufferOneOff(vk::Context *context,
                                          bool hasProtectedContent,
                                          vk::PrimaryCommandBuffer *commandBufferOut);
+
+    void resetSecondaryCommandBuffer(vk::CommandBuffer &&commandBuffer)
+    {
+        mCommandBufferRecycler.resetCommandBufferHelper(std::move(commandBuffer));
+    }
 
     // Fire off a single command buffer immediately with default priority.
     // Command buffer must be allocated with getCommandBufferOneOff and is reclaimed.
@@ -262,8 +330,12 @@ class RendererVk : angle::NonCopyable
     {
         if (!sharedGarbage.empty())
         {
-            std::lock_guard<std::mutex> lock(mGarbageMutex);
-            mSharedGarbage.emplace_back(std::move(use), std::move(sharedGarbage));
+            vk::SharedGarbage garbage(std::move(use), std::move(sharedGarbage));
+            if (!garbage.destroyIfComplete(this, getLastCompletedQueueSerial()))
+            {
+                std::lock_guard<std::mutex> lock(mGarbageMutex);
+                mSharedGarbage.push_back(std::move(garbage));
+            }
         }
     }
 
@@ -279,32 +351,6 @@ class RendererVk : angle::NonCopyable
 
     uint64_t getMaxFenceWaitTimeNs() const;
 
-    ANGLE_INLINE Serial getCurrentQueueSerial()
-    {
-        if (mFeatures.asyncCommandQueue.enabled)
-        {
-            return mCommandProcessor.getCurrentQueueSerial();
-        }
-        else
-        {
-            std::lock_guard<std::mutex> lock(mCommandQueueMutex);
-            return mCommandQueue.getCurrentQueueSerial();
-        }
-    }
-
-    ANGLE_INLINE Serial getLastSubmittedQueueSerial()
-    {
-        if (mFeatures.asyncCommandQueue.enabled)
-        {
-            return mCommandProcessor.getLastSubmittedQueueSerial();
-        }
-        else
-        {
-            std::lock_guard<std::mutex> lock(mCommandQueueMutex);
-            return mCommandQueue.getLastSubmittedQueueSerial();
-        }
-    }
-
     ANGLE_INLINE Serial getLastCompletedQueueSerial()
     {
         if (mFeatures.asyncCommandQueue.enabled)
@@ -315,6 +361,31 @@ class RendererVk : angle::NonCopyable
         {
             std::lock_guard<std::mutex> lock(mCommandQueueMutex);
             return mCommandQueue.getLastCompletedQueueSerial();
+        }
+    }
+
+    ANGLE_INLINE bool isCommandQueueBusy()
+    {
+        std::lock_guard<std::mutex> lock(mCommandQueueMutex);
+        if (mFeatures.asyncCommandQueue.enabled)
+        {
+            return mCommandProcessor.isBusy();
+        }
+        else
+        {
+            return mCommandQueue.isBusy();
+        }
+    }
+
+    angle::Result ensureNoPendingWork(vk::Context *context)
+    {
+        if (mFeatures.asyncCommandQueue.enabled)
+        {
+            return mCommandProcessor.ensureNoPendingWork(context);
+        }
+        else
+        {
+            return mCommandQueue.ensureNoPendingWork(context);
         }
     }
 
@@ -353,7 +424,8 @@ class RendererVk : angle::NonCopyable
                               const vk::Semaphore *signalSemaphore,
                               std::vector<vk::ResourceUseList> &&resourceUseLists,
                               vk::GarbageList &&currentGarbage,
-                              vk::CommandPool *commandPool);
+                              vk::CommandPool *commandPool,
+                              Serial *submitSerialOut);
 
     void handleDeviceLost();
     angle::Result finishToSerial(vk::Context *context, Serial serial);
@@ -376,8 +448,11 @@ class RendererVk : angle::NonCopyable
                           egl::ContextPriority priority,
                           const VkPresentInfoKHR &presentInfo);
 
-    vk::CommandBufferHelper *getCommandBufferHelper(bool hasRenderPass);
-    void recycleCommandBufferHelper(vk::CommandBufferHelper *commandBuffer);
+    angle::Result getCommandBufferHelper(vk::Context *context,
+                                         bool hasRenderPass,
+                                         vk::CommandPool *commandPool,
+                                         vk::CommandBufferHelper **commandBufferHelperOut);
+    void recycleCommandBufferHelper(VkDevice device, vk::CommandBufferHelper **commandBuffer);
 
     // Process GPU memory reports
     void processMemoryReportCallback(const VkDeviceMemoryReportCallbackDataEXT &callbackData)
@@ -406,6 +481,16 @@ class RendererVk : angle::NonCopyable
     angle::Result getFormatDescriptorCountForExternalFormat(ContextVk *contextVk,
                                                             uint64_t format,
                                                             uint32_t *descriptorCountOut);
+
+    VkDeviceSize getMaxCopyBytesUsingCPUWhenPreservingBufferData() const
+    {
+        return mMaxCopyBytesUsingCPUWhenPreservingBufferData;
+    }
+
+    const vk::ExtensionNameList &getEnabledDeviceExtensions() const
+    {
+        return mEnabledDeviceExtensions;
+    }
 
   private:
     angle::Result initializeDevice(DisplayVk *displayVk, uint32_t queueFamilyIndex);
@@ -483,6 +568,7 @@ class RendererVk : angle::NonCopyable
     uint32_t mDefaultUniformBufferSize;
     VkDevice mDevice;
     AtomicSerialFactory mShaderSerialFactory;
+    VkDeviceSize mMaxCopyBytesUsingCPUWhenPreservingBufferData;
 
     bool mDeviceLost;
 
@@ -524,16 +610,18 @@ class RendererVk : angle::NonCopyable
     };
     std::deque<PendingOneOffCommands> mPendingOneOffCommands;
 
+    // Synchronous Command Queue
     std::mutex mCommandQueueMutex;
     vk::CommandQueue mCommandQueue;
-
-    // Command buffer pool management.
-    std::mutex mCommandBufferHelperFreeListMutex;
-    std::vector<vk::CommandBufferHelper *> mCommandBufferHelperFreeList;
 
     // Async Command Queue
     vk::CommandProcessor mCommandProcessor;
 
+    // Command buffer pool management.
+    std::mutex mCommandBufferRecyclerMutex;
+    vk::CommandBufferRecycler mCommandBufferRecycler;
+
+    vk::BufferMemoryAllocator mBufferMemoryAllocator;
     vk::Allocator mAllocator;
     SamplerCache mSamplerCache;
     SamplerYcbcrConversionCache mYuvConversionCache;
@@ -563,6 +651,8 @@ class RendererVk : angle::NonCopyable
 
     // Use thread pool to compress cache data.
     std::shared_ptr<rx::WaitableCompressEvent> mCompressEvent;
+
+    vk::ExtensionNameList mEnabledDeviceExtensions;
 };
 
 }  // namespace rx

@@ -96,7 +96,7 @@ class State : angle::NonCopyable
           const EGLenum clientType,
           const Version &clientVersion,
           bool debug,
-          bool bindGeneratesResource,
+          bool bindGeneratesResourceCHROMIUM,
           bool clientArraysEnabled,
           bool robustResourceInit,
           bool programBinaryCacheEnabled,
@@ -121,7 +121,7 @@ class State : angle::NonCopyable
     const Limitations &getLimitations() const { return mLimitations; }
     egl::ShareGroup *getShareGroup() const { return mShareGroup; }
 
-    bool isWebGL() const { return mExtensions.webglCompatibility; }
+    bool isWebGL() const { return mExtensions.webglCompatibilityANGLE; }
 
     bool isWebGL1() const { return (isWebGL() && mClientVersion.major == 2); }
 
@@ -411,10 +411,6 @@ class State : angle::NonCopyable
     Query *getActiveQuery(QueryType type) const;
 
     // Program Pipeline binding manipulation
-    angle::Result useProgramStages(const Context *context,
-                                   ProgramPipeline *programPipeline,
-                                   GLbitfield stages,
-                                   Program *shaderProgram);
     angle::Result setProgramPipelineBinding(const Context *context, ProgramPipeline *pipeline);
     void detachProgramPipeline(const Context *context, ProgramPipelineID pipeline);
 
@@ -539,7 +535,7 @@ class State : angle::NonCopyable
         mDirtyObjects.set(DIRTY_OBJECT_VERTEX_ARRAY);
     }
 
-    void setVertexBindingDivisor(GLuint bindingIndex, GLuint divisor);
+    void setVertexBindingDivisor(const Context *context, GLuint bindingIndex, GLuint divisor);
 
     // Pixel pack state manipulation
     void setPackAlignment(GLint alignment);
@@ -605,8 +601,7 @@ class State : angle::NonCopyable
     // Sets the dirty bit for the program executable.
     angle::Result onProgramExecutableChange(const Context *context, Program *program);
     // Sets the dirty bit for the program pipeline executable.
-    angle::Result onProgramPipelineExecutableChange(const Context *context,
-                                                    ProgramPipeline *program);
+    angle::Result onProgramPipelineExecutableChange(const Context *context);
 
     enum DirtyBitType
     {

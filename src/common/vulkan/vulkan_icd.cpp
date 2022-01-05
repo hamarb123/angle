@@ -11,6 +11,7 @@
 #include <functional>
 #include <vector>
 
+#include "common/Optional.h"
 #include "common/bitset_utils.h"
 #include "common/debug.h"
 #include "common/system_utils.h"
@@ -57,6 +58,7 @@ const std::string WrapICDEnvironment(const char *icdEnvironment)
 }
 
 constexpr char kLoaderLayersPathEnv[] = "VK_LAYER_PATH";
+constexpr char kLayerEnablesEnv[]     = "VK_LAYER_ENABLES";
 #endif
 
 constexpr char kLoaderICDFilenamesEnv[]              = "VK_ICD_FILENAMES";
@@ -94,8 +96,7 @@ ICDFilterFunc GetFilterForICD(vk::ICD preferredICD)
             const std::string anglePreferredDevice =
                 angle::GetEnvironmentVar(kANGLEPreferredDeviceEnv);
             return [anglePreferredDevice](const VkPhysicalDeviceProperties &deviceProperties) {
-                return (anglePreferredDevice.empty() ||
-                        anglePreferredDevice == deviceProperties.deviceName);
+                return (anglePreferredDevice == deviceProperties.deviceName);
             };
     }
 }
@@ -163,6 +164,12 @@ ScopedVkLoaderEnvironment::ScopedVkLoaderEnvironment(bool enableValidationLayers
             ERR() << "Error setting environment for Vulkan layers init.";
             mEnableValidationLayers = false;
         }
+        if (!angle::PrependPathToEnvironmentVar(
+                kLayerEnablesEnv, "VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION"))
+        {
+            ERR() << "Error setting synchronization validation environment for Vulkan validation "
+                     "layers init.";
+        }
 
         if (!setCustomExtensionsEnvironment())
         {
@@ -217,14 +224,6 @@ bool ScopedVkLoaderEnvironment::setCustomExtensionsEnvironment()
         {VK_STRUCTURE_TYPE_SAMPLER_FILTERING_PRECISION_GOOGLE,
          sizeof(VkSamplerFilteringPrecisionGOOGLE)},
 
-        {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT,
-         sizeof(VkPhysicalDeviceProvokingVertexFeaturesEXT)},
-
-        {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_PROPERTIES_EXT,
-         sizeof(VkPhysicalDeviceProvokingVertexPropertiesEXT)},
-
-        {VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT,
-         sizeof(VkPipelineRasterizationProvokingVertexStateCreateInfoEXT)},
     };
 
     mPreviousCustomExtensionsEnv = angle::GetEnvironmentVar(kValidationLayersCustomSTypeListEnv);
@@ -262,9 +261,37 @@ void ChoosePhysicalDevice(const std::vector<VkPhysicalDevice> &physicalDevices,
             return;
         }
     }
-    WARN() << "Preferred device ICD not found. Using default physicalDevice instead.";
 
-    // Fall back to first device.
+    Optional<VkPhysicalDevice> integratedDevice;
+    VkPhysicalDeviceProperties integratedDeviceProperties;
+    for (const VkPhysicalDevice &physicalDevice : physicalDevices)
+    {
+        vkGetPhysicalDeviceProperties(physicalDevice, physicalDevicePropertiesOut);
+        // If discrete GPU exists, uses it by default.
+        if (physicalDevicePropertiesOut->deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+        {
+            *physicalDeviceOut = physicalDevice;
+            return;
+        }
+        if (physicalDevicePropertiesOut->deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU &&
+            !integratedDevice.valid())
+        {
+            integratedDevice           = physicalDevice;
+            integratedDeviceProperties = *physicalDevicePropertiesOut;
+            continue;
+        }
+    }
+
+    // If only integrated GPU exists, use it by default.
+    if (integratedDevice.valid())
+    {
+        *physicalDeviceOut           = integratedDevice.value();
+        *physicalDevicePropertiesOut = integratedDeviceProperties;
+        return;
+    }
+
+    WARN() << "Preferred device ICD not found. Using default physicalDevice instead.";
+    // Fallback to the first device.
     *physicalDeviceOut = physicalDevices[0];
     vkGetPhysicalDeviceProperties(*physicalDeviceOut, physicalDevicePropertiesOut);
 }

@@ -316,7 +316,7 @@ class SPIRVBuilder : angle::NonCopyable
     // Decorations that may apply to intermediate instructions (in addition to variables).
     // |precise| is only applicable to arithmetic nodes.
     SpirvDecorations getDecorations(const TType &type);
-    SpirvDecorations getArithmeticDecorations(const TType &type, bool isPrecise);
+    SpirvDecorations getArithmeticDecorations(const TType &type, bool isPrecise, TOperator op);
 
     // Extended instructions
     spirv::IdRef getExtInstImportIdStd();
@@ -403,6 +403,8 @@ class SPIRVBuilder : angle::NonCopyable
                                  const char *name);
     // Helper to declare specialization constants.
     spirv::IdRef declareSpecConst(TBasicType type, int id, const char *name);
+    // Helper to declare a named constant.
+    void declareNamedConst(spirv::IdRef id, const char *name);
 
     // Helpers for conditionals.
     void startConditional(size_t blockCount, bool isContinuable, bool isBreakable);

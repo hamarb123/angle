@@ -54,6 +54,7 @@ struct GPUTestConfig
         kConditionAMD,
         kConditionIntel,
         kConditionVMWare,
+        kConditionApple,
         kConditionRelease,
         kConditionDebug,
         kConditionD3D9,
@@ -71,8 +72,6 @@ struct GPUTestConfig
         kConditionPreRotation90,
         kConditionPreRotation180,
         kConditionPreRotation270,
-        // TODO: remove when no longer needed.  http://anglebug.com/6210
-        kConditionSPIRVGen,
 
         kNumberOfConditions,
     };
@@ -81,7 +80,7 @@ struct GPUTestConfig
 
     GPUTestConfig();
     GPUTestConfig(bool isSwiftShader);
-    GPUTestConfig(const API &api, uint32_t preRotation, bool enableDirectSPIRVGen);
+    GPUTestConfig(const API &api, uint32_t preRotation);
 
     const GPUTestConfig::ConditionArray &getConditions() const;
 

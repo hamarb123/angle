@@ -13,6 +13,7 @@
 
 #include "common/Color.h"
 #include "common/FixedVector.h"
+#include "libANGLE/renderer/vulkan/ResourceVk.h"
 #include "libANGLE/renderer/vulkan/vk_utils.h"
 
 namespace rx
@@ -51,8 +52,6 @@ namespace vk
 class DynamicDescriptorPool;
 class ImageHelper;
 enum class ImageLayout;
-
-using PipelineAndSerial = ObjectAndSerial<Pipeline>;
 
 using RefCountedDescriptorSetLayout    = RefCounted<DescriptorSetLayout>;
 using RefCountedPipelineLayout         = RefCounted<PipelineLayout>;
@@ -102,21 +101,19 @@ inline void UpdateAccess(ResourceAccess *oldAccess, ResourceAccess newAccess)
     }
 }
 
-enum RenderPassStoreOp
+enum class RenderPassLoadOp
+{
+    Load     = VK_ATTACHMENT_LOAD_OP_LOAD,
+    Clear    = VK_ATTACHMENT_LOAD_OP_CLEAR,
+    DontCare = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+    None,
+};
+enum class RenderPassStoreOp
 {
     Store    = VK_ATTACHMENT_STORE_OP_STORE,
     DontCare = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-    NoneQCOM,
+    None,
 };
-// ConvertRenderPassStoreOpToVkStoreOp rely on the fact that only NoneQCOM is different from VK
-// enums.
-static_assert(RenderPassStoreOp::NoneQCOM == 2, "ConvertRenderPassStoreOpToVkStoreOp must updated");
-
-inline VkAttachmentStoreOp ConvertRenderPassStoreOpToVkStoreOp(RenderPassStoreOp storeOp)
-{
-    return storeOp == RenderPassStoreOp::NoneQCOM ? VK_ATTACHMENT_STORE_OP_NONE_QCOM
-                                                  : static_cast<VkAttachmentStoreOp>(storeOp);
-}
 
 // There can be a maximum of IMPLEMENTATION_MAX_DRAW_BUFFERS color and resolve attachments, plus one
 // depth/stencil attachment and one depth/stencil resolve attachment.
@@ -287,7 +284,7 @@ static_assert(kRenderPassDescSize == 16, "Size check failed");
 
 struct PackedAttachmentOpsDesc final
 {
-    // VkAttachmentLoadOp is in range [0, 2], and VkAttachmentStoreOp is in range [0, 2].
+    // RenderPassLoadOp is in range [0, 3], and RenderPassStoreOp is in range [0, 2].
     uint16_t loadOp : 2;
     uint16_t storeOp : 2;
     uint16_t stencilLoadOp : 2;
@@ -332,9 +329,9 @@ class AttachmentOpsArray final
     void setLayouts(PackedAttachmentIndex index,
                     ImageLayout initialLayout,
                     ImageLayout finalLayout);
-    void setOps(PackedAttachmentIndex index, VkAttachmentLoadOp loadOp, RenderPassStoreOp storeOp);
+    void setOps(PackedAttachmentIndex index, RenderPassLoadOp loadOp, RenderPassStoreOp storeOp);
     void setStencilOps(PackedAttachmentIndex index,
-                       VkAttachmentLoadOp loadOp,
+                       RenderPassLoadOp loadOp,
                        RenderPassStoreOp storeOp);
 
     void setClearOp(PackedAttachmentIndex index);
@@ -574,11 +571,8 @@ class GraphicsPipelineDesc final
                                      const PipelineLayout &pipelineLayout,
                                      const gl::AttributesMask &activeAttribLocationsMask,
                                      const gl::ComponentTypeMask &programAttribsTypeMask,
-                                     const ShaderModule *vertexModule,
-                                     const ShaderModule *fragmentModule,
-                                     const ShaderModule *geometryModule,
-                                     const ShaderModule *tessControlModule,
-                                     const ShaderModule *tessEvaluationModule,
+                                     const gl::DrawBufferMask &missingOutputsMask,
+                                     const ShaderAndSerialMap &shaders,
                                      const SpecializationConstants &specConsts,
                                      Pipeline *pipelineOut) const;
 
@@ -632,9 +626,14 @@ class GraphicsPipelineDesc final
                             gl::DrawBufferMask blendEnabledMask);
     void updateBlendColor(GraphicsPipelineTransitionBits *transition, const gl::ColorF &color);
     void updateBlendFuncs(GraphicsPipelineTransitionBits *transition,
-                          const gl::BlendStateExt &blendStateExt);
+                          const gl::BlendStateExt &blendStateExt,
+                          gl::DrawBufferMask attachmentMask);
     void updateBlendEquations(GraphicsPipelineTransitionBits *transition,
-                              const gl::BlendStateExt &blendStateExt);
+                              const gl::BlendStateExt &blendStateExt,
+                              gl::DrawBufferMask attachmentMask);
+    void resetBlendFuncsAndEquations(GraphicsPipelineTransitionBits *transition,
+                                     gl::DrawBufferMask previousAttachmentsMask,
+                                     gl::DrawBufferMask newAttachmentsMask);
     void setColorWriteMasks(gl::BlendStateExt::ColorMaskStorage::Type colorMasks,
                             const gl::DrawBufferMask &alphaMask,
                             const gl::DrawBufferMask &enabledDrawBuffers);
@@ -965,18 +964,16 @@ ANGLE_INLINE bool GraphicsPipelineTransitionMatch(GraphicsPipelineTransitionBits
     return true;
 }
 
-class PipelineHelper final : angle::NonCopyable
+class PipelineHelper final : public Resource
 {
   public:
     PipelineHelper();
-    ~PipelineHelper();
+    ~PipelineHelper() override;
     inline explicit PipelineHelper(Pipeline &&pipeline);
 
     void destroy(VkDevice device);
 
-    void updateSerial(Serial serial) { mSerial = serial; }
     bool valid() const { return mPipeline.valid(); }
-    Serial getSerial() const { return mSerial; }
     Pipeline &getPipeline() { return mPipeline; }
 
     ANGLE_INLINE bool findTransition(GraphicsPipelineTransitionBits bits,
@@ -1002,7 +999,6 @@ class PipelineHelper final : angle::NonCopyable
 
   private:
     std::vector<GraphicsPipelineTransition> mTransitions;
-    Serial mSerial;
     Pipeline mPipeline;
 };
 
@@ -1517,8 +1513,9 @@ class RenderPassCache final : angle::NonCopyable
 
     // Use a two-layer caching scheme. The top level matches the "compatible" RenderPass elements.
     // The second layer caches the attachment load/store ops and initial/final layout.
-    using InnerCache = angle::HashMap<vk::AttachmentOpsArray, vk::RenderPassHelper>;
-    using OuterCache = angle::HashMap<vk::RenderPassDesc, InnerCache>;
+    // Switch to `std::unordered_map` to retain pointer stability.
+    using InnerCache = std::unordered_map<vk::AttachmentOpsArray, vk::RenderPassHelper>;
+    using OuterCache = std::unordered_map<vk::RenderPassDesc, InnerCache>;
 
     OuterCache mPayload;
     CacheStats mCompatibleRenderPassCacheStats;
@@ -1543,11 +1540,8 @@ class GraphicsPipelineCache final : public HasCacheStats<VulkanCacheType::Graphi
                                            const vk::PipelineLayout &pipelineLayout,
                                            const gl::AttributesMask &activeAttribLocationsMask,
                                            const gl::ComponentTypeMask &programAttribsTypeMask,
-                                           const vk::ShaderModule *vertexModule,
-                                           const vk::ShaderModule *fragmentModule,
-                                           const vk::ShaderModule *geometryModule,
-                                           const vk::ShaderModule *tessControlModule,
-                                           const vk::ShaderModule *tessEvaluationModule,
+                                           const gl::DrawBufferMask &missingOutputsMask,
+                                           const vk::ShaderAndSerialMap &shaders,
                                            const vk::SpecializationConstants &specConsts,
                                            const vk::GraphicsPipelineDesc &desc,
                                            const vk::GraphicsPipelineDesc **descPtrOut,
@@ -1564,9 +1558,8 @@ class GraphicsPipelineCache final : public HasCacheStats<VulkanCacheType::Graphi
 
         mCacheStats.miss();
         return insertPipeline(contextVk, pipelineCacheVk, compatibleRenderPass, pipelineLayout,
-                              activeAttribLocationsMask, programAttribsTypeMask, vertexModule,
-                              fragmentModule, geometryModule, tessControlModule,
-                              tessEvaluationModule, specConsts, desc, descPtrOut, pipelineOut);
+                              activeAttribLocationsMask, programAttribsTypeMask, missingOutputsMask,
+                              shaders, specConsts, desc, descPtrOut, pipelineOut);
     }
 
   private:
@@ -1576,11 +1569,8 @@ class GraphicsPipelineCache final : public HasCacheStats<VulkanCacheType::Graphi
                                  const vk::PipelineLayout &pipelineLayout,
                                  const gl::AttributesMask &activeAttribLocationsMask,
                                  const gl::ComponentTypeMask &programAttribsTypeMask,
-                                 const vk::ShaderModule *vertexModule,
-                                 const vk::ShaderModule *fragmentModule,
-                                 const vk::ShaderModule *geometryModule,
-                                 const vk::ShaderModule *tessControlModule,
-                                 const vk::ShaderModule *tessEvaluationModule,
+                                 const gl::DrawBufferMask &missingOutputsMask,
+                                 const vk::ShaderAndSerialMap &shaders,
                                  const vk::SpecializationConstants &specConsts,
                                  const vk::GraphicsPipelineDesc &desc,
                                  const vk::GraphicsPipelineDesc **descPtrOut,

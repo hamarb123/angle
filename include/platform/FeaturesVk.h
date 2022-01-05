@@ -43,13 +43,6 @@ struct FeaturesVk : FeatureSetBase
                                "Enable provoking vertex mode via VK_EXT_provoking_vertex extension",
                                &members};
 
-    // Add an extra copy region when using vkCmdCopyBuffer as the Windows Intel driver seems
-    // to have a bug where the last region is ignored.
-    Feature extraCopyBufferRegion = {
-        "extraCopyBufferRegion", FeatureCategory::VulkanWorkarounds,
-        "Some drivers seem to have a bug where the last copy region in vkCmdCopyBuffer is ignored",
-        &members};
-
     // This flag is added for the sole purpose of end2end tests, to test the correctness
     // of various algorithms when a fallback format is used, such as using a packed format to
     // emulate a depth- or stencil-only format.
@@ -301,6 +294,15 @@ struct FeaturesVk : FeatureSetBase
         "VkDevice supports the VK_EXT_swapchain_colorspace extension", &members,
         "http://anglebug.com/2514"};
 
+    // Whether the VkDevice supports the VK_EXT_external_memory_dma_buf and
+    // VK_EXT_image_drm_format_modifier extensions.  These extensions are always used together to
+    // implement EGL_EXT_image_dma_buf_import and EGL_EXT_image_dma_buf_import_modifiers.
+    Feature supportsExternalMemoryDmaBufAndModifiers = {
+        "supportsExternalMemoryDmaBufAndModifiers", FeatureCategory::VulkanFeatures,
+        "VkDevice supports the VK_EXT_external_memory_dma_buf and VK_EXT_image_drm_format_modifier "
+        "extensions",
+        &members, "http://anglebug.com/6248"};
+
     // Whether the VkDevice supports the VK_EXT_external_memory_host extension, on which the
     // ANGLE_iosurface_client_buffer extension can be layered.
     Feature supportsExternalMemoryHost = {
@@ -332,6 +334,15 @@ struct FeaturesVk : FeatureSetBase
         "shadowBuffers", FeatureCategory::VulkanFeatures,
         "Allocate a shadow buffer for GL buffer objects to reduce glMap* latency.", &members,
         "http://anglebug.com/4339"};
+
+    // When we update buffer data we usually face a choice to either clone a buffer and copy the
+    // data or stage a buffer update and use the GPU to do the copy. For some GPUs, a performance
+    // penalty to use the GPU to do copies. Setting this flag to true will always try to create a
+    // new buffer and use the CPU to copy data when possible.
+    Feature preferCPUForBufferSubData = {
+        "preferCPUForBufferSubData", FeatureCategory::VulkanFeatures,
+        "Prefer use CPU to do bufferSubData instead of staged update.", &members,
+        "http://issuetracker.google.com/200067929"};
 
     // Persistently map buffer memory until destroy, saves on map/unmap IOCTL overhead
     // for buffers that are updated frequently.
@@ -389,6 +400,13 @@ struct FeaturesVk : FeatureSetBase
         "supportsRenderPassStoreOpNoneQCOM", FeatureCategory::VulkanFeatures,
         "VkDevice supports VK_QCOM_render_pass_store_ops extension.", &members,
         "http://anglebug.com/5055"};
+
+    // Whether the VkDevice supports the VK_EXT_load_store_op_none extension
+    // http://anglebug.com/5371
+    Feature supportsRenderPassLoadStoreOpNone = {
+        "supportsRenderPassLoadStoreOpNone", FeatureCategory::VulkanFeatures,
+        "VkDevice supports VK_EXT_load_store_op_none extension.", &members,
+        "http://anglebug.com/5371"};
 
     // Force maxUniformBufferSize to 16K on Qualcomm's Adreno 540. Pixel2's Adreno540 reports
     // maxUniformBufferSize 64k but various tests failed with that size. For that specific
@@ -497,11 +515,11 @@ struct FeaturesVk : FeatureSetBase
                                       "Emulate 270-degree prerotation.", &members,
                                       "http://anglebug.com/4901"};
 
-    // Whether SPIR-V should be generated directly instead of through glslang.  Transitory feature
-    // until the work is complete.
-    Feature directSPIRVGeneration = {"directSPIRVGeneration", FeatureCategory::VulkanFeatures,
-                                     "Direct translation to SPIR-V.", &members,
-                                     "http://anglebug.com/4889"};
+    // Whether SPIR-V should be generated through glslang.  Transitory feature while confidence is
+    // built on the SPIR-V generation code.
+    Feature generateSPIRVThroughGlslang = {
+        "generateSPIRVThroughGlslang", FeatureCategory::VulkanFeatures,
+        "Translate SPIR-V through glslang.", &members, "http://anglebug.com/4889"};
 
     // Whether we should use driver uniforms over specialization constants for some shader
     // modifications like yflip and rotation.

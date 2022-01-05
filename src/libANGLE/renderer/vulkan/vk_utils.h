@@ -20,8 +20,10 @@
 #include "common/debug.h"
 #include "libANGLE/Error.h"
 #include "libANGLE/Observer.h"
+#include "libANGLE/angletypes.h"
 #include "libANGLE/renderer/serial_utils.h"
 #include "libANGLE/renderer/vulkan/SecondaryCommandBuffer.h"
+#include "libANGLE/renderer/vulkan/VulkanSecondaryCommandBuffer.h"
 #include "libANGLE/renderer/vulkan/vk_wrapper.h"
 #include "vulkan/vulkan_fuchsia_ext.h"
 
@@ -52,12 +54,8 @@ class ShareGroup;
 
 namespace gl
 {
-struct Box;
 class MockOverlay;
-struct Extents;
 struct RasterizerState;
-struct Rectangle;
-class State;
 struct SwizzleState;
 struct VertexAttribute;
 class VertexBinding;
@@ -183,13 +181,15 @@ class Context : angle::NonCopyable
     RendererVk *const mRenderer;
 };
 
+class RenderPassDesc;
+
 #if ANGLE_USE_CUSTOM_VULKAN_CMD_BUFFERS
 using CommandBuffer = priv::SecondaryCommandBuffer;
 #else
-using CommandBuffer                          = priv::CommandBuffer;
+using CommandBuffer                          = VulkanSecondaryCommandBuffer;
 #endif
 
-using PrimaryCommandBuffer = priv::CommandBuffer;
+using SecondaryCommandBufferList = std::vector<CommandBuffer>;
 
 VkImageAspectFlags GetDepthStencilAspectFlags(const angle::Format &format);
 VkImageAspectFlags GetFormatAspectFlags(const angle::Format &format);
@@ -350,8 +350,55 @@ class MemoryProperties final : angle::NonCopyable
         return mMemoryProperties.memoryHeaps[heapIndex].size;
     }
 
+    uint32_t getMemoryTypeCount() const { return mMemoryProperties.memoryTypeCount; }
+
   private:
     VkPhysicalDeviceMemoryProperties mMemoryProperties;
+};
+
+class BufferMemory : angle::NonCopyable
+{
+  public:
+    BufferMemory();
+    ~BufferMemory();
+    angle::Result initExternal(void *clientBuffer);
+    angle::Result init();
+
+    void destroy(RendererVk *renderer);
+
+    angle::Result map(ContextVk *contextVk, VkDeviceSize size, uint8_t **ptrOut)
+    {
+        if (mMappedMemory == nullptr)
+        {
+            ANGLE_TRY(mapImpl(contextVk, size));
+        }
+        *ptrOut = mMappedMemory;
+        return angle::Result::Continue;
+    }
+    void unmap(RendererVk *renderer);
+    void flush(RendererVk *renderer,
+               VkMemoryMapFlags memoryPropertyFlags,
+               VkDeviceSize offset,
+               VkDeviceSize size);
+    void invalidate(RendererVk *renderer,
+                    VkMemoryMapFlags memoryPropertyFlags,
+                    VkDeviceSize offset,
+                    VkDeviceSize size);
+
+    bool isExternalBuffer() const { return mClientBuffer != nullptr; }
+
+    uint8_t *getMappedMemory() const { return mMappedMemory; }
+    DeviceMemory *getExternalMemoryObject() { return &mExternalMemory; }
+    Allocation *getMemoryObject() { return &mAllocation; }
+
+  private:
+    angle::Result mapImpl(ContextVk *contextVk, VkDeviceSize size);
+
+    Allocation mAllocation;        // use mAllocation if isExternalBuffer() is false
+    DeviceMemory mExternalMemory;  // use mExternalMemory if isExternalBuffer() is true
+
+    void *mClientBuffer;
+    uint8_t *mMappedMemory;
 };
 
 // Similar to StagingImage, for Buffers.
@@ -404,12 +451,14 @@ angle::Result AllocateImageMemory(Context *context,
                                   DeviceMemory *deviceMemoryOut,
                                   VkDeviceSize *sizeOut);
 
-angle::Result AllocateImageMemoryWithRequirements(Context *context,
-                                                  VkMemoryPropertyFlags memoryPropertyFlags,
-                                                  const VkMemoryRequirements &memoryRequirements,
-                                                  const void *extraAllocationInfo,
-                                                  Image *image,
-                                                  DeviceMemory *deviceMemoryOut);
+angle::Result AllocateImageMemoryWithRequirements(
+    Context *context,
+    VkMemoryPropertyFlags memoryPropertyFlags,
+    const VkMemoryRequirements &memoryRequirements,
+    const void *extraAllocationInfo,
+    const VkBindImagePlaneMemoryInfoKHR *extraBindInfo,
+    Image *image,
+    DeviceMemory *deviceMemoryOut);
 
 angle::Result AllocateBufferMemoryWithRequirements(Context *context,
                                                    VkMemoryPropertyFlags memoryPropertyFlags,
@@ -733,6 +782,9 @@ ANGLE_DISABLE_STRUCT_PADDING_WARNINGS
 template <typename T>
 using SpecializationConstantMap = angle::PackedEnumMap<sh::vk::SpecializationConstantId, T>;
 
+using ShaderAndSerialPointer = BindingPointer<ShaderAndSerial>;
+using ShaderAndSerialMap     = gl::ShaderMap<ShaderAndSerialPointer>;
+
 void MakeDebugUtilsLabel(GLenum source, const char *marker, VkDebugUtilsLabelEXT *label);
 
 constexpr size_t kUnpackedDepthIndex   = gl::IMPLEMENTATION_MAX_DRAW_BUFFERS;
@@ -880,6 +932,8 @@ struct PerfCounters
     uint32_t descriptorSetAllocations;
     uint32_t shaderBuffersDescriptorSetCacheHits;
     uint32_t shaderBuffersDescriptorSetCacheMisses;
+    uint32_t buffersGhosted;
+    uint32_t vertexArraySyncStateCalls;
 };
 
 // A Vulkan image level index.

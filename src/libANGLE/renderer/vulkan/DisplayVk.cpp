@@ -13,6 +13,7 @@
 #include "libANGLE/Context.h"
 #include "libANGLE/Display.h"
 #include "libANGLE/renderer/vulkan/ContextVk.h"
+#include "libANGLE/renderer/vulkan/DeviceVk.h"
 #include "libANGLE/renderer/vulkan/ImageVk.h"
 #include "libANGLE/renderer/vulkan/RendererVk.h"
 #include "libANGLE/renderer/vulkan/SurfaceVk.h"
@@ -99,6 +100,11 @@ std::string DisplayVk::getVersionString()
         return mRenderer->getVersionString();
     }
     return std::string();
+}
+
+DeviceImpl *DisplayVk::createDevice()
+{
+    return new DeviceVk();
 }
 
 egl::Error DisplayVk::waitClient(const gl::Context *context)
@@ -197,11 +203,11 @@ gl::Version DisplayVk::getMaxConformantESVersion() const
 
 void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
 {
-    outExtensions->createContextRobustness      = getRenderer()->getNativeExtensions().robustness;
-    outExtensions->surfaceOrientation           = true;
-    outExtensions->displayTextureShareGroup     = true;
-    outExtensions->displaySemaphoreShareGroup   = true;
-    outExtensions->robustResourceInitialization = true;
+    outExtensions->createContextRobustness    = getRenderer()->getNativeExtensions().robustnessEXT;
+    outExtensions->surfaceOrientation         = true;
+    outExtensions->displayTextureShareGroup   = true;
+    outExtensions->displaySemaphoreShareGroup = true;
+    outExtensions->robustResourceInitializationANGLE = true;
 
     // The Vulkan implementation will always say that EGL_KHR_swap_buffers_with_damage is supported.
     // When the Vulkan driver supports VK_KHR_incremental_present, it will use it.  Otherwise, it
@@ -221,7 +227,7 @@ void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
     outExtensions->imageNativeBuffer =
         getRenderer()->getFeatures().supportsAndroidHardwareBuffer.enabled;
     outExtensions->surfacelessContext = true;
-    outExtensions->glColorspace = getRenderer()->getFeatures().supportsSwapchainColorspace.enabled;
+    outExtensions->glColorspace       = true;
     outExtensions->imageGlColorspace =
         outExtensions->glColorspace && getRenderer()->getFeatures().supportsImageFormatList.enabled;
 
@@ -229,6 +235,14 @@ void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
     outExtensions->getNativeClientBufferANDROID = true;
     outExtensions->framebufferTargetANDROID     = true;
 #endif  // defined(ANGLE_PLATFORM_ANDROID)
+
+    // EGL_EXT_image_dma_buf_import is only exposed if EGL_EXT_image_dma_buf_import_modifiers can
+    // also be exposed.  The Vulkan extensions that support these EGL extensions are not split in
+    // the same way; both Vulkan extensions are needed for EGL_EXT_image_dma_buf_import, and with
+    // both Vulkan extensions, EGL_EXT_image_dma_buf_import_modifiers is also supportable.
+    outExtensions->imageDmaBufImportEXT =
+        getRenderer()->getFeatures().supportsExternalMemoryDmaBufAndModifiers.enabled;
+    outExtensions->imageDmaBufImportModifiersEXT = outExtensions->imageDmaBufImportEXT;
 
     // Disable context priority when non-zero memory init is enabled. This enforces a queue order.
     outExtensions->contextPriority = !getRenderer()->getFeatures().allocateNonZeroMemory.enabled;
@@ -256,7 +270,7 @@ void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
 void DisplayVk::generateCaps(egl::Caps *outCaps) const
 {
     outCaps->textureNPOT = true;
-    outCaps->stencil8    = getRenderer()->getNativeExtensions().stencilIndex8;
+    outCaps->stencil8    = getRenderer()->getNativeExtensions().textureStencil8OES;
 }
 
 const char *DisplayVk::getWSILayer() const
@@ -312,7 +326,7 @@ void DisplayVk::populateFeatureList(angle::FeatureList *features)
     mRenderer->getFeatures().populateFeatureList(features);
 }
 
-ShareGroupVk::ShareGroupVk() : mSyncObjectPendingFlush(false) {}
+ShareGroupVk::ShareGroupVk() {}
 
 void ShareGroupVk::onDestroy(const egl::Display *display)
 {

@@ -23,6 +23,7 @@
 #include <climits>
 #include <cstdarg>
 #include <cstddef>
+#include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
@@ -62,6 +63,30 @@ class NonCopyable
 };
 
 extern const uintptr_t DirtyPointer;
+
+struct SaveFileHelper
+{
+  public:
+    // We always use ios::binary to avoid inconsistent line endings when captured on Linux vs Win.
+    SaveFileHelper(const std::string &filePathIn);
+    ~SaveFileHelper();
+
+    template <typename T>
+    SaveFileHelper &operator<<(const T &value)
+    {
+        mOfs << value;
+        checkError();
+        return *this;
+    }
+
+    void write(const uint8_t *data, size_t size);
+
+  private:
+    void checkError();
+
+    std::ofstream mOfs;
+    std::string mFilePath;
+};
 
 }  // namespace angle
 
@@ -220,6 +245,7 @@ inline bool IsLittleEndian()
 
 #define GL_A1RGB5_ANGLEX 0x6AC5
 #define GL_BGRX8_ANGLEX 0x6ABA
+#define GL_RGBX8_ANGLEX 0x6AFA
 #define GL_BGR565_ANGLEX 0x6ABB
 #define GL_BGRA4_ANGLEX 0x6ABC
 #define GL_BGR5_A1_ANGLEX 0x6ABD
@@ -403,5 +429,11 @@ inline bool IsLittleEndian()
 #else
 #    define ANGLE_REQUIRE_CONSTANT_INIT
 #endif  // __has_cpp_attribute(require_constant_initialization)
+
+#if __has_cpp_attribute(clang::fallthrough)
+#    define ANGLE_FALLTHROUGH [[clang::fallthrough]]
+#else
+#    define ANGLE_FALLTHROUGH
+#endif
 
 #endif  // COMMON_ANGLEUTILS_H_
