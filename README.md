@@ -1,8 +1,44 @@
+# Additional info for hamarb123:
+
+Latest stable Google Chrome chromium build branch can be found [here](https://googlechromelabs.github.io/current-versions/)
+
+Download depot_tools from [here](https://commondatastorage.googleapis.com/chrome-infra-docs/flat/depot_tools/docs/html/depot_tools_tutorial.html#_setting_up)
+
+To set up powershell building, do the following:
+```ps1
+set DEPOT_TOOLS_WIN_TOOLCHAIN=0
+$Env:PATH = "<path to depot_tools>;"+$Env:PATH";<path to python 2.7>"
+python scripts/bootstrap.py
+gclient sync
+cmd /c mklink /D out "<path to out directory>"
+gn args out/Debug_x86 && gn args out/Release_x86 && gn args out/Debug_x64 && gn args out/Release_x64 && gn args out/Debug_arm64 && gn args out/Release_arm64
+```
+
+Can set up VS solutions with: `gn gen out/Debug_x86 --sln=angle --ide=vs2022 && gn gen out/Release_x86 --sln=angle --ide=vs2022 && gn gen out/Debug_x64 --sln=angle --ide=vs2022 && gn gen out/Release_x64 --sln=angle --ide=vs2022 && gn gen out/Debug_arm64 --sln=angle --ide=vs2022 && gn gen out/Release_arm64 --sln=angle --ide=vs2022`
+
+Can build all configs like so: `autoninja -C out/Debug_x86 && autoninja -C out/Release_x86 && autoninja -C out/Debug_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -C out/Release_arm64`
+
+# Recommended build settings:
+
+```
+# Set build arguments here. See `gn help buildargs`.
+is_component_build = false
+target_cpu = "x86"
+is_clang = true
+is_debug = true
+```
+
+or `target_cpu = "x64"` / `target_cpu = "arm64"` for those processors
+
+or `is_debug = false` for Release mode
+
+`is_component_build = false` allows only needing to distribute `libEGL.dll`, `libGLESv2.dll`, and (for &lt; Win 8.1) `d3dcompiler_47.dll`
+
 # Note - To build arm64 on Windows:
 
 Must have `is_clang = true` in the ninja args.
 
-Modification to `third_party/VK-GL-CTS/src/framework/opengl/wrapper/glwTypes.inl`:
+Manual: Modification to `third_party/VK-GL-CTS/src/framework/opengl/wrapper/glwTypes.inl`:
 ```diff
  typedef void				GLvoid;
  
@@ -12,7 +48,7 @@ Modification to `third_party/VK-GL-CTS/src/framework/opengl/wrapper/glwTypes.inl
  	typedef signed long long int	GLsizeiptr;
 ```
 
-Modification to `third_party\libpng\BUILD.gn` (may be unnecessary in future, but is for now):
+Integrated in project: Modification to `third_party\libpng\BUILD.gn` (may be unnecessary in future, but is for now):
 ```diff
      "src/pngwtran.c",
      "src/pngwutil.c",
