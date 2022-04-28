@@ -175,12 +175,11 @@ void SecondaryCommandBuffer::executeCommands(PrimaryCommandBuffer *primary)
                         getParamPtr<BeginTransformFeedbackParams>(currentCommand);
                     const VkBuffer *counterBuffers =
                         Offset<VkBuffer>(params, sizeof(BeginTransformFeedbackParams));
-                    // Workaround for AMD driver bug where it expects the offsets array to be
-                    // non-null
-                    gl::TransformFeedbackBuffersArray<VkDeviceSize> offsets;
-                    offsets.fill(0);
+                    const VkDeviceSize *counterBufferOffsets =
+                        reinterpret_cast<const VkDeviceSize *>(counterBuffers +
+                                                               params->bufferCount);
                     vkCmdBeginTransformFeedbackEXT(cmdBuffer, 0, params->bufferCount,
-                                                   counterBuffers, offsets.data());
+                                                   counterBuffers, counterBufferOffsets);
                     break;
                 }
                 case CommandID::BindComputePipeline:
@@ -357,7 +356,8 @@ void SecondaryCommandBuffer::executeCommands(PrimaryCommandBuffer *primary)
                 {
                     const DrawIndexedIndirectParams *params =
                         getParamPtr<DrawIndexedIndirectParams>(currentCommand);
-                    vkCmdDrawIndexedIndirect(cmdBuffer, params->buffer, params->offset, 1, 0);
+                    vkCmdDrawIndexedIndirect(cmdBuffer, params->buffer, params->offset,
+                                             params->drawCount, params->stride);
                     break;
                 }
                 case CommandID::DrawIndexedInstanced:
@@ -389,7 +389,8 @@ void SecondaryCommandBuffer::executeCommands(PrimaryCommandBuffer *primary)
                 {
                     const DrawIndirectParams *params =
                         getParamPtr<DrawIndirectParams>(currentCommand);
-                    vkCmdDrawIndirect(cmdBuffer, params->buffer, params->offset, 1, 0);
+                    vkCmdDrawIndirect(cmdBuffer, params->buffer, params->offset, params->drawCount,
+                                      params->stride);
                     break;
                 }
                 case CommandID::DrawInstanced:
@@ -426,12 +427,11 @@ void SecondaryCommandBuffer::executeCommands(PrimaryCommandBuffer *primary)
                         getParamPtr<EndTransformFeedbackParams>(currentCommand);
                     const VkBuffer *counterBuffers =
                         Offset<VkBuffer>(params, sizeof(EndTransformFeedbackParams));
-                    // Workaround for AMD driver bug where it expects the offsets array to be
-                    // non-null
-                    gl::TransformFeedbackBuffersArray<VkDeviceSize> offsets;
-                    offsets.fill(0);
+                    const VkDeviceSize *counterBufferOffsets =
+                        reinterpret_cast<const VkDeviceSize *>(counterBuffers +
+                                                               params->bufferCount);
                     vkCmdEndTransformFeedbackEXT(cmdBuffer, 0, params->bufferCount, counterBuffers,
-                                                 offsets.data());
+                                                 counterBufferOffsets);
                     break;
                 }
                 case CommandID::FillBuffer:

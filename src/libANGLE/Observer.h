@@ -55,6 +55,9 @@ enum class SubjectMessage
     // pending commands and waiting for the GPU to become idle.
     InternalMemoryAllocationChanged,
 
+    // Indicates that a buffer's storage has changed. Used to prevent use-after-free error. (Vulkan)
+    BufferVkStorageChanged,
+
     // Indicates an external change to the default framebuffer.
     SurfaceChanged,
 
@@ -64,6 +67,8 @@ enum class SubjectMessage
     ProgramRelinked,
     // Indicates a separable program's sampler uniforms were updated.
     SamplerUniformsUpdated,
+    // Other types of uniform change.
+    ProgramUniformUpdated,
 
     // Indicates a Storage of back-end in gl::Texture has been released.
     StorageReleased,

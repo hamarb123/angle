@@ -80,6 +80,7 @@ class ActiveTexturesCache final : angle::NonCopyable
     void set(size_t textureIndex, Texture *texture);
     void reset(size_t textureIndex);
     bool empty() const;
+    size_t size() const { return mTextures.size(); }
 
   private:
     ActiveTextureArray<Texture *> mTextures;
@@ -112,6 +113,7 @@ class State : angle::NonCopyable
     EGLenum getClientType() const { return mClientType; }
     EGLenum getContextPriority() const { return mContextPriority; }
     bool hasProtectedContent() const { return mHasProtectedContent; }
+    bool isDebugContext() const { return mIsDebugContext; }
     GLint getClientMajorVersion() const { return mClientVersion.major; }
     GLint getClientMinorVersion() const { return mClientVersion.minor; }
     const Version &getClientVersion() const { return mClientVersion; }
@@ -362,7 +364,7 @@ class State : angle::NonCopyable
 
     // If both a Program and a ProgramPipeline are bound, the Program will
     // always override the ProgramPipeline.
-    const ProgramExecutable *getProgramExecutable() const { return mExecutable; }
+    ProgramExecutable *getProgramExecutable() const { return mExecutable; }
 
     // Program binding manipulation
     angle::Result setProgram(const Context *context, Program *newProgram);
@@ -701,12 +703,12 @@ class State : angle::NonCopyable
         DIRTY_OBJECT_IMAGES_INIT,
         DIRTY_OBJECT_READ_ATTACHMENTS,
         DIRTY_OBJECT_DRAW_ATTACHMENTS,
+        DIRTY_OBJECT_READ_FRAMEBUFFER,
+        DIRTY_OBJECT_DRAW_FRAMEBUFFER,
         DIRTY_OBJECT_VERTEX_ARRAY,
         DIRTY_OBJECT_TEXTURES,  // Top-level dirty bit. Also see mDirtyTextures.
         DIRTY_OBJECT_IMAGES,    // Top-level dirty bit. Also see mDirtyImages.
         DIRTY_OBJECT_SAMPLERS,  // Top-level dirty bit. Also see mDirtySamplers.
-        DIRTY_OBJECT_READ_FRAMEBUFFER,
-        DIRTY_OBJECT_DRAW_FRAMEBUFFER,
         DIRTY_OBJECT_PROGRAM,
         DIRTY_OBJECT_UNKNOWN,
         DIRTY_OBJECT_MAX = DIRTY_OBJECT_UNKNOWN,
@@ -909,6 +911,8 @@ class State : angle::NonCopyable
 
     const std::vector<ImageUnit> &getImageUnits() const { return mImageUnits; }
 
+    bool hasDisplayTextureShareGroup() const { return mDisplayTextureShareGroup; }
+
   private:
     friend class Context;
 
@@ -939,11 +943,12 @@ class State : angle::NonCopyable
     angle::Result syncProgram(const Context *context, Command command);
 
     using DirtyObjectHandler = angle::Result (State::*)(const Context *context, Command command);
+
     static constexpr DirtyObjectHandler kDirtyObjectHandlers[DIRTY_OBJECT_MAX] = {
         &State::syncActiveTextures,  &State::syncTexturesInit,    &State::syncImagesInit,
-        &State::syncReadAttachments, &State::syncDrawAttachments, &State::syncVertexArray,
-        &State::syncTextures,        &State::syncImages,          &State::syncSamplers,
-        &State::syncReadFramebuffer, &State::syncDrawFramebuffer, &State::syncProgram};
+        &State::syncReadAttachments, &State::syncDrawAttachments, &State::syncReadFramebuffer,
+        &State::syncDrawFramebuffer, &State::syncVertexArray,     &State::syncTextures,
+        &State::syncImages,          &State::syncSamplers,        &State::syncProgram};
 
     // Robust init must happen before Framebuffer init for the Vulkan back-end.
     static_assert(DIRTY_OBJECT_ACTIVE_TEXTURES < DIRTY_OBJECT_TEXTURES_INIT, "init order");
@@ -957,20 +962,13 @@ class State : angle::NonCopyable
     static_assert(DIRTY_OBJECT_IMAGES_INIT == 2, "check DIRTY_OBJECT_IMAGES_INIT index");
     static_assert(DIRTY_OBJECT_READ_ATTACHMENTS == 3, "check DIRTY_OBJECT_READ_ATTACHMENTS index");
     static_assert(DIRTY_OBJECT_DRAW_ATTACHMENTS == 4, "check DIRTY_OBJECT_DRAW_ATTACHMENTS index");
-    static_assert(DIRTY_OBJECT_VERTEX_ARRAY == 5, "check DIRTY_OBJECT_VERTEX_ARRAY index");
-    static_assert(DIRTY_OBJECT_TEXTURES == 6, "check DIRTY_OBJECT_TEXTURES index");
-    static_assert(DIRTY_OBJECT_IMAGES == 7, "check DIRTY_OBJECT_IMAGES index");
-    static_assert(DIRTY_OBJECT_SAMPLERS == 8, "check DIRTY_OBJECT_SAMPLERS index");
-    static_assert(DIRTY_OBJECT_READ_FRAMEBUFFER == 9, "check DIRTY_OBJECT_READ_FRAMEBUFFER index");
-    static_assert(DIRTY_OBJECT_DRAW_FRAMEBUFFER == 10, "check DIRTY_OBJECT_DRAW_FRAMEBUFFER index");
+    static_assert(DIRTY_OBJECT_READ_FRAMEBUFFER == 5, "check DIRTY_OBJECT_READ_FRAMEBUFFER index");
+    static_assert(DIRTY_OBJECT_DRAW_FRAMEBUFFER == 6, "check DIRTY_OBJECT_DRAW_FRAMEBUFFER index");
+    static_assert(DIRTY_OBJECT_VERTEX_ARRAY == 7, "check DIRTY_OBJECT_VERTEX_ARRAY index");
+    static_assert(DIRTY_OBJECT_TEXTURES == 8, "check DIRTY_OBJECT_TEXTURES index");
+    static_assert(DIRTY_OBJECT_IMAGES == 9, "check DIRTY_OBJECT_IMAGES index");
+    static_assert(DIRTY_OBJECT_SAMPLERS == 10, "check DIRTY_OBJECT_SAMPLERS index");
     static_assert(DIRTY_OBJECT_PROGRAM == 11, "check DIRTY_OBJECT_PROGRAM index");
-
-    // Container (FBO) object must handled after the texture so that if texture code adds dirty bit
-    // to container object, they will be picked up in the same draw call.
-    static_assert(DIRTY_OBJECT_TEXTURES < DIRTY_OBJECT_READ_FRAMEBUFFER,
-                  "State::syncDirtyObjects order");
-    static_assert(DIRTY_OBJECT_TEXTURES < DIRTY_OBJECT_DRAW_FRAMEBUFFER,
-                  "State::syncDirtyObjects order");
 
     // Dispatch table for buffer update functions.
     static const angle::PackedEnumMap<BufferBinding, BufferBindingSetter> kBufferSetters;
@@ -980,6 +978,7 @@ class State : angle::NonCopyable
     EGLenum mClientType;
     EGLenum mContextPriority;
     bool mHasProtectedContent;
+    bool mIsDebugContext;
     Version mClientVersion;
 
     // Caps to use for validation
@@ -1158,6 +1157,7 @@ class State : angle::NonCopyable
     bool mSetBlendIndexedInvoked;
     bool mSetBlendFactorsIndexedInvoked;
     bool mSetBlendEquationsIndexedInvoked;
+    bool mDisplayTextureShareGroup;
 
     // GL_EXT_primitive_bounding_box
     GLfloat mBoundingBoxMinX;

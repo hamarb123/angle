@@ -536,6 +536,34 @@ std::string BuildBigInitialStackShader(int length)
     return result;
 }
 
+// Tests a shader from conformance.olges/GL/build/build_017_to_024
+// This shader uses chained assign-equals ops with swizzle, often reusing the same variable
+// as part of a swizzle.
+
+// Skipped on NV: angleproject:7029
+TEST_P(GLSLTest, SwizzledChainedAssignIncrement)
+{
+    constexpr char kFS[] =
+        R"(
+        precision mediump float;
+        void main() {
+            vec2 v = vec2(1,5);
+            // at the end of next statement, values in
+            // v.x = 12, v.y = 12
+            v.xy += v.yx += v.xy;
+            // v1 and v2, both are initialized with (12,12)
+            vec2 v1 = v, v2 = v;
+            v1.xy += v2.yx += ++(v.xy);  // v1 = 37, v2 = 25 each
+            v1.xy += v2.yx += (v.xy)++;  // v1 = 75, v2 = 38 each
+            gl_FragColor = vec4(v1,v2)/255.;  // 75, 75, 38, 38
+        })";
+
+    ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Simple(), kFS);
+    drawQuad(program, essl1_shaders::PositionAttrib(), 0.5f);
+    ASSERT_GL_NO_ERROR();
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor(75, 75, 38, 38));
+}
+
 TEST_P(GLSLTest, NamelessScopedStructs)
 {
     constexpr char kFS[] = R"(precision mediump float;
@@ -1168,6 +1196,279 @@ void main() {
     }
 }
 
+GLint GetFirstIntPixelRedValue()
+{
+    GLint pixel[4];
+    glReadPixels(0, 0, 1, 1, GL_RGBA_INTEGER, GL_INT, pixel);
+    return pixel[0];
+}
+
+TEST_P(GLSLTest_ES3, GLVertexIDIntegerTextureDrawElements)
+{
+    constexpr char kVS[] = R"(#version 300 es
+    flat out highp int vVertexID;
+
+    void main() {
+        vVertexID = gl_VertexID;
+        gl_PointSize = 1.0;
+        gl_Position = vec4(0,0,0,1);
+    })";
+
+    constexpr char kFS[] = R"(#version 300 es
+    flat in highp int vVertexID;
+    out highp int oVertexID;
+    void main() {
+        oVertexID = vVertexID;
+    })";
+
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
+    glUseProgram(program);
+    glViewport(0, 0, 1, 1);
+
+    GLTexture tex;
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32I, 1, 1);
+    GLFramebuffer fb;
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+
+    EXPECT_GL_NO_ERROR();
+
+    GLint clearData[4] = {42};
+    glClearBufferiv(GL_COLOR, 0, clearData);
+    EXPECT_EQ(42, GetFirstIntPixelRedValue());
+
+    const int kIndexDataSize = 5;
+    GLushort indexData[]     = {1, 2, 5, 3, 10000};
+    GLBuffer indexBuffer;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indexData), indexData, GL_STATIC_DRAW);
+
+    for (size_t first = 0; first < kIndexDataSize; ++first)
+    {
+        for (size_t count = 1; first + count <= kIndexDataSize; ++count)
+        {
+            glDrawElements(GL_POINTS, count, GL_UNSIGNED_SHORT,
+                           reinterpret_cast<const void *>(first * 2u));
+            GLint expected = indexData[first + count - 1];
+            GLint actual   = GetFirstIntPixelRedValue();
+            EXPECT_EQ(expected, actual);
+        }
+    }
+    EXPECT_GL_NO_ERROR();
+}
+
+TEST_P(GLSLTest_ES3, GLVertexIDIntegerTextureDrawElementsU8)
+{
+    constexpr char kVS[] = R"(#version 300 es
+    flat out highp int vVertexID;
+
+    void main() {
+        vVertexID = gl_VertexID;
+        gl_PointSize = 1.0;
+        gl_Position = vec4(0,0,0,1);
+    })";
+
+    constexpr char kFS[] = R"(#version 300 es
+    flat in highp int vVertexID;
+    out highp int oVertexID;
+    void main() {
+        oVertexID = vVertexID;
+    })";
+
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
+    glUseProgram(program);
+    glViewport(0, 0, 1, 1);
+
+    GLTexture tex;
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32I, 1, 1);
+    GLFramebuffer fb;
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+
+    EXPECT_GL_NO_ERROR();
+
+    GLint clearData[4] = {42};
+    glClearBufferiv(GL_COLOR, 0, clearData);
+    EXPECT_EQ(42, GetFirstIntPixelRedValue());
+
+    const int kIndexDataSize = 5;
+    GLubyte indexData[]      = {1, 2, 5, 3, 100};
+    GLBuffer indexBuffer;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indexData), indexData, GL_STATIC_DRAW);
+
+    for (size_t first = 0; first < kIndexDataSize; ++first)
+    {
+        for (size_t count = 1; first + count <= kIndexDataSize; ++count)
+        {
+            glDrawElements(GL_POINTS, count, GL_UNSIGNED_BYTE,
+                           reinterpret_cast<const void *>(first));
+            GLint expected = indexData[first + count - 1];
+            GLint actual   = GetFirstIntPixelRedValue();
+            EXPECT_EQ(expected, actual);
+        }
+    }
+    EXPECT_GL_NO_ERROR();
+}
+
+void GLVertexIDIntegerTextureDrawElementsU8Line_Helper(size_t first, const GLubyte *indices)
+{
+    glDrawElements(GL_LINES, 2, GL_UNSIGNED_BYTE, reinterpret_cast<const void *>(first));
+
+    GLint pixels[8];
+    glReadPixels(0, 0, 2, 1, GL_RGBA_INTEGER, GL_INT, pixels);
+
+    GLint expected = indices[first + 1];
+    EXPECT_EQ(expected, pixels[0]);
+    EXPECT_EQ(expected, pixels[4]);
+}
+
+TEST_P(GLSLTest_ES3, GLVertexIDIntegerTextureDrawElementsU8Line)
+{
+    constexpr char kVS[] = R"(#version 300 es
+    flat out highp int vVertexID;
+    layout(location = 0) in vec4 position;
+
+    void main() {
+        vVertexID = gl_VertexID;
+        gl_Position = position;
+    })";
+
+    constexpr char kFS[] = R"(#version 300 es
+    flat in highp int vVertexID;
+    out highp int oVertexID;
+    void main() {
+        oVertexID = vVertexID;
+    })";
+
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
+    glUseProgram(program);
+    glViewport(0, 0, 2, 1);
+
+    GLTexture tex;
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32I, 2, 1);
+    GLFramebuffer fb;
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+
+    EXPECT_GL_NO_ERROR();
+
+    struct LR
+    {
+        LR() : X0(-1.0f), X1(1.0f) {}
+        float X0;
+        float X1;
+    };
+    constexpr int kNumVertices = 100;
+    LR vertData[kNumVertices];
+    GLBuffer buf;
+    glBindBuffer(GL_ARRAY_BUFFER, buf);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertData), vertData, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+    GLint clearData[4] = {42};
+    glClearBufferiv(GL_COLOR, 0, clearData);
+    EXPECT_EQ(42, GetFirstIntPixelRedValue());
+
+    GLubyte indexData[] = {1, 4, 5, 2, 50, 61};
+    GLBuffer indexBuffer;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indexData), indexData, GL_STATIC_DRAW);
+
+    GLVertexIDIntegerTextureDrawElementsU8Line_Helper(0, indexData);
+    GLVertexIDIntegerTextureDrawElementsU8Line_Helper(1, indexData);
+    GLVertexIDIntegerTextureDrawElementsU8Line_Helper(2, indexData);
+    GLVertexIDIntegerTextureDrawElementsU8Line_Helper(4, indexData);
+
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test gl_VertexID works with lines
+TEST_P(GLSLTest_ES3, GLVertexIDIntegerTextureDrawElementsU8LineIds)
+{
+    // Draws lines via indices (glDrawElements). Each pair of indices
+    // draws the next consecutive pixel. For 2 points, because we're
+    // using int attributes, they must be "flat" and so the spec
+    // says for a given line the value should come from the second
+    // of the 2 points. (see: OpenGL ES 3.0.2 spec Table 2.12)
+    // Each line is only 1 pixel long so every other pixel should
+    // be the default value.
+    constexpr char kVS[] = R"(#version 300 es
+    flat out highp int vVertexID;
+    layout(location = 0) in float position;
+    uniform float width;
+
+    void main() {
+        vVertexID = gl_VertexID;
+        gl_Position = vec4(position / width * 2.0 - 1.0, 0, 0, 1);
+    })";
+
+    constexpr char kFS[] = R"(#version 300 es
+    flat in highp int vVertexID;
+    out highp int oVertexID;
+    void main() {
+        oVertexID = vVertexID;
+    })";
+
+    GLubyte indexData[]          = {1, 4, 5, 2, 50, 61, 32, 33};
+    constexpr size_t kNumIndices = sizeof(indexData) / sizeof(indexData[0]);
+    GLBuffer indexBuffer;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indexData), indexData, GL_STATIC_DRAW);
+
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
+    glUseProgram(program);
+    glUniform1f(glGetUniformLocation(program, "width"), kNumIndices);
+    glViewport(0, 0, kNumIndices, 1);
+
+    GLTexture tex;
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32I, kNumIndices, 1);
+    GLFramebuffer fb;
+    glBindFramebuffer(GL_FRAMEBUFFER, fb);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+
+    constexpr int kNumVertices = 100;
+    std::vector<float> vertData(kNumVertices, -1.0f);
+    {
+        int i = 0;
+        for (GLubyte ndx : indexData)
+        {
+            vertData[ndx] = i++;
+        }
+    }
+    GLBuffer buf;
+    glBindBuffer(GL_ARRAY_BUFFER, buf);
+    glBufferData(GL_ARRAY_BUFFER, vertData.size() * sizeof(float), vertData.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+    GLint kDefaultValue = 42;
+    GLint clearData[4]  = {kDefaultValue};
+    glClearBufferiv(GL_COLOR, 0, clearData);
+    EXPECT_EQ(kDefaultValue, GetFirstIntPixelRedValue());
+
+    EXPECT_GL_NO_ERROR();
+
+    glDrawElements(GL_LINES, kNumIndices, GL_UNSIGNED_BYTE, 0);
+
+    GLint pixels[kNumIndices * 4];
+    glReadPixels(0, 0, kNumIndices, 1, GL_RGBA_INTEGER, GL_INT, pixels);
+
+    for (size_t i = 0; i < kNumIndices; ++i)
+    {
+        const int expected = i % 2 ? kDefaultValue : indexData[i + 1];
+        const int actual   = pixels[i * 4];
+        EXPECT_EQ(expected, actual);
+    }
+
+    EXPECT_GL_NO_ERROR();
+}
+
 // Helper function for the GLVertexIDIntegerTextureDrawArrays test
 void GLVertexIDIntegerTextureDrawArrays_helper(int first, int count, GLenum err)
 {
@@ -1248,7 +1549,6 @@ void main() {
     int32_t int32Max = 0x7FFFFFFF;
     GLVertexIDIntegerTextureDrawArrays_helper(int32Max - 2, 1, GL_OUT_OF_MEMORY);
     GLVertexIDIntegerTextureDrawArrays_helper(int32Max - 1, 1, GL_OUT_OF_MEMORY);
-    GLVertexIDIntegerTextureDrawArrays_helper(int32Max, 1, GL_OUT_OF_MEMORY);
 }
 
 // Draw an array of points with the first vertex offset at 5 using gl_VertexID
@@ -2845,10 +3145,10 @@ void main()
 
     mat3x2 m = mat3x2(ivec2(i), uvec2(u), bvec2(b));
 
-    color = vec4(mi[0][0] == float(i) ? 1 : 0,
-                 mu[2][2] == float(u) ? 1 : 0,
-                 mb[1][1] == float(b) ? 1 : 0,
-                 m[0][1] == float(i) && m[1][0] == float(u) && m[2][0] == float(b) ? 1 : 0);
+    color = vec4(mi[0][0] == -123.0 ? 1 : 0,
+                 mu[2][2] == 456.0 ? 1 : 0,
+                 mb[1][1] == 1.0 ? 1 : 0,
+                 m[0][1] == -123.0 && m[1][0] == 456.0 && m[2][0] == 1.0 ? 1 : 0);
 })";
 
     ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), kFS);
@@ -2887,9 +3187,9 @@ void main()
     vec3 v3 = vec3(b, u);
     vec4 v4 = vec4(i, u);
 
-    color = vec4(v2.x == float(i.x) && v2.y == float(b.x) ? 1 : 0,
-                 v3.x == float(b.x) && v3.y == float(b.y) && v3.z == float(u.x) ? 1 : 0,
-                 v4.x == float(i.x) && v4.y == float(i.y) && v4.z == float(u.x) && v4.w == float(u.y) ? 1 : 0,
+    color = vec4(v2.x == -123.0 && v2.y == 1.0 ? 1 : 0,
+                 v3.x == 1.0 && v3.y == 0.0 && v3.z == 456.0 ? 1 : 0,
+                 v4.x == -123.0 && v4.y == -23.0 && v4.z == 456.0 && v4.w == 76.0 ? 1 : 0,
                  1);
 })";
 
@@ -5556,6 +5856,45 @@ TEST_P(GLSLTest_ES3, ConstantStatementAsLoopInit)
     glDeleteShader(shader);
 }
 
+// Tests that using a constant condition guarding a discard works
+// Covers a failing case in the Vulkan backend: http://anglebug.com/7033
+TEST_P(GLSLTest_ES3, ConstantConditionGuardingDiscard)
+{
+    constexpr char kFS[] = R"(#version 300 es
+void main()
+{
+    if (true)
+    {
+        discard;
+    }
+})";
+
+    GLuint shader = CompileShader(GL_FRAGMENT_SHADER, kFS);
+    EXPECT_NE(0u, shader);
+    glDeleteShader(shader);
+}
+
+// Tests that nesting a discard in unconditional blocks works
+// Covers a failing case in the Vulkan backend: http://anglebug.com/7033
+TEST_P(GLSLTest_ES3, NestedUnconditionalDiscards)
+{
+    constexpr char kFS[] = R"(#version 300 es
+out mediump vec4 c;
+void main()
+{
+    {
+        c = vec4(0);
+        {
+            discard;
+        }
+    }
+})";
+
+    GLuint shader = CompileShader(GL_FRAGMENT_SHADER, kFS);
+    EXPECT_NE(0u, shader);
+    glDeleteShader(shader);
+}
+
 // Test that uninitialized local variables are initialized to 0.
 TEST_P(WebGL2GLSLTest, InitUninitializedLocals)
 {
@@ -6165,6 +6504,126 @@ TEST_P(GLSLTest_ES31, VaryingTessellationSampleInAndOut)
             float out0 = te_out;
             color = vec4(1, 0, 0, 1);
         })";
+
+    ANGLE_GL_PROGRAM_WITH_TESS(program, kVS, kTCS, kTES, kFS);
+    drawPatches(program.get(), "inputAttribute", 0.5f, 1.0f, GL_FALSE);
+    ASSERT_GL_NO_ERROR();
+}
+
+// Test that a shader with sample in / sample out can be used successfully when the varying
+// precision is different between VS and FS.
+TEST_P(GLSLTest_ES31, VaryingSampleInAndOutDifferentPrecision)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_OES_shader_multisample_interpolation"));
+
+    constexpr char kVS[] =
+        R"(#version 310 es
+        #extension GL_OES_shader_multisample_interpolation : require
+
+        precision highp float;
+        in vec4 inputAttribute;
+
+        sample out highp float v;
+        void main()
+        {
+            v = inputAttribute[0];
+            gl_Position = inputAttribute;
+        })";
+
+    constexpr char kFS[] =
+        R"(#version 310 es
+        #extension GL_OES_shader_multisample_interpolation : require
+
+        precision highp float;
+        sample in mediump float v;
+        layout(location = 0) out mediump vec4 color;
+
+        void main()
+        {
+            color = vec4(round((v + 1.) / 2. * 5.) / 5., 0, 0, 1);
+        })";
+
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
+    drawQuad(program.get(), "inputAttribute", 0.5f, 1.0f, GL_FALSE);
+    ASSERT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(getWindowWidth() - 1, 0, GLColor::red);
+}
+
+// Test that a shader IO block varying whose block name is declared multiple(in/out) time links
+// successfully.
+TEST_P(GLSLTest_ES31, VaryingIOBlockDeclaredAsInAndOut)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_tessellation_shader"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_io_blocks"));
+
+    constexpr char kVS[] = R"(#version 310 es
+    #extension GL_EXT_shader_io_blocks : require
+    precision highp float;
+    in vec4 inputAttribute;
+    out Vertex
+    {
+        vec4 fv;
+    } outVertex;
+    void main()
+    {
+        gl_Position = inputAttribute;
+        outVertex.fv = gl_Position;
+    })";
+
+    constexpr char kTCS[] = R"(#version 310 es
+    #extension GL_EXT_tessellation_shader : require
+    #extension GL_EXT_shader_io_blocks : require
+    precision mediump float;
+    in Vertex
+    {
+        vec4 fv;
+    } inVertex[];
+    layout(vertices = 2) out;
+    out Vertex
+    {
+        vec4 fv;
+    } outVertex[];
+
+    void main()
+    {
+        gl_out[gl_InvocationID].gl_Position = gl_in[gl_InvocationID].gl_Position;
+        outVertex[gl_InvocationID].fv = inVertex[gl_InvocationID].fv;
+        gl_TessLevelInner[0] = 1.0;
+            gl_TessLevelInner[1] = 1.0;
+            gl_TessLevelOuter[0] = 1.0;
+            gl_TessLevelOuter[1] = 1.0;
+            gl_TessLevelOuter[2] = 1.0;
+            gl_TessLevelOuter[3] = 1.0;
+    })";
+
+    constexpr char kTES[] = R"(#version 310 es
+    #extension GL_EXT_tessellation_shader : require
+    #extension GL_EXT_shader_io_blocks : require
+    precision mediump float;
+    layout (isolines, point_mode) in;
+    in Vertex
+    {
+        vec4 fv;
+    } inVertex[];
+    out vec4 result_fv;
+
+    void main()
+    {
+        gl_Position = gl_in[0].gl_Position;
+        result_fv = inVertex[0].fv;
+    })";
+
+    constexpr char kFS[] = R"(#version 310 es
+    precision mediump float;
+
+    layout(location = 0) out mediump vec4 color;
+
+    void main()
+    {
+        // Output solid green
+        color = vec4(0, 1.0, 0, 1.0);
+    })";
 
     ANGLE_GL_PROGRAM_WITH_TESS(program, kVS, kTCS, kTES, kFS);
     drawPatches(program.get(), "inputAttribute", 0.5f, 1.0f, GL_FALSE);
@@ -12148,6 +12607,157 @@ void main()
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::white);
 }
 
+// Test using builtins that can only be redefined with gl_PerVertex
+TEST_P(GLSLTest_ES31, PerVertexRedefinition)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_geometry_shader"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_clip_cull_distance"));
+
+    constexpr char kVS[] = R"(#version 310 es
+void main()
+{
+    gl_Position = vec4(1.0, 0.0, 0.0, 1.0);
+})";
+
+    constexpr char kGS[] = R"(#version 310 es
+#extension GL_EXT_geometry_shader : require
+#extension GL_EXT_clip_cull_distance : require
+
+layout(lines_adjacency, invocations = 3) in;
+layout(points, max_vertices = 16) out;
+
+out gl_PerVertex {
+    vec4 gl_Position;
+    float gl_ClipDistance[4];
+    float gl_CullDistance[4];
+};
+
+void main()
+{
+    for (int n = 0; n < 16; ++n)
+    {
+        gl_Position = vec4(n, 0.0, 0.0, 1.0);
+        EmitVertex();
+    }
+
+    EndPrimitive();
+})";
+
+    constexpr char kFS[] = R"(#version 310 es
+precision highp float;
+
+out vec4 result;
+
+void main()
+{
+    result = vec4(1.0);
+})";
+
+    ANGLE_GL_PROGRAM_WITH_GS(program, kVS, kGS, kFS);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Negative test using builtins that can only be used when redefining gl_PerVertex
+TEST_P(GLSLTest_ES31, PerVertexNegativeTest)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_geometry_shader"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_clip_cull_distance"));
+
+    constexpr char kVS[] = R"(#version 310 es
+void main()
+{
+    gl_Position = vec4(1.0, 0.0, 0.0, 1.0);
+})";
+
+    constexpr char kGS[] = R"(#version 310 es
+#extension GL_EXT_geometry_shader : require
+#extension GL_EXT_clip_cull_distance : require
+
+layout(lines_adjacency, invocations = 3) in;
+layout(points, max_vertices = 16) out;
+
+vec4 gl_Position;
+float gl_ClipDistance[4];
+float gl_CullDistance[4];
+
+void main()
+{
+    for (int n = 0; n < 16; ++n)
+    {
+        gl_Position = vec4(n, 0.0, 0.0, 1.0);
+        EmitVertex();
+    }
+
+    EndPrimitive();
+})";
+
+    constexpr char kFS[] = R"(#version 310 es
+precision highp float;
+
+out vec4 result;
+
+void main()
+{
+    result = vec4(1.0);
+})";
+
+    GLuint program = CompileProgramWithGS(kVS, kGS, kFS);
+    EXPECT_EQ(0u, program);
+    glDeleteProgram(program);
+}
+
+// Negative test using builtins that can only be used when redefining gl_PerVertex
+// but have the builtins in a differently named struct
+TEST_P(GLSLTest_ES31, PerVertexRenamedNegativeTest)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_geometry_shader"));
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_clip_cull_distance"));
+
+    constexpr char kVS[] = R"(#version 310 es
+void main()
+{
+    gl_Position = vec4(1.0, 0.0, 0.0, 1.0);
+})";
+
+    constexpr char kGS[] = R"(#version 310 es
+#extension GL_EXT_geometry_shader : require
+#extension GL_EXT_clip_cull_distance : require
+
+layout(lines_adjacency, invocations = 3) in;
+layout(points, max_vertices = 16) out;
+
+out Block {
+    vec4 gl_Position;
+    float gl_ClipDistance[4];
+    float gl_CullDistance[4];
+};
+
+void main()
+{
+    for (int n = 0; n < 16; ++n)
+    {
+        gl_Position = vec4(n, 0.0, 0.0, 1.0);
+        EmitVertex();
+    }
+
+    EndPrimitive();
+})";
+
+    constexpr char kFS[] = R"(#version 310 es
+precision highp float;
+
+out vec4 result;
+
+void main()
+{
+    result = vec4(1.0);
+})";
+
+    GLuint program = CompileProgramWithGS(kVS, kGS, kFS);
+    EXPECT_EQ(0u, program);
+    glDeleteProgram(program);
+}
+
 // Test varying packing in presence of multiple I/O blocks
 TEST_P(GLSLTest_ES31, MultipleIOBlocks)
 {
@@ -13896,10 +14506,9 @@ void main() {
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 }
 
+// Test that vector and matrix scalarization does not affect rendering.
 TEST_P(GLSLTest, VectorAndMatrixScalarizationDoesNotAffectRendering)
 {
-    ANGLE_SKIP_TEST_IF(IsWindows() && IsNVIDIA() && (IsOpenGL() || IsOpenGLES()));
-
     constexpr char kFS[] = R"(
 precision mediump float;
 
@@ -13987,6 +14596,46 @@ void main()
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 }
 
+// Tests initializing a nameless shader IO block using the shader translator option.
+TEST_P(GLSLTest_ES31_InitShaderVariables, InitIOBlockNameless)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_io_blocks"));
+
+    const char kVS[] = R"(#version 310 es
+#extension GL_EXT_shader_io_blocks : require
+in vec4 position;
+out BlockType {
+    vec4 blockMember;
+};
+
+void main()
+{
+    gl_Position = position;
+})";
+
+    const char kFS[] = R"(#version 310 es
+#extension GL_EXT_shader_io_blocks : require
+precision mediump float;
+out vec4 colorOut;
+in BlockType {
+    vec4 blockMember;
+};
+
+void main()
+{
+    if (blockMember == vec4(0)) {
+        colorOut = vec4(0, 1, 0, 1);
+    } else {
+        colorOut = vec4(1, 0, 0, 1);
+    }
+})";
+
+    ANGLE_GL_PROGRAM(testProgram, kVS, kFS);
+    drawQuad(testProgram, "position", 0.5f, 1.0f, true);
+    ASSERT_GL_NO_ERROR();
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+}
+
 // Tests initializing a shader IO block with an array using the shader translator option.
 TEST_P(GLSLTest_ES31_InitShaderVariables, InitIOBlockWithArray)
 {
@@ -14016,6 +14665,47 @@ void main()
 {
     if (BlockTypeOut.blockMember[0] == vec4(0) &&
         BlockTypeOut.blockMember[1] == vec4(0)) {
+        colorOut = vec4(0, 1, 0, 1);
+    } else {
+        colorOut = vec4(1, 0, 0, 1);
+    }
+})";
+
+    ANGLE_GL_PROGRAM(testProgram, kVS, kFS);
+    drawQuad(testProgram, "position", 0.5f, 1.0f, true);
+    ASSERT_GL_NO_ERROR();
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+}
+
+// Tests initializing a shader IO block array using the shader translator option.
+TEST_P(GLSLTest_ES31_InitShaderVariables, InitIOBlockArray)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_io_blocks"));
+
+    const char kVS[] = R"(#version 310 es
+#extension GL_EXT_shader_io_blocks : require
+in vec4 position;
+out BlockType {
+    vec4 blockMember;
+} BlockTypeOut[2];
+
+void main()
+{
+    gl_Position = position;
+})";
+
+    const char kFS[] = R"(#version 310 es
+#extension GL_EXT_shader_io_blocks : require
+precision mediump float;
+out vec4 colorOut;
+in BlockType {
+    vec4 blockMember;
+} BlockTypeOut[2];
+
+void main()
+{
+    if (BlockTypeOut[0].blockMember == vec4(0) &&
+        BlockTypeOut[1].blockMember == vec4(0)) {
         colorOut = vec4(0, 1, 0, 1);
     } else {
         colorOut = vec4(1, 0, 0, 1);
@@ -14268,6 +14958,32 @@ void main()
 {
     float data[10];
     f = data[false ? i : 5];
+})";
+
+    GLuint shader = glCreateShader(GL_FRAGMENT_SHADER);
+
+    const char *sourceArray[1] = {kFS};
+    GLint lengths[1]           = {static_cast<GLint>(sizeof(kFS) - 1)};
+    glShaderSource(shader, 1, sourceArray, lengths);
+    glCompileShader(shader);
+
+    GLint compileResult;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compileResult);
+    EXPECT_NE(compileResult, 0);
+}
+
+// Test that framebuffer fetch transforms gl_LastFragData in the presence of gl_FragCoord without
+// failing validation (adapted from a Chromium test, see anglebug.com/6951)
+TEST_P(GLSLTest, FramebufferFetchWithLastFragData)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+
+    constexpr char kFS[] = R"(#version 100
+
+#extension GL_EXT_shader_framebuffer_fetch : require
+varying mediump vec4 color;
+void main() {
+    gl_FragColor = length(gl_FragCoord.xy) * gl_LastFragData[0];
 })";
 
     GLuint shader = glCreateShader(GL_FRAGMENT_SHADER);

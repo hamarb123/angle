@@ -16,6 +16,7 @@
 #include "libANGLE/renderer/metal/DisplayMtl.h"
 #include "libANGLE/renderer/metal/mtl_buffer_pool.h"
 #include "libANGLE/renderer/metal/mtl_command_buffer.h"
+#include "libANGLE/renderer/metal/mtl_context_device.h"
 #include "libANGLE/renderer/metal/mtl_state_cache.h"
 namespace rx
 {
@@ -34,11 +35,23 @@ class ProvokingVertexHelper : public mtl::ProvokingVertexCacheSpecializeShaderFa
                                            bool primitiveRestartEnabled,
                                            gl::PrimitiveMode primitiveMode,
                                            gl::DrawElementsType elementsType,
-                                           size_t &outIndexcount,
+                                           size_t &outIndexCount,
+                                           size_t &outIndexOffset,
                                            gl::PrimitiveMode &outPrimitiveMode);
+
+    mtl::BufferRef generateIndexBuffer(ContextMtl *context,
+                                       size_t first,
+                                       size_t indexCount,
+                                       gl::PrimitiveMode primitiveMode,
+                                       gl::DrawElementsType elementsType,
+                                       size_t &outIndexCount,
+                                       size_t &outIndexOffset,
+                                       gl::PrimitiveMode &outPrimitiveMode);
+
     void commitPreconditionCommandBuffer(ContextMtl *context);
     void ensureCommandBufferReady();
     void onDestroy(ContextMtl *context);
+    mtl::ComputeCommandEncoder *getComputeCommandEncoder();
 
   private:
     id<MTLLibrary> mProvokingVertexLibrary;
@@ -48,7 +61,6 @@ class ProvokingVertexHelper : public mtl::ProvokingVertexCacheSpecializeShaderFa
     mtl::ProvokingVertexComputePipelineDesc mCachedDesc;
     mtl::ComputeCommandEncoder mCurrentEncoder;
 
-    mtl::ComputeCommandEncoder *getComputeCommandEncoder();
     // Program cache
     virtual angle::Result getSpecializedShader(
         rx::mtl::Context *context,

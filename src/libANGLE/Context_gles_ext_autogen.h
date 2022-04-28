@@ -47,6 +47,24 @@
                                                                                                    \
     /* GLES2+ Extensions */                                                                        \
                                                                                                    \
+    /* GL_AMD_performance_monitor */                                                               \
+    void beginPerfMonitor(GLuint monitor);                                                         \
+    void deletePerfMonitors(GLsizei n, GLuint *monitors);                                          \
+    void endPerfMonitor(GLuint monitor);                                                           \
+    void genPerfMonitors(GLsizei n, GLuint *monitors);                                             \
+    void getPerfMonitorCounterData(GLuint monitor, GLenum pname, GLsizei dataSize, GLuint *data,   \
+                                   GLint *bytesWritten);                                           \
+    void getPerfMonitorCounterInfo(GLuint group, GLuint counter, GLenum pname, void *data);        \
+    void getPerfMonitorCounterString(GLuint group, GLuint counter, GLsizei bufSize,                \
+                                     GLsizei *length, GLchar *counterString);                      \
+    void getPerfMonitorCounters(GLuint group, GLint *numCounters, GLint *maxActiveCounters,        \
+                                GLsizei counterSize, GLuint *counters);                            \
+    void getPerfMonitorGroupString(GLuint group, GLsizei bufSize, GLsizei *length,                 \
+                                   GLchar *groupString);                                           \
+    void getPerfMonitorGroups(GLint *numGroups, GLsizei groupsSize, GLuint *groups);               \
+    void selectPerfMonitorCounters(GLuint monitor, GLboolean enable, GLuint group,                 \
+                                   GLint numCounters, GLuint *counterList);                        \
+    /* GL_ANDROID_extension_pack_es31a */                                                          \
     /* GL_ANGLE_depth_texture */                                                                   \
     /* GL_ANGLE_framebuffer_blit */                                                                \
     /* GL_ANGLE_instanced_arrays */                                                                \
@@ -141,6 +159,11 @@
     /* GL_EXT_memory_object_fd */                                                                  \
     void importMemoryFd(MemoryObjectID memoryPacked, GLuint64 size, HandleType handleTypePacked,   \
                         GLint fd);                                                                 \
+    /* GL_EXT_multi_draw_indirect */                                                               \
+    void multiDrawArraysIndirect(PrimitiveMode modePacked, const void *indirect,                   \
+                                 GLsizei drawcount, GLsizei stride);                               \
+    void multiDrawElementsIndirect(PrimitiveMode modePacked, DrawElementsType typePacked,          \
+                                   const void *indirect, GLsizei drawcount, GLsizei stride);       \
     /* GL_EXT_multisample_compatibility */                                                         \
     /* GL_EXT_multisampled_render_to_texture */                                                    \
     void framebufferTexture2DMultisample(GLenum target, GLenum attachment,                         \
@@ -173,6 +196,7 @@
     /* GL_EXT_semaphore_fd */                                                                      \
     void importSemaphoreFd(SemaphoreID semaphorePacked, HandleType handleTypePacked, GLint fd);    \
     /* GL_EXT_separate_shader_objects */                                                           \
+    /* GL_EXT_shader_framebuffer_fetch */                                                          \
     /* GL_EXT_shader_framebuffer_fetch_non_coherent */                                             \
     void framebufferFetchBarrier();                                                                \
     /* GL_EXT_shader_io_blocks */                                                                  \
@@ -211,6 +235,9 @@
     /* GL_KHR_texture_compression_astc_hdr */                                                      \
     /* GL_KHR_texture_compression_astc_ldr */                                                      \
     /* GL_KHR_texture_compression_astc_sliced_3d */                                                \
+    /* GL_MESA_framebuffer_flip_y */                                                               \
+    void framebufferParameteriMESA(GLenum target, GLenum pname, GLint param);                      \
+    void getFramebufferParameterivMESA(GLenum target, GLenum pname, GLint *params);                \
     /* GL_NV_EGL_stream_consumer_external */                                                       \
     /* GL_NV_depth_buffer_float2 */                                                                \
     /* GL_NV_fence */                                                                              \
@@ -261,6 +288,7 @@
     /* GL_OES_mapbuffer */                                                                         \
     void *mapBuffer(BufferBinding targetPacked, GLenum access);                                    \
     /* GL_OES_packed_depth_stencil */                                                              \
+    /* GL_OES_primitive_bounding_box */                                                            \
     /* GL_OES_rgb8_rgba8 */                                                                        \
     /* GL_OES_sample_shading */                                                                    \
     /* GL_OES_sample_variables */                                                                  \
@@ -299,7 +327,7 @@
                                          GLsizei instanceCount, GLuint baseInstance);              \
     void drawElementsInstancedBaseVertexBaseInstance(                                              \
         PrimitiveMode modePacked, GLsizei count, DrawElementsType typePacked,                      \
-        const GLvoid *indices, GLsizei instanceCounts, GLint baseVertex, GLuint baseInstance);     \
+        const GLvoid *indices, GLsizei instanceCount, GLint baseVertex, GLuint baseInstance);      \
     void multiDrawArraysInstancedBaseInstance(                                                     \
         PrimitiveMode modePacked, const GLint *firsts, const GLsizei *counts,                      \
         const GLsizei *instanceCounts, const GLuint *baseInstances, GLsizei drawcount);            \
@@ -307,6 +335,7 @@
         PrimitiveMode modePacked, const GLsizei *counts, DrawElementsType typePacked,              \
         const GLvoid *const *indices, const GLsizei *instanceCounts, const GLint *baseVertices,    \
         const GLuint *baseInstances, GLsizei drawcount);                                           \
+    /* GL_ANGLE_base_vertex_base_instance_shader_builtin */                                        \
     /* GL_ANGLE_client_arrays */                                                                   \
     /* GL_ANGLE_compressed_texture_etc */                                                          \
     /* GL_ANGLE_copy_texture_3d */                                                                 \
@@ -331,20 +360,22 @@
     /* GL_ANGLE_memory_object_flags */                                                             \
     void texStorageMemFlags2D(TextureType targetPacked, GLsizei levels, GLenum internalFormat,     \
                               GLsizei width, GLsizei height, MemoryObjectID memoryPacked,          \
-                              GLuint64 offset, GLbitfield createFlags, GLbitfield usageFlags);     \
+                              GLuint64 offset, GLbitfield createFlags, GLbitfield usageFlags,      \
+                              const void *imageCreateInfoPNext);                                   \
     void texStorageMemFlags2DMultisample(                                                          \
         TextureType targetPacked, GLsizei samples, GLenum internalFormat, GLsizei width,           \
         GLsizei height, GLboolean fixedSampleLocations, MemoryObjectID memoryPacked,               \
-        GLuint64 offset, GLbitfield createFlags, GLbitfield usageFlags);                           \
-    void texStorageMemFlags3D(TextureType targetPacked, GLsizei levels, GLenum internalFormat,     \
-                              GLsizei width, GLsizei height, GLsizei depth,                        \
-                              MemoryObjectID memoryPacked, GLuint64 offset,                        \
-                              GLbitfield createFlags, GLbitfield usageFlags);                      \
-    void texStorageMemFlags3DMultisample(TextureType targetPacked, GLsizei samples,                \
-                                         GLenum internalFormat, GLsizei width, GLsizei height,     \
-                                         GLsizei depth, GLboolean fixedSampleLocations,            \
-                                         MemoryObjectID memoryPacked, GLuint64 offset,             \
-                                         GLbitfield createFlags, GLbitfield usageFlags);           \
+        GLuint64 offset, GLbitfield createFlags, GLbitfield usageFlags,                            \
+        const void *imageCreateInfoPNext);                                                         \
+    void texStorageMemFlags3D(                                                                     \
+        TextureType targetPacked, GLsizei levels, GLenum internalFormat, GLsizei width,            \
+        GLsizei height, GLsizei depth, MemoryObjectID memoryPacked, GLuint64 offset,               \
+        GLbitfield createFlags, GLbitfield usageFlags, const void *imageCreateInfoPNext);          \
+    void texStorageMemFlags3DMultisample(                                                          \
+        TextureType targetPacked, GLsizei samples, GLenum internalFormat, GLsizei width,           \
+        GLsizei height, GLsizei depth, GLboolean fixedSampleLocations,                             \
+        MemoryObjectID memoryPacked, GLuint64 offset, GLbitfield createFlags,                      \
+        GLbitfield usageFlags, const void *imageCreateInfoPNext);                                  \
     /* GL_ANGLE_memory_object_fuchsia */                                                           \
     void importMemoryZirconHandle(MemoryObjectID memoryPacked, GLuint64 size,                      \
                                   HandleType handleTypePacked, GLuint handle);                     \
@@ -370,6 +401,7 @@
     /* GL_ANGLE_request_extension */                                                               \
     void requestExtension(const GLchar *name);                                                     \
     void disableExtension(const GLchar *name);                                                     \
+    /* GL_ANGLE_rgbx_internal_format */                                                            \
     /* GL_ANGLE_robust_client_memory */                                                            \
     void getBooleanvRobust(GLenum pname, GLsizei bufSize, GLsizei *length, GLboolean *params);     \
     void getBufferParameterivRobust(BufferBinding targetPacked, GLenum pname, GLsizei bufSize,     \
@@ -525,6 +557,10 @@
     void invalidateTexture(TextureType targetPacked);                                              \
     /* GL_ANGLE_texture_multisample */                                                             \
     /* GL_ANGLE_texture_rectangle */                                                               \
+    /* GL_ANGLE_vulkan_image */                                                                    \
+    void acquireTextures(GLuint numTextures, const TextureID *texturesPacked,                      \
+                         const GLenum *layouts);                                                   \
+    void releaseTextures(GLuint numTextures, const TextureID *texturesPacked, GLenum *layouts);    \
     /* GL_ANGLE_webgl_compatibility */                                                             \
     /* GL_ANGLE_yuv_internal_format */                                                             \
     /* GL_CHROMIUM_bind_generates_resource */                                                      \

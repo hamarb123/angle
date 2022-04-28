@@ -38,6 +38,7 @@ enum class Command
     Dispatch,
     Draw,
     GenerateMipmap,
+    Invalidate,
     ReadPixels,
     TexImage,
     Other
@@ -664,7 +665,7 @@ class BlendStateExt final
 
     ///////// Blend Equation /////////
 
-    EquationStorage::Type expandEquationValue(const GLenum mode) const;
+    EquationStorage::Type expandEquationValue(const gl::BlendEquationType equation) const;
     EquationStorage::Type expandEquationColorIndexed(const size_t index) const;
     EquationStorage::Type expandEquationAlphaIndexed(const size_t index) const;
     void setEquations(const GLenum modeColor, const GLenum modeAlpha);
@@ -720,6 +721,8 @@ class BlendStateExt final
 
     DrawBufferMask mMaxEnabledMask;
     DrawBufferMask mEnabledMask;
+    // Cache of whether the blend equation for each index is from KHR_blend_equation_advanced.
+    DrawBufferMask mUsesAdvancedBlendEquationMask;
 
     size_t mMaxDrawBuffers;
 };

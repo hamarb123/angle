@@ -449,9 +449,13 @@ EGLBoolean Initialize(Thread *thread, Display *display, EGLint *major, EGLint *m
                          EGL_FALSE);
 
     if (major)
-        *major = 1;
+    {
+        *major = kEglMajorVersion;
+    }
     if (minor)
-        *minor = 5;
+    {
+        *minor = kEglMinorVersion;
+    }
 
     thread->setSuccess();
     return EGL_TRUE;
@@ -620,7 +624,9 @@ EGLBoolean SurfaceAttrib(Thread *thread,
 {
     ANGLE_EGL_TRY_RETURN(thread, display->prepareForCall(), "eglSurfaceAttrib",
                          GetDisplayIfValid(display), EGL_FALSE);
-    SetSurfaceAttrib(eglSurface, attribute, value);
+
+    ANGLE_EGL_TRY_RETURN(thread, SetSurfaceAttrib(eglSurface, attribute, value), "eglSurfaceAttrib",
+                         GetDisplayIfValid(display), EGL_FALSE);
 
     thread->setSuccess();
     return EGL_TRUE;
@@ -661,8 +667,8 @@ EGLBoolean Terminate(Thread *thread, Display *display)
 
     ScopedSyncCurrentContextFromThread scopedSyncCurrent(thread);
 
-    ANGLE_EGL_TRY_RETURN(thread, display->terminate(thread), "eglTerminate",
-                         GetDisplayIfValid(display), EGL_FALSE);
+    ANGLE_EGL_TRY_RETURN(thread, display->terminate(thread, Display::TerminateReason::Api),
+                         "eglTerminate", GetDisplayIfValid(display), EGL_FALSE);
 
     thread->setSuccess();
     return EGL_TRUE;

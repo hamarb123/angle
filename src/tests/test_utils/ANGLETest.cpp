@@ -224,6 +224,13 @@ GLColorRGB::GLColorRGB(const Vector3 &floatColor)
     : R(ColorDenorm(floatColor.x())), G(ColorDenorm(floatColor.y())), B(ColorDenorm(floatColor.z()))
 {}
 
+GLColor::GLColor(const Vector3 &floatColor)
+    : R(ColorDenorm(floatColor.x())),
+      G(ColorDenorm(floatColor.y())),
+      B(ColorDenorm(floatColor.z())),
+      A(255)
+{}
+
 GLColor::GLColor(const Vector4 &floatColor)
     : R(ColorDenorm(floatColor.x())),
       G(ColorDenorm(floatColor.y())),
@@ -384,6 +391,7 @@ constexpr char kEnableANGLEPerTestCaptureLabel[] = "--angle-per-test-capture-lab
 constexpr char kBatchId[]                        = "--batch-id=";
 constexpr char kDelayTestStart[]                 = "--delay-test-start=";
 constexpr char kRenderDoc[]                      = "--renderdoc";
+constexpr char kNoRenderDoc[]                    = "--no-renderdoc";
 
 void SetupEnvironmentVarsForCaptureReplay()
 {
@@ -408,7 +416,11 @@ void SetTestStartDelay(const char *testStartDelay)
     gTestStartDelaySeconds = std::stoi(testStartDelay);
 }
 
+#if defined(ANGLE_TEST_ENABLE_RENDERDOC_CAPTURE)
+bool gEnableRenderDocCapture = true;
+#else
 bool gEnableRenderDocCapture = false;
+#endif
 
 // static
 std::array<Vector3, 6> ANGLETestBase::GetQuadVertices()
@@ -1048,7 +1060,7 @@ void ANGLETestBase::drawIndexedQuad(GLuint program,
                                     GLfloat positionAttribZ,
                                     GLfloat positionAttribXYScale)
 {
-    ASSERT(!mFixture->configParams.webGLCompatibility.valid() ||
+    ASSERT(!mFixture || !mFixture->configParams.webGLCompatibility.valid() ||
            !mFixture->configParams.webGLCompatibility.value());
     drawIndexedQuad(program, positionAttribName, positionAttribZ, positionAttribXYScale, false);
 }
@@ -1598,6 +1610,10 @@ void ANGLEProcessTestArgs(int *argc, char *argv[])
         else if (strncmp(argv[argIndex], kRenderDoc, strlen(kRenderDoc)) == 0)
         {
             gEnableRenderDocCapture = true;
+        }
+        else if (strncmp(argv[argIndex], kNoRenderDoc, strlen(kNoRenderDoc)) == 0)
+        {
+            gEnableRenderDocCapture = false;
         }
     }
 }

@@ -273,6 +273,24 @@ std::ostream &operator<<(std::ostream &stream, const PlatformParameters &pp)
         stream << "_NoVulkanViewportFlip";
     }
 
+    if (pp.eglParameters.supportsVulkanMultiDrawIndirect == EGL_TRUE)
+    {
+        stream << "_VulkanMultiDrawIndirect";
+    }
+    else if (pp.eglParameters.supportsVulkanMultiDrawIndirect == EGL_FALSE)
+    {
+        stream << "_VulkanNoMultiDrawIndirect";
+    }
+
+    if (pp.eglParameters.WithVulkanPreferCPUForBufferSubData == EGL_TRUE)
+    {
+        stream << "_VulkanPreferCPUForBufferSubData";
+    }
+    else if (pp.eglParameters.WithVulkanPreferCPUForBufferSubData == EGL_FALSE)
+    {
+        stream << "_VulkanNoPreferCPUForBufferSubData";
+    }
+
     if (pp.eglParameters.emulatedVAOs == EGL_TRUE)
     {
         stream << "_EmulatedVAOs";
@@ -296,6 +314,26 @@ std::ostream &operator<<(std::ostream &stream, const PlatformParameters &pp)
     if (pp.eglParameters.forceVulkanFallbackFormat == EGL_TRUE)
     {
         stream << "_FallbackFormat";
+    }
+
+    if (pp.eglParameters.displayPowerPreference == EGL_LOW_POWER_ANGLE)
+    {
+        stream << "_LowPowerGPU";
+    }
+
+    if (pp.eglParameters.displayPowerPreference == EGL_HIGH_POWER_ANGLE)
+    {
+        stream << "_HighPowerGPU";
+    }
+
+    if (pp.eglParameters.forceSubmitImmutableTextureUpdates == EGL_TRUE)
+    {
+        stream << "_VulkanForceSubmitImmutableTextureUpdates";
+    }
+
+    if (pp.eglParameters.createPipelineDuringLink == EGL_TRUE)
+    {
+        stream << "_CreatePipelineDuringLink";
     }
 
     return stream;

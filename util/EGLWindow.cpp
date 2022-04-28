@@ -196,6 +196,12 @@ bool EGLWindow::initializeDisplay(OSWindow *osWindow,
         displayAttributes.push_back(reinterpret_cast<EGLAttrib>(params.platformMethods));
     }
 
+    if (params.displayPowerPreference != EGL_DONT_CARE)
+    {
+        displayAttributes.push_back(EGL_POWER_PREFERENCE_ANGLE);
+        displayAttributes.push_back(params.displayPowerPreference);
+    }
+
     std::vector<const char *> disabledFeatureOverrides;
     std::vector<const char *> enabledFeatureOverrides;
 
@@ -237,6 +243,24 @@ bool EGLWindow::initializeDisplay(OSWindow *osWindow,
     else if (params.supportsVulkanViewportFlip == EGL_FALSE)
     {
         disabledFeatureOverrides.push_back("supportsViewportFlip");
+    }
+
+    if (params.supportsVulkanMultiDrawIndirect == EGL_TRUE)
+    {
+        enabledFeatureOverrides.push_back("supportsMultiDrawIndirect");
+    }
+    else if (params.supportsVulkanMultiDrawIndirect == EGL_FALSE)
+    {
+        disabledFeatureOverrides.push_back("supportsMultiDrawIndirect");
+    }
+
+    if (params.WithVulkanPreferCPUForBufferSubData == EGL_TRUE)
+    {
+        enabledFeatureOverrides.push_back("preferCPUForBufferSubData");
+    }
+    else if (params.WithVulkanPreferCPUForBufferSubData == EGL_FALSE)
+    {
+        disabledFeatureOverrides.push_back("preferCPUForBufferSubData");
     }
 
     switch (params.emulatedPrerotation)
@@ -307,6 +331,16 @@ bool EGLWindow::initializeDisplay(OSWindow *osWindow,
     if (params.forceVulkanFallbackFormat == EGL_TRUE)
     {
         enabledFeatureOverrides.push_back("forceFallbackFormat");
+    }
+
+    if (params.forceSubmitImmutableTextureUpdates == EGL_TRUE)
+    {
+        enabledFeatureOverrides.push_back("forceSubmitImmutableTextureUpdates");
+    }
+
+    if (params.createPipelineDuringLink == EGL_TRUE)
+    {
+        enabledFeatureOverrides.push_back("createPipelineDuringLink");
     }
 
     const bool hasFeatureControlANGLE =
@@ -804,11 +838,14 @@ bool EGLWindow::makeCurrent()
 
 bool EGLWindow::makeCurrent(EGLContext context)
 {
-    if (eglMakeCurrent(mDisplay, mSurface, mSurface, context) == EGL_FALSE ||
-        eglGetError() != EGL_SUCCESS)
+    if (isGLInitialized())
     {
-        fprintf(stderr, "Error during eglMakeCurrent.\n");
-        return false;
+        if (eglMakeCurrent(mDisplay, mSurface, mSurface, context) == EGL_FALSE ||
+            eglGetError() != EGL_SUCCESS)
+        {
+            fprintf(stderr, "Error during eglMakeCurrent.\n");
+            return false;
+        }
     }
 
     return true;

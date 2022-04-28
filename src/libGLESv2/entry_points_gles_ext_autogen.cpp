@@ -36,6 +36,324 @@ using namespace gl;
 
 extern "C" {
 
+// GL_AMD_performance_monitor
+void GL_APIENTRY GL_BeginPerfMonitorAMD(GLuint monitor)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLBeginPerfMonitorAMD, "context = %d, monitor = %u", CID(context), monitor);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateBeginPerfMonitorAMD(
+                                context, angle::EntryPoint::GLBeginPerfMonitorAMD, monitor));
+        if (isCallValid)
+        {
+            context->beginPerfMonitor(monitor);
+        }
+        ANGLE_CAPTURE(BeginPerfMonitorAMD, isCallValid, context, monitor);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_DeletePerfMonitorsAMD(GLsizei n, GLuint *monitors)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLDeletePerfMonitorsAMD, "context = %d, n = %d, monitors = 0x%016" PRIxPTR "",
+          CID(context), n, (uintptr_t)monitors);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateDeletePerfMonitorsAMD(
+                                context, angle::EntryPoint::GLDeletePerfMonitorsAMD, n, monitors));
+        if (isCallValid)
+        {
+            context->deletePerfMonitors(n, monitors);
+        }
+        ANGLE_CAPTURE(DeletePerfMonitorsAMD, isCallValid, context, n, monitors);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_EndPerfMonitorAMD(GLuint monitor)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLEndPerfMonitorAMD, "context = %d, monitor = %u", CID(context), monitor);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid =
+            (context->skipValidation() ||
+             ValidateEndPerfMonitorAMD(context, angle::EntryPoint::GLEndPerfMonitorAMD, monitor));
+        if (isCallValid)
+        {
+            context->endPerfMonitor(monitor);
+        }
+        ANGLE_CAPTURE(EndPerfMonitorAMD, isCallValid, context, monitor);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_GenPerfMonitorsAMD(GLsizei n, GLuint *monitors)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLGenPerfMonitorsAMD, "context = %d, n = %d, monitors = 0x%016" PRIxPTR "",
+          CID(context), n, (uintptr_t)monitors);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateGenPerfMonitorsAMD(
+                                context, angle::EntryPoint::GLGenPerfMonitorsAMD, n, monitors));
+        if (isCallValid)
+        {
+            context->genPerfMonitors(n, monitors);
+        }
+        ANGLE_CAPTURE(GenPerfMonitorsAMD, isCallValid, context, n, monitors);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_GetPerfMonitorCounterDataAMD(GLuint monitor,
+                                                 GLenum pname,
+                                                 GLsizei dataSize,
+                                                 GLuint *data,
+                                                 GLint *bytesWritten)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLGetPerfMonitorCounterDataAMD,
+          "context = %d, monitor = %u, pname = %s, dataSize = %d, data = 0x%016" PRIxPTR
+          ", bytesWritten = 0x%016" PRIxPTR "",
+          CID(context), monitor, GLenumToString(GLenumGroup::DefaultGroup, pname), dataSize,
+          (uintptr_t)data, (uintptr_t)bytesWritten);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateGetPerfMonitorCounterDataAMD(
+                                context, angle::EntryPoint::GLGetPerfMonitorCounterDataAMD, monitor,
+                                pname, dataSize, data, bytesWritten));
+        if (isCallValid)
+        {
+            context->getPerfMonitorCounterData(monitor, pname, dataSize, data, bytesWritten);
+        }
+        ANGLE_CAPTURE(GetPerfMonitorCounterDataAMD, isCallValid, context, monitor, pname, dataSize,
+                      data, bytesWritten);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_GetPerfMonitorCounterInfoAMD(GLuint group,
+                                                 GLuint counter,
+                                                 GLenum pname,
+                                                 void *data)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLGetPerfMonitorCounterInfoAMD,
+          "context = %d, group = %u, counter = %u, pname = %s, data = 0x%016" PRIxPTR "",
+          CID(context), group, counter, GLenumToString(GLenumGroup::DefaultGroup, pname),
+          (uintptr_t)data);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateGetPerfMonitorCounterInfoAMD(
+                                context, angle::EntryPoint::GLGetPerfMonitorCounterInfoAMD, group,
+                                counter, pname, data));
+        if (isCallValid)
+        {
+            context->getPerfMonitorCounterInfo(group, counter, pname, data);
+        }
+        ANGLE_CAPTURE(GetPerfMonitorCounterInfoAMD, isCallValid, context, group, counter, pname,
+                      data);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_GetPerfMonitorCounterStringAMD(GLuint group,
+                                                   GLuint counter,
+                                                   GLsizei bufSize,
+                                                   GLsizei *length,
+                                                   GLchar *counterString)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLGetPerfMonitorCounterStringAMD,
+          "context = %d, group = %u, counter = %u, bufSize = %d, length = 0x%016" PRIxPTR
+          ", counterString = 0x%016" PRIxPTR "",
+          CID(context), group, counter, bufSize, (uintptr_t)length, (uintptr_t)counterString);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateGetPerfMonitorCounterStringAMD(
+                                context, angle::EntryPoint::GLGetPerfMonitorCounterStringAMD, group,
+                                counter, bufSize, length, counterString));
+        if (isCallValid)
+        {
+            context->getPerfMonitorCounterString(group, counter, bufSize, length, counterString);
+        }
+        ANGLE_CAPTURE(GetPerfMonitorCounterStringAMD, isCallValid, context, group, counter, bufSize,
+                      length, counterString);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_GetPerfMonitorCountersAMD(GLuint group,
+                                              GLint *numCounters,
+                                              GLint *maxActiveCounters,
+                                              GLsizei counterSize,
+                                              GLuint *counters)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLGetPerfMonitorCountersAMD,
+          "context = %d, group = %u, numCounters = 0x%016" PRIxPTR
+          ", maxActiveCounters = 0x%016" PRIxPTR ", counterSize = %d, counters = 0x%016" PRIxPTR "",
+          CID(context), group, (uintptr_t)numCounters, (uintptr_t)maxActiveCounters, counterSize,
+          (uintptr_t)counters);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateGetPerfMonitorCountersAMD(
+                                context, angle::EntryPoint::GLGetPerfMonitorCountersAMD, group,
+                                numCounters, maxActiveCounters, counterSize, counters));
+        if (isCallValid)
+        {
+            context->getPerfMonitorCounters(group, numCounters, maxActiveCounters, counterSize,
+                                            counters);
+        }
+        ANGLE_CAPTURE(GetPerfMonitorCountersAMD, isCallValid, context, group, numCounters,
+                      maxActiveCounters, counterSize, counters);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_GetPerfMonitorGroupStringAMD(GLuint group,
+                                                 GLsizei bufSize,
+                                                 GLsizei *length,
+                                                 GLchar *groupString)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLGetPerfMonitorGroupStringAMD,
+          "context = %d, group = %u, bufSize = %d, length = 0x%016" PRIxPTR
+          ", groupString = 0x%016" PRIxPTR "",
+          CID(context), group, bufSize, (uintptr_t)length, (uintptr_t)groupString);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateGetPerfMonitorGroupStringAMD(
+                                context, angle::EntryPoint::GLGetPerfMonitorGroupStringAMD, group,
+                                bufSize, length, groupString));
+        if (isCallValid)
+        {
+            context->getPerfMonitorGroupString(group, bufSize, length, groupString);
+        }
+        ANGLE_CAPTURE(GetPerfMonitorGroupStringAMD, isCallValid, context, group, bufSize, length,
+                      groupString);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_GetPerfMonitorGroupsAMD(GLint *numGroups, GLsizei groupsSize, GLuint *groups)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLGetPerfMonitorGroupsAMD,
+          "context = %d, numGroups = 0x%016" PRIxPTR ", groupsSize = %d, groups = 0x%016" PRIxPTR
+          "",
+          CID(context), (uintptr_t)numGroups, groupsSize, (uintptr_t)groups);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid =
+            (context->skipValidation() ||
+             ValidateGetPerfMonitorGroupsAMD(context, angle::EntryPoint::GLGetPerfMonitorGroupsAMD,
+                                             numGroups, groupsSize, groups));
+        if (isCallValid)
+        {
+            context->getPerfMonitorGroups(numGroups, groupsSize, groups);
+        }
+        ANGLE_CAPTURE(GetPerfMonitorGroupsAMD, isCallValid, context, numGroups, groupsSize, groups);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_SelectPerfMonitorCountersAMD(GLuint monitor,
+                                                 GLboolean enable,
+                                                 GLuint group,
+                                                 GLint numCounters,
+                                                 GLuint *counterList)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLSelectPerfMonitorCountersAMD,
+          "context = %d, monitor = %u, enable = %s, group = %u, numCounters = %d, counterList = "
+          "0x%016" PRIxPTR "",
+          CID(context), monitor, GLbooleanToString(enable), group, numCounters,
+          (uintptr_t)counterList);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateSelectPerfMonitorCountersAMD(
+                                context, angle::EntryPoint::GLSelectPerfMonitorCountersAMD, monitor,
+                                enable, group, numCounters, counterList));
+        if (isCallValid)
+        {
+            context->selectPerfMonitorCounters(monitor, enable, group, numCounters, counterList);
+        }
+        ANGLE_CAPTURE(SelectPerfMonitorCountersAMD, isCallValid, context, monitor, enable, group,
+                      numCounters, counterList);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+// GL_ANDROID_extension_pack_es31a
+
 // GL_ANGLE_base_vertex_base_instance
 void GL_APIENTRY GL_DrawArraysInstancedBaseInstanceANGLE(GLenum mode,
                                                          GLint first,
@@ -75,16 +393,16 @@ void GL_APIENTRY GL_DrawElementsInstancedBaseVertexBaseInstanceANGLE(GLenum mode
                                                                      GLsizei count,
                                                                      GLenum type,
                                                                      const GLvoid *indices,
-                                                                     GLsizei instanceCounts,
+                                                                     GLsizei instanceCount,
                                                                      GLint baseVertex,
                                                                      GLuint baseInstance)
 {
     Context *context = GetValidGlobalContext();
     EVENT(context, GLDrawElementsInstancedBaseVertexBaseInstanceANGLE,
           "context = %d, mode = %s, count = %d, type = %s, indices = 0x%016" PRIxPTR
-          ", instanceCounts = %d, baseVertex = %d, baseInstance = %u",
+          ", instanceCount = %d, baseVertex = %d, baseInstance = %u",
           CID(context), GLenumToString(GLenumGroup::PrimitiveType, mode), count,
-          GLenumToString(GLenumGroup::DrawElementsType, type), (uintptr_t)indices, instanceCounts,
+          GLenumToString(GLenumGroup::DrawElementsType, type), (uintptr_t)indices, instanceCount,
           baseVertex, baseInstance);
 
     if (context)
@@ -96,14 +414,14 @@ void GL_APIENTRY GL_DrawElementsInstancedBaseVertexBaseInstanceANGLE(GLenum mode
             (context->skipValidation() ||
              ValidateDrawElementsInstancedBaseVertexBaseInstanceANGLE(
                  context, angle::EntryPoint::GLDrawElementsInstancedBaseVertexBaseInstanceANGLE,
-                 modePacked, count, typePacked, indices, instanceCounts, baseVertex, baseInstance));
+                 modePacked, count, typePacked, indices, instanceCount, baseVertex, baseInstance));
         if (isCallValid)
         {
             context->drawElementsInstancedBaseVertexBaseInstance(
-                modePacked, count, typePacked, indices, instanceCounts, baseVertex, baseInstance);
+                modePacked, count, typePacked, indices, instanceCount, baseVertex, baseInstance);
         }
         ANGLE_CAPTURE(DrawElementsInstancedBaseVertexBaseInstanceANGLE, isCallValid, context,
-                      modePacked, count, typePacked, indices, instanceCounts, baseVertex,
+                      modePacked, count, typePacked, indices, instanceCount, baseVertex,
                       baseInstance);
     }
     else
@@ -639,35 +957,40 @@ void GL_APIENTRY GL_TexStorageMemFlags2DANGLE(GLenum target,
                                               GLuint memory,
                                               GLuint64 offset,
                                               GLbitfield createFlags,
-                                              GLbitfield usageFlags)
+                                              GLbitfield usageFlags,
+                                              const void *imageCreateInfoPNext)
 {
     Context *context = GetValidGlobalContext();
     EVENT(context, GLTexStorageMemFlags2DANGLE,
           "context = %d, target = %s, levels = %d, internalFormat = %s, width = %d, height = %d, "
-          "memory = %u, offset = %llu, createFlags = %s, usageFlags = %s",
+          "memory = %u, offset = %llu, createFlags = %s, usageFlags = %s, imageCreateInfoPNext = "
+          "0x%016" PRIxPTR "",
           CID(context), GLenumToString(GLenumGroup::TextureTarget, target), levels,
           GLenumToString(GLenumGroup::DefaultGroup, internalFormat), width, height, memory,
           static_cast<unsigned long long>(offset),
           GLbitfieldToString(GLenumGroup::DefaultGroup, createFlags).c_str(),
-          GLbitfieldToString(GLenumGroup::DefaultGroup, usageFlags).c_str());
+          GLbitfieldToString(GLenumGroup::DefaultGroup, usageFlags).c_str(),
+          (uintptr_t)imageCreateInfoPNext);
 
     if (context)
     {
         TextureType targetPacked                              = PackParam<TextureType>(target);
         MemoryObjectID memoryPacked                           = PackParam<MemoryObjectID>(memory);
         std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
-        bool isCallValid =
-            (context->skipValidation() ||
-             ValidateTexStorageMemFlags2DANGLE(
-                 context, angle::EntryPoint::GLTexStorageMemFlags2DANGLE, targetPacked, levels,
-                 internalFormat, width, height, memoryPacked, offset, createFlags, usageFlags));
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateTexStorageMemFlags2DANGLE(
+                                context, angle::EntryPoint::GLTexStorageMemFlags2DANGLE,
+                                targetPacked, levels, internalFormat, width, height, memoryPacked,
+                                offset, createFlags, usageFlags, imageCreateInfoPNext));
         if (isCallValid)
         {
             context->texStorageMemFlags2D(targetPacked, levels, internalFormat, width, height,
-                                          memoryPacked, offset, createFlags, usageFlags);
+                                          memoryPacked, offset, createFlags, usageFlags,
+                                          imageCreateInfoPNext);
         }
         ANGLE_CAPTURE(TexStorageMemFlags2DANGLE, isCallValid, context, targetPacked, levels,
-                      internalFormat, width, height, memoryPacked, offset, createFlags, usageFlags);
+                      internalFormat, width, height, memoryPacked, offset, createFlags, usageFlags,
+                      imageCreateInfoPNext);
     }
     else
     {
@@ -684,18 +1007,20 @@ void GL_APIENTRY GL_TexStorageMemFlags2DMultisampleANGLE(GLenum target,
                                                          GLuint memory,
                                                          GLuint64 offset,
                                                          GLbitfield createFlags,
-                                                         GLbitfield usageFlags)
+                                                         GLbitfield usageFlags,
+                                                         const void *imageCreateInfoPNext)
 {
     Context *context = GetValidGlobalContext();
-    EVENT(
-        context, GLTexStorageMemFlags2DMultisampleANGLE,
-        "context = %d, target = %s, samples = %d, internalFormat = %s, width = %d, height = %d, "
-        "fixedSampleLocations = %s, memory = %u, offset = %llu, createFlags = %s, usageFlags = %s",
-        CID(context), GLenumToString(GLenumGroup::TextureTarget, target), samples,
-        GLenumToString(GLenumGroup::DefaultGroup, internalFormat), width, height,
-        GLbooleanToString(fixedSampleLocations), memory, static_cast<unsigned long long>(offset),
-        GLbitfieldToString(GLenumGroup::DefaultGroup, createFlags).c_str(),
-        GLbitfieldToString(GLenumGroup::DefaultGroup, usageFlags).c_str());
+    EVENT(context, GLTexStorageMemFlags2DMultisampleANGLE,
+          "context = %d, target = %s, samples = %d, internalFormat = %s, width = %d, height = %d, "
+          "fixedSampleLocations = %s, memory = %u, offset = %llu, createFlags = %s, usageFlags = "
+          "%s, imageCreateInfoPNext = 0x%016" PRIxPTR "",
+          CID(context), GLenumToString(GLenumGroup::TextureTarget, target), samples,
+          GLenumToString(GLenumGroup::DefaultGroup, internalFormat), width, height,
+          GLbooleanToString(fixedSampleLocations), memory, static_cast<unsigned long long>(offset),
+          GLbitfieldToString(GLenumGroup::DefaultGroup, createFlags).c_str(),
+          GLbitfieldToString(GLenumGroup::DefaultGroup, usageFlags).c_str(),
+          (uintptr_t)imageCreateInfoPNext);
 
     if (context)
     {
@@ -707,16 +1032,16 @@ void GL_APIENTRY GL_TexStorageMemFlags2DMultisampleANGLE(GLenum target,
              ValidateTexStorageMemFlags2DMultisampleANGLE(
                  context, angle::EntryPoint::GLTexStorageMemFlags2DMultisampleANGLE, targetPacked,
                  samples, internalFormat, width, height, fixedSampleLocations, memoryPacked, offset,
-                 createFlags, usageFlags));
+                 createFlags, usageFlags, imageCreateInfoPNext));
         if (isCallValid)
         {
-            context->texStorageMemFlags2DMultisample(targetPacked, samples, internalFormat, width,
-                                                     height, fixedSampleLocations, memoryPacked,
-                                                     offset, createFlags, usageFlags);
+            context->texStorageMemFlags2DMultisample(
+                targetPacked, samples, internalFormat, width, height, fixedSampleLocations,
+                memoryPacked, offset, createFlags, usageFlags, imageCreateInfoPNext);
         }
         ANGLE_CAPTURE(TexStorageMemFlags2DMultisampleANGLE, isCallValid, context, targetPacked,
                       samples, internalFormat, width, height, fixedSampleLocations, memoryPacked,
-                      offset, createFlags, usageFlags);
+                      offset, createFlags, usageFlags, imageCreateInfoPNext);
     }
     else
     {
@@ -733,36 +1058,41 @@ void GL_APIENTRY GL_TexStorageMemFlags3DANGLE(GLenum target,
                                               GLuint memory,
                                               GLuint64 offset,
                                               GLbitfield createFlags,
-                                              GLbitfield usageFlags)
+                                              GLbitfield usageFlags,
+                                              const void *imageCreateInfoPNext)
 {
     Context *context = GetValidGlobalContext();
     EVENT(context, GLTexStorageMemFlags3DANGLE,
           "context = %d, target = %s, levels = %d, internalFormat = %s, width = %d, height = %d, "
-          "depth = %d, memory = %u, offset = %llu, createFlags = %s, usageFlags = %s",
+          "depth = %d, memory = %u, offset = %llu, createFlags = %s, usageFlags = %s, "
+          "imageCreateInfoPNext = 0x%016" PRIxPTR "",
           CID(context), GLenumToString(GLenumGroup::TextureTarget, target), levels,
           GLenumToString(GLenumGroup::DefaultGroup, internalFormat), width, height, depth, memory,
           static_cast<unsigned long long>(offset),
           GLbitfieldToString(GLenumGroup::DefaultGroup, createFlags).c_str(),
-          GLbitfieldToString(GLenumGroup::DefaultGroup, usageFlags).c_str());
+          GLbitfieldToString(GLenumGroup::DefaultGroup, usageFlags).c_str(),
+          (uintptr_t)imageCreateInfoPNext);
 
     if (context)
     {
         TextureType targetPacked                              = PackParam<TextureType>(target);
         MemoryObjectID memoryPacked                           = PackParam<MemoryObjectID>(memory);
         std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
-        bool isCallValid                                      = (context->skipValidation() ||
-                            ValidateTexStorageMemFlags3DANGLE(
-                                context, angle::EntryPoint::GLTexStorageMemFlags3DANGLE,
-                                targetPacked, levels, internalFormat, width, height, depth,
-                                memoryPacked, offset, createFlags, usageFlags));
+        bool isCallValid =
+            (context->skipValidation() ||
+             ValidateTexStorageMemFlags3DANGLE(
+                 context, angle::EntryPoint::GLTexStorageMemFlags3DANGLE, targetPacked, levels,
+                 internalFormat, width, height, depth, memoryPacked, offset, createFlags,
+                 usageFlags, imageCreateInfoPNext));
         if (isCallValid)
         {
             context->texStorageMemFlags3D(targetPacked, levels, internalFormat, width, height,
-                                          depth, memoryPacked, offset, createFlags, usageFlags);
+                                          depth, memoryPacked, offset, createFlags, usageFlags,
+                                          imageCreateInfoPNext);
         }
         ANGLE_CAPTURE(TexStorageMemFlags3DANGLE, isCallValid, context, targetPacked, levels,
                       internalFormat, width, height, depth, memoryPacked, offset, createFlags,
-                      usageFlags);
+                      usageFlags, imageCreateInfoPNext);
     }
     else
     {
@@ -780,18 +1110,20 @@ void GL_APIENTRY GL_TexStorageMemFlags3DMultisampleANGLE(GLenum target,
                                                          GLuint memory,
                                                          GLuint64 offset,
                                                          GLbitfield createFlags,
-                                                         GLbitfield usageFlags)
+                                                         GLbitfield usageFlags,
+                                                         const void *imageCreateInfoPNext)
 {
     Context *context = GetValidGlobalContext();
     EVENT(context, GLTexStorageMemFlags3DMultisampleANGLE,
           "context = %d, target = %s, samples = %d, internalFormat = %s, width = %d, height = %d, "
           "depth = %d, fixedSampleLocations = %s, memory = %u, offset = %llu, createFlags = %s, "
-          "usageFlags = %s",
+          "usageFlags = %s, imageCreateInfoPNext = 0x%016" PRIxPTR "",
           CID(context), GLenumToString(GLenumGroup::TextureTarget, target), samples,
           GLenumToString(GLenumGroup::DefaultGroup, internalFormat), width, height, depth,
           GLbooleanToString(fixedSampleLocations), memory, static_cast<unsigned long long>(offset),
           GLbitfieldToString(GLenumGroup::DefaultGroup, createFlags).c_str(),
-          GLbitfieldToString(GLenumGroup::DefaultGroup, usageFlags).c_str());
+          GLbitfieldToString(GLenumGroup::DefaultGroup, usageFlags).c_str(),
+          (uintptr_t)imageCreateInfoPNext);
 
     if (context)
     {
@@ -803,16 +1135,16 @@ void GL_APIENTRY GL_TexStorageMemFlags3DMultisampleANGLE(GLenum target,
              ValidateTexStorageMemFlags3DMultisampleANGLE(
                  context, angle::EntryPoint::GLTexStorageMemFlags3DMultisampleANGLE, targetPacked,
                  samples, internalFormat, width, height, depth, fixedSampleLocations, memoryPacked,
-                 offset, createFlags, usageFlags));
+                 offset, createFlags, usageFlags, imageCreateInfoPNext));
         if (isCallValid)
         {
-            context->texStorageMemFlags3DMultisample(targetPacked, samples, internalFormat, width,
-                                                     height, depth, fixedSampleLocations,
-                                                     memoryPacked, offset, createFlags, usageFlags);
+            context->texStorageMemFlags3DMultisample(
+                targetPacked, samples, internalFormat, width, height, depth, fixedSampleLocations,
+                memoryPacked, offset, createFlags, usageFlags, imageCreateInfoPNext);
         }
         ANGLE_CAPTURE(TexStorageMemFlags3DMultisampleANGLE, isCallValid, context, targetPacked,
                       samples, internalFormat, width, height, depth, fixedSampleLocations,
-                      memoryPacked, offset, createFlags, usageFlags);
+                      memoryPacked, offset, createFlags, usageFlags, imageCreateInfoPNext);
     }
     else
     {
@@ -3554,6 +3886,69 @@ void GL_APIENTRY GL_GetTranslatedShaderSourceANGLE(GLuint shader,
     }
 }
 
+// GL_ANGLE_vulkan_image
+void GL_APIENTRY GL_AcquireTexturesANGLE(GLuint numTextures,
+                                         const GLuint *textures,
+                                         const GLenum *layouts)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLAcquireTexturesANGLE,
+          "context = %d, numTextures = %u, textures = 0x%016" PRIxPTR ", layouts = 0x%016" PRIxPTR
+          "",
+          CID(context), numTextures, (uintptr_t)textures, (uintptr_t)layouts);
+
+    if (context)
+    {
+        const TextureID *texturesPacked = PackParam<const TextureID *>(textures);
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid =
+            (context->skipValidation() ||
+             ValidateAcquireTexturesANGLE(context, angle::EntryPoint::GLAcquireTexturesANGLE,
+                                          numTextures, texturesPacked, layouts));
+        if (isCallValid)
+        {
+            context->acquireTextures(numTextures, texturesPacked, layouts);
+        }
+        ANGLE_CAPTURE(AcquireTexturesANGLE, isCallValid, context, numTextures, texturesPacked,
+                      layouts);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_ReleaseTexturesANGLE(GLuint numTextures,
+                                         const GLuint *textures,
+                                         GLenum *layouts)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLReleaseTexturesANGLE,
+          "context = %d, numTextures = %u, textures = 0x%016" PRIxPTR ", layouts = 0x%016" PRIxPTR
+          "",
+          CID(context), numTextures, (uintptr_t)textures, (uintptr_t)layouts);
+
+    if (context)
+    {
+        const TextureID *texturesPacked = PackParam<const TextureID *>(textures);
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid =
+            (context->skipValidation() ||
+             ValidateReleaseTexturesANGLE(context, angle::EntryPoint::GLReleaseTexturesANGLE,
+                                          numTextures, texturesPacked, layouts));
+        if (isCallValid)
+        {
+            context->releaseTextures(numTextures, texturesPacked, layouts);
+        }
+        ANGLE_CAPTURE(ReleaseTexturesANGLE, isCallValid, context, numTextures, texturesPacked,
+                      layouts);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
 // GL_APPLE_clip_distance
 
 // GL_ARB_sync
@@ -5669,6 +6064,75 @@ void GL_APIENTRY GL_ImportMemoryFdEXT(GLuint memory, GLuint64 size, GLenum handl
     }
 }
 
+// GL_EXT_multi_draw_indirect
+void GL_APIENTRY GL_MultiDrawArraysIndirectEXT(GLenum mode,
+                                               const void *indirect,
+                                               GLsizei drawcount,
+                                               GLsizei stride)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLMultiDrawArraysIndirectEXT,
+          "context = %d, mode = %s, indirect = 0x%016" PRIxPTR ", drawcount = %d, stride = %d",
+          CID(context), GLenumToString(GLenumGroup::PrimitiveType, mode), (uintptr_t)indirect,
+          drawcount, stride);
+
+    if (context)
+    {
+        PrimitiveMode modePacked                              = PackParam<PrimitiveMode>(mode);
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateMultiDrawArraysIndirectEXT(
+                                context, angle::EntryPoint::GLMultiDrawArraysIndirectEXT,
+                                modePacked, indirect, drawcount, stride));
+        if (isCallValid)
+        {
+            context->multiDrawArraysIndirect(modePacked, indirect, drawcount, stride);
+        }
+        ANGLE_CAPTURE(MultiDrawArraysIndirectEXT, isCallValid, context, modePacked, indirect,
+                      drawcount, stride);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_MultiDrawElementsIndirectEXT(GLenum mode,
+                                                 GLenum type,
+                                                 const void *indirect,
+                                                 GLsizei drawcount,
+                                                 GLsizei stride)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLMultiDrawElementsIndirectEXT,
+          "context = %d, mode = %s, type = %s, indirect = 0x%016" PRIxPTR
+          ", drawcount = %d, stride = %d",
+          CID(context), GLenumToString(GLenumGroup::PrimitiveType, mode),
+          GLenumToString(GLenumGroup::DrawElementsType, type), (uintptr_t)indirect, drawcount,
+          stride);
+
+    if (context)
+    {
+        PrimitiveMode modePacked                              = PackParam<PrimitiveMode>(mode);
+        DrawElementsType typePacked                           = PackParam<DrawElementsType>(type);
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateMultiDrawElementsIndirectEXT(
+                                context, angle::EntryPoint::GLMultiDrawElementsIndirectEXT,
+                                modePacked, typePacked, indirect, drawcount, stride));
+        if (isCallValid)
+        {
+            context->multiDrawElementsIndirect(modePacked, typePacked, indirect, drawcount, stride);
+        }
+        ANGLE_CAPTURE(MultiDrawElementsIndirectEXT, isCallValid, context, modePacked, typePacked,
+                      indirect, drawcount, stride);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
 // GL_EXT_multisampled_render_to_texture
 void GL_APIENTRY GL_FramebufferTexture2DMultisampleEXT(GLenum target,
                                                        GLenum attachment,
@@ -7551,6 +8015,8 @@ void GL_APIENTRY GL_ValidateProgramPipelineEXT(GLuint pipeline)
     }
 }
 
+// GL_EXT_shader_framebuffer_fetch
+
 // GL_EXT_shader_framebuffer_fetch_non_coherent
 void GL_APIENTRY GL_FramebufferFetchBarrierEXT()
 {
@@ -8424,6 +8890,61 @@ void GL_APIENTRY GL_MaxShaderCompilerThreadsKHR(GLuint count)
 // GL_KHR_texture_compression_astc_ldr
 
 // GL_KHR_texture_compression_astc_sliced_3d
+
+// GL_MESA_framebuffer_flip_y
+void GL_APIENTRY GL_FramebufferParameteriMESA(GLenum target, GLenum pname, GLint param)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLFramebufferParameteriMESA, "context = %d, target = %s, pname = %s, param = %d",
+          CID(context), GLenumToString(GLenumGroup::FramebufferTarget, target),
+          GLenumToString(GLenumGroup::FramebufferParameterName, pname), param);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid =
+            (context->skipValidation() ||
+             ValidateFramebufferParameteriMESA(
+                 context, angle::EntryPoint::GLFramebufferParameteriMESA, target, pname, param));
+        if (isCallValid)
+        {
+            context->framebufferParameteriMESA(target, pname, param);
+        }
+        ANGLE_CAPTURE(FramebufferParameteriMESA, isCallValid, context, target, pname, param);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
+
+void GL_APIENTRY GL_GetFramebufferParameterivMESA(GLenum target, GLenum pname, GLint *params)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLGetFramebufferParameterivMESA,
+          "context = %d, target = %s, pname = %s, params = 0x%016" PRIxPTR "", CID(context),
+          GLenumToString(GLenumGroup::FramebufferTarget, target),
+          GLenumToString(GLenumGroup::FramebufferAttachmentParameterName, pname),
+          (uintptr_t)params);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid                                      = (context->skipValidation() ||
+                            ValidateGetFramebufferParameterivMESA(
+                                context, angle::EntryPoint::GLGetFramebufferParameterivMESA, target,
+                                pname, params));
+        if (isCallValid)
+        {
+            context->getFramebufferParameterivMESA(target, pname, params);
+        }
+        ANGLE_CAPTURE(GetFramebufferParameterivMESA, isCallValid, context, target, pname, params);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
 
 // GL_NV_fence
 void GL_APIENTRY GL_DeleteFencesNV(GLsizei n, const GLuint *fences)
@@ -10079,6 +10600,42 @@ void GL_APIENTRY GL_PointSizePointerOES(GLenum type, GLsizei stride, const void 
 }
 
 // GL_OES_point_sprite
+
+// GL_OES_primitive_bounding_box
+void GL_APIENTRY GL_PrimitiveBoundingBoxOES(GLfloat minX,
+                                            GLfloat minY,
+                                            GLfloat minZ,
+                                            GLfloat minW,
+                                            GLfloat maxX,
+                                            GLfloat maxY,
+                                            GLfloat maxZ,
+                                            GLfloat maxW)
+{
+    Context *context = GetValidGlobalContext();
+    EVENT(context, GLPrimitiveBoundingBoxOES,
+          "context = %d, minX = %f, minY = %f, minZ = %f, minW = %f, maxX = %f, maxY = %f, maxZ = "
+          "%f, maxW = %f",
+          CID(context), minX, minY, minZ, minW, maxX, maxY, maxZ, maxW);
+
+    if (context)
+    {
+        std::unique_lock<angle::GlobalMutex> shareContextLock = GetContextLock(context);
+        bool isCallValid =
+            (context->skipValidation() ||
+             ValidatePrimitiveBoundingBoxOES(context, angle::EntryPoint::GLPrimitiveBoundingBoxOES,
+                                             minX, minY, minZ, minW, maxX, maxY, maxZ, maxW));
+        if (isCallValid)
+        {
+            context->primitiveBoundingBox(minX, minY, minZ, minW, maxX, maxY, maxZ, maxW);
+        }
+        ANGLE_CAPTURE(PrimitiveBoundingBoxOES, isCallValid, context, minX, minY, minZ, minW, maxX,
+                      maxY, maxZ, maxW);
+    }
+    else
+    {
+        GenerateContextLostErrorOnCurrentGlobalContext();
+    }
+}
 
 // GL_OES_query_matrix
 GLbitfield GL_APIENTRY GL_QueryMatrixxOES(GLfixed *mantissa, GLint *exponent)

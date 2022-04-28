@@ -2743,23 +2743,6 @@ void Context::invalidateTexSubImage(TextureID texture,
     UNIMPLEMENTED();
 }
 
-void Context::multiDrawArraysIndirect(GLenum mode,
-                                      const void *indirect,
-                                      GLsizei drawcount,
-                                      GLsizei stride)
-{
-    UNIMPLEMENTED();
-}
-
-void Context::multiDrawElementsIndirect(GLenum mode,
-                                        GLenum type,
-                                        const void *indirect,
-                                        GLsizei drawcount,
-                                        GLsizei stride)
-{
-    UNIMPLEMENTED();
-}
-
 void Context::shaderStorageBlockBinding(ShaderProgramID program,
                                         GLuint storageBlockIndex,
                                         GLuint storageBlockBinding)
@@ -3359,14 +3342,6 @@ void Context::getnUniformdv(ShaderProgramID program,
                             UniformLocation location,
                             GLsizei bufSize,
                             GLdouble *params)
-{
-    UNIMPLEMENTED();
-}
-
-void Context::getnUniformuiv(ShaderProgramID program,
-                             UniformLocation location,
-                             GLsizei bufSize,
-                             GLuint *params)
 {
     UNIMPLEMENTED();
 }

@@ -40,6 +40,7 @@ angle_toggleable_extensions = [
 
 angle_requestable_extensions = [
     "GL_ANGLE_base_vertex_base_instance",
+    "GL_ANGLE_base_vertex_base_instance_shader_builtin",
     "GL_ANGLE_compressed_texture_etc",
     "GL_ANGLE_copy_texture_3d",
     "GL_ANGLE_framebuffer_multisample",
@@ -58,6 +59,7 @@ angle_requestable_extensions = [
     "GL_ANGLE_texture_compression_dxt5",
     "GL_ANGLE_texture_external_update",
     "GL_ANGLE_texture_multisample",
+    "GL_ANGLE_vulkan_image",
     "GL_ANGLE_yuv_internal_format",
     "GL_CHROMIUM_color_buffer_float_rgb",
     "GL_CHROMIUM_color_buffer_float_rgba",
@@ -98,6 +100,7 @@ gles_requestable_extensions = [
     "GL_EXT_map_buffer_range",
     "GL_EXT_memory_object",
     "GL_EXT_memory_object_fd",
+    "GL_EXT_multi_draw_indirect",
     "GL_EXT_multisampled_render_to_texture",
     "GL_EXT_multisampled_render_to_texture2",
     "GL_EXT_occlusion_query_boolean",
@@ -107,6 +110,7 @@ gles_requestable_extensions = [
     "GL_EXT_semaphore",
     "GL_EXT_semaphore_fd",
     "GL_EXT_separate_shader_objects",
+    "GL_EXT_shader_framebuffer_fetch",
     "GL_EXT_shader_framebuffer_fetch_non_coherent",
     "GL_EXT_shader_io_blocks",
     "GL_EXT_shader_non_constant_global_initializers",
@@ -138,6 +142,7 @@ gles_requestable_extensions = [
     "GL_KHR_texture_compression_astc_hdr",
     "GL_KHR_texture_compression_astc_ldr",
     "GL_KHR_texture_compression_astc_sliced_3d",
+    "GL_MESA_framebuffer_flip_y",
     "GL_NV_depth_buffer_float2",
     "GL_NV_EGL_stream_consumer_external",
     "GL_NV_framebuffer_blit",
@@ -203,6 +208,7 @@ angle_es_only_extensions = [
     "GL_ANGLE_program_cache_control",
     "GL_ANGLE_relaxed_vertex_attribute_type",
     "GL_ANGLE_request_extension",
+    "GL_ANGLE_rgbx_internal_format",
     "GL_ANGLE_robust_client_memory",
     "GL_ANGLE_robust_resource_initialization",
     "GL_ANGLE_webgl_compatibility",
@@ -214,6 +220,8 @@ angle_es_only_extensions = [
 ]
 
 gles_es_only_extensions = [
+    "GL_AMD_performance_monitor",
+    "GL_ANDROID_extension_pack_es31a",
     "GL_ANGLE_depth_texture",
     "GL_ANGLE_translated_shader_source",
     "GL_EXT_debug_label",
@@ -236,6 +244,7 @@ gles_es_only_extensions = [
     "GL_OES_depth_texture",
     "GL_OES_EGL_sync",
     "GL_OES_packed_depth_stencil",
+    "GL_OES_primitive_bounding_box",
     "GL_OES_surfaceless_context",
 ]
 
@@ -285,13 +294,16 @@ supported_egl_extensions = [
     "EGL_ANGLE_display_texture_share_group",
     "EGL_ANGLE_feature_control",
     "EGL_ANGLE_ggp_stream_descriptor",
+    "EGL_ANGLE_metal_create_context_ownership_identity",
     "EGL_ANGLE_power_preference",
+    "EGL_ANGLE_prepare_swap_buffers",
     "EGL_ANGLE_program_cache_control",
     "EGL_ANGLE_query_surface_pointer",
     "EGL_ANGLE_stream_producer_d3d_texture",
     "EGL_ANGLE_surface_d3d_texture_2d_share_handle",
     "EGL_ANGLE_swap_with_frame_token",
     "EGL_ANGLE_sync_control_rate",
+    "EGL_ANGLE_vulkan_image",
     "EGL_ANGLE_window_fixed_size",
     "EGL_CHROMIUM_sync_control",
     "EGL_EXT_create_context_robustness",
@@ -301,6 +313,8 @@ supported_egl_extensions = [
     "EGL_EXT_gl_colorspace_display_p3_passthrough",
     "EGL_EXT_gl_colorspace_scrgb",
     "EGL_EXT_gl_colorspace_scrgb_linear",
+    "EGL_EXT_image_dma_buf_import",
+    "EGL_EXT_image_dma_buf_import_modifiers",
     "EGL_EXT_image_gl_colorspace",
     "EGL_EXT_pixel_format_float",
     "EGL_EXT_platform_base",
@@ -311,8 +325,10 @@ supported_egl_extensions = [
     "EGL_KHR_fence_sync",
     "EGL_KHR_gl_colorspace",
     "EGL_KHR_image",
+    "EGL_KHR_lock_surface3",
     "EGL_KHR_mutable_render_buffer",
     "EGL_KHR_no_config_context",
+    "EGL_KHR_partial_update",
     "EGL_KHR_reusable_sync",
     "EGL_KHR_stream",
     "EGL_KHR_stream_consumer_gltexture",
@@ -347,7 +363,8 @@ supported_cl_extensions = [
 ]
 
 # Strip these suffixes from Context entry point names. NV is excluded (for now).
-strip_suffixes = ["ANGLE", "EXT", "KHR", "OES", "CHROMIUM"]
+strip_suffixes = ["AMD", "ANDROID", "ANGLE", "CHROMIUM", "EXT", "KHR", "OES", "OVR"]
+check_sorted('strip_suffixes', strip_suffixes)
 
 # The EGL_ANGLE_explicit_context extension is generated differently from other extensions.
 # Toggle generation here.

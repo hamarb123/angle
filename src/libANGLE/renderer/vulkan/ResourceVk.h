@@ -12,6 +12,8 @@
 
 #include "libANGLE/renderer/vulkan/vk_utils.h"
 
+#include <queue>
+
 namespace rx
 {
 namespace vk
@@ -113,6 +115,27 @@ class SharedResourceUse final : angle::NonCopyable
     ResourceUse *mUse;
 };
 
+class SharedBufferSuballocationGarbage
+{
+  public:
+    SharedBufferSuballocationGarbage() = default;
+    SharedBufferSuballocationGarbage(SharedBufferSuballocationGarbage &&other)
+        : mLifetime(std::move(other.mLifetime)), mGarbage(std::move(other.mGarbage))
+    {}
+    SharedBufferSuballocationGarbage(SharedResourceUse &&use, BufferSuballocation &&garbage)
+        : mLifetime(std::move(use)), mGarbage(std::move(garbage))
+    {}
+    ~SharedBufferSuballocationGarbage() = default;
+
+    bool destroyIfComplete(RendererVk *renderer, Serial completedSerial);
+    bool usedInRecordedCommands() const { return mLifetime.usedInRecordedCommands(); }
+
+  private:
+    SharedResourceUse mLifetime;
+    BufferSuballocation mGarbage;
+};
+using SharedBufferSuballocationGarbageList = std::queue<SharedBufferSuballocationGarbage>;
+
 class SharedGarbage
 {
   public:
@@ -123,13 +146,14 @@ class SharedGarbage
     SharedGarbage &operator=(SharedGarbage &&rhs);
 
     bool destroyIfComplete(RendererVk *renderer, Serial completedSerial);
+    bool usedInRecordedCommands() const { return mLifetime.usedInRecordedCommands(); }
 
   private:
     SharedResourceUse mLifetime;
     std::vector<GarbageObject> mGarbage;
 };
 
-using SharedGarbageList = std::vector<SharedGarbage>;
+using SharedGarbageList = std::queue<SharedGarbage>;
 
 // Mixin to abstract away the resource use tracking.
 class ResourceUseList final : angle::NonCopyable
@@ -184,7 +208,9 @@ class Resource : angle::NonCopyable
     angle::Result finishRunningCommands(ContextVk *contextVk);
 
     // Complete all recorded and in-flight commands involving this resource
-    angle::Result waitForIdle(ContextVk *contextVk, const char *debugMessage);
+    angle::Result waitForIdle(ContextVk *contextVk,
+                              const char *debugMessage,
+                              RenderPassClosureReason reason);
 
     // Adds the resource to a resource use list.
     void retain(ResourceUseList *resourceUseList) const;
@@ -192,6 +218,7 @@ class Resource : angle::NonCopyable
   protected:
     Resource();
     Resource(Resource &&other);
+    Resource &operator=(Resource &&rhs);
 
     // Current resource lifetime.
     SharedResourceUse mUse;
@@ -236,7 +263,9 @@ class ReadWriteResource : public angle::NonCopyable
     angle::Result finishGPUWriteCommands(ContextVk *contextVk);
 
     // Complete all recorded and in-flight commands involving this resource
-    angle::Result waitForIdle(ContextVk *contextVk, const char *debugMessage);
+    angle::Result waitForIdle(ContextVk *contextVk,
+                              const char *debugMessage,
+                              RenderPassClosureReason reason);
 
     // Adds the resource to a resource use list.
     void retainReadOnly(ResourceUseList *resourceUseList) const;
@@ -245,6 +274,7 @@ class ReadWriteResource : public angle::NonCopyable
   protected:
     ReadWriteResource();
     ReadWriteResource(ReadWriteResource &&other);
+    ReadWriteResource &operator=(ReadWriteResource &&other);
 
     // Track any use of the object. Always updated on every retain call.
     SharedResourceUse mReadOnlyUse;

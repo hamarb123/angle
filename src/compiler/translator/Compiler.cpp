@@ -346,6 +346,7 @@ TCompiler::TCompiler(sh::GLenum type, ShShaderSpec spec, ShShaderOutput output)
       mTessEvaluationShaderInputOrderingType(EtetUndefined),
       mTessEvaluationShaderInputPointType(EtetUndefined),
       mHasAnyPreciseType(false),
+      mAdvancedBlendEquations(0),
       mCompileOptions(0)
 {}
 
@@ -426,7 +427,8 @@ TIntermBlock *TCompiler::compileTreeImpl(const char *const shaderStrings[],
         (compileOptions & SH_EMULATE_GL_BASE_VERTEX_BASE_INSTANCE) != 0;
     if (!glBaseVertexBaseInstanceSupported)
     {
-        auto it = mExtensionBehavior.find(TExtension::ANGLE_base_vertex_base_instance);
+        auto it =
+            mExtensionBehavior.find(TExtension::ANGLE_base_vertex_base_instance_shader_builtin);
         if (it != mExtensionBehavior.end())
         {
             mExtensionBehavior.erase(it);
@@ -559,6 +561,10 @@ void TCompiler::setASTMetadata(const TParseContext &parseContext)
 
     mHasAnyPreciseType = parseContext.hasAnyPreciseType();
 
+    if (mShaderType == GL_FRAGMENT_SHADER)
+    {
+        mAdvancedBlendEquations = parseContext.getAdvancedBlendEquations();
+    }
     if (mShaderType == GL_GEOMETRY_SHADER_EXT)
     {
         mGeometryShaderInputPrimitiveType  = parseContext.getGeometryShaderInputPrimitiveType();
@@ -709,6 +715,7 @@ bool TCompiler::checkAndSimplifyAST(TIntermBlock *root,
     {
         return false;
     }
+    mValidateASTOptions.validateNoStatementsAfterBranch = true;
 
     // We need to generate globals early if we have non constant initializers enabled
     bool initializeLocalsAndGlobals = (compileOptions & SH_INITIALIZE_UNINITIALIZED_LOCALS) != 0 &&
@@ -860,7 +867,8 @@ bool TCompiler::checkAndSimplifyAST(TIntermBlock *root,
     }
 
     if (mShaderType == GL_VERTEX_SHADER &&
-        IsExtensionEnabled(mExtensionBehavior, TExtension::ANGLE_base_vertex_base_instance))
+        IsExtensionEnabled(mExtensionBehavior,
+                           TExtension::ANGLE_base_vertex_base_instance_shader_builtin))
     {
         if ((compileOptions & SH_EMULATE_GL_BASE_VERTEX_BASE_INSTANCE) != 0)
         {
@@ -1158,7 +1166,7 @@ bool TCompiler::compile(const char *const shaderStrings[],
                 (compileOptions & SH_EMULATE_GL_DRAW_ID) != 0;
             bool lookForBaseVertexBaseInstance =
                 IsExtensionEnabled(mExtensionBehavior,
-                                   TExtension::ANGLE_base_vertex_base_instance) &&
+                                   TExtension::ANGLE_base_vertex_base_instance_shader_builtin) &&
                 (compileOptions & SH_EMULATE_GL_BASE_VERTEX_BASE_INSTANCE) != 0;
 
             if (lookForDrawID || lookForBaseVertexBaseInstance)
@@ -1234,6 +1242,7 @@ void TCompiler::setResourceString()
         << ":EXT_blend_func_extended:" << mResources.EXT_blend_func_extended
         << ":EXT_frag_depth:" << mResources.EXT_frag_depth
         << ":EXT_primitive_bounding_box:" << mResources.EXT_primitive_bounding_box
+        << ":OES_primitive_bounding_box:" << mResources.OES_primitive_bounding_box
         << ":EXT_shader_texture_lod:" << mResources.EXT_shader_texture_lod
         << ":EXT_shader_framebuffer_fetch:" << mResources.EXT_shader_framebuffer_fetch
         << ":EXT_shader_framebuffer_fetch_non_coherent:" << mResources.EXT_shader_framebuffer_fetch_non_coherent
@@ -1256,7 +1265,7 @@ void TCompiler::setResourceString()
         << ":MaxViewsOVR:" << mResources.MaxViewsOVR
         << ":NV_draw_buffers:" << mResources.NV_draw_buffers
         << ":ANGLE_multi_draw:" << mResources.ANGLE_multi_draw
-        << ":ANGLE_base_vertex_base_instance:" << mResources.ANGLE_base_vertex_base_instance
+        << ":ANGLE_base_vertex_base_instance_shader_builtin:" << mResources.ANGLE_base_vertex_base_instance_shader_builtin
         << ":APPLE_clip_distance:" << mResources.APPLE_clip_distance
         << ":OES_texture_cube_map_array:" << mResources.OES_texture_cube_map_array
         << ":EXT_texture_cube_map_array:" << mResources.EXT_texture_cube_map_array
@@ -1607,7 +1616,13 @@ bool TCompiler::initializeOutputVariables(TIntermBlock *root)
         ASSERT(mShaderType == GL_FRAGMENT_SHADER);
         for (const sh::ShaderVariable &var : mOutputVariables)
         {
-            list.push_back(var);
+            // in-out variables represent the context of the framebuffer
+            // when the draw call starts, so they have to be considered
+            // as already initialized.
+            if (!var.isFragmentInOut)
+            {
+                list.push_back(var);
+            }
         }
     }
     return InitializeVariables(this, root, list, &mSymbolTable, mShaderVersion, mExtensionBehavior,

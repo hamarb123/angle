@@ -21,11 +21,6 @@ struct FeaturesMtl : FeatureSetBase
         "has_base_vertex_instanced_draw", FeatureCategory::MetalFeatures,
         "The renderer supports base vertex instanced draw", &members};
 
-    // Support depth texture filtering
-    Feature hasDepthTextureFiltering = {
-        "has_depth_texture_filtering", FeatureCategory::MetalFeatures,
-        "The renderer supports depth texture's filtering other than nearest", &members};
-
     // Support explicit memory barrier
     Feature hasExplicitMemBarrier = {"has_explicit_mem_barrier_mtl", FeatureCategory::MetalFeatures,
                                      "The renderer supports explicit memory barrier", &members};
@@ -133,6 +128,11 @@ struct FeaturesMtl : FeatureSetBase
     Feature intelDisableFastMath = {
         "intel_disable_fast_math", FeatureCategory::MetalWorkarounds,
         "Disable fast math in atan and invariance cases when running below macOS 12.0", &members};
+
+    Feature multisampleColorFormatShaderReadWorkaround = {
+        "multisample_color_format_shader_read_workaround", FeatureCategory::MetalWorkarounds,
+        "Add shaderRead usage to some multisampled texture formats", &members,
+        "http://anglebug.com/7049"};
 };
 
 }  // namespace angle

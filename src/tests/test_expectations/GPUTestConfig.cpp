@@ -439,6 +439,11 @@ inline bool IsPixel4XL()
     return IsAndroidDevice("Pixel 4 XL");
 }
 
+inline bool IsPixel6()
+{
+    return IsAndroidDevice("Pixel 6");
+}
+
 // Check whether the active GPU is a specific device based on the string device ID.
 inline bool IsDeviceIdGPU(const std::string &gpuDeviceId)
 {
@@ -454,11 +459,13 @@ inline bool IsDeviceIdGPU(const std::string &gpuDeviceId)
 // Check whether the active GPU is a NVIDIA Quadro P400
 inline bool IsNVIDIAQuadroP400()
 {
-    if (!IsNVIDIA())
-    {
-        return false;
-    }
-    return IsDeviceIdGPU("0x1CB3");
+    return (IsNVIDIA() && IsDeviceIdGPU("0x1CB3"));
+}
+
+// Check whether the active GPU is a NVIDIA GTX 1660
+inline bool IsNVIDIAGTX1660()
+{
+    return (IsNVIDIA() && IsDeviceIdGPU("0x2184"));
 }
 
 // Check whether the backend API has been set to D3D9 in the constructor
@@ -548,16 +555,23 @@ GPUTestConfig::GPUTestConfig(bool isSwiftShader)
     mConditions[kConditionVulkan]    = true;
     mConditions[kConditionMetal]     = true;
 
-    // Devices are irrelevent if we are running on SW
+    // Devices are irrelevant if we are running on SW
     mConditions[kConditionNexus5X]          = !isSwiftShader && IsNexus5X();
     mConditions[kConditionPixel2OrXL]       = !isSwiftShader && (IsPixel2() || IsPixel2XL());
     mConditions[kConditionPixel4OrXL]       = !isSwiftShader && (IsPixel4() || IsPixel4XL());
+    mConditions[kConditionPixel6]           = !isSwiftShader && (IsPixel6());
     mConditions[kConditionNVIDIAQuadroP400] = !isSwiftShader && IsNVIDIAQuadroP400();
+    mConditions[kConditionNVIDIAGTX1660]    = !isSwiftShader && IsNVIDIAGTX1660();
 
     mConditions[kConditionPreRotation]    = false;
     mConditions[kConditionPreRotation90]  = false;
     mConditions[kConditionPreRotation180] = false;
     mConditions[kConditionPreRotation270] = false;
+
+    mConditions[kConditionNoSan] = !IsASan() && !IsTSan() && !IsUBSan();
+    mConditions[kConditionASan]  = IsASan();
+    mConditions[kConditionTSan]  = IsTSan();
+    mConditions[kConditionUBSan] = IsUBSan();
 }
 
 // If the constructor is passed an API, load those conditions as well

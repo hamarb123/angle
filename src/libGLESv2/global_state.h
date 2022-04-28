@@ -14,7 +14,7 @@
 #include "libANGLE/Thread.h"
 #include "libANGLE/features.h"
 
-#if defined(ANGLE_PLATFORM_APPLE)
+#if defined(ANGLE_PLATFORM_APPLE) || (ANGLE_PLATFORM_ANDROID)
 #    include "common/tls.h"
 #endif
 
@@ -101,6 +101,7 @@ extern thread_local Thread *gCurrentThread;
 #endif
 
 angle::GlobalMutex &GetGlobalMutex();
+angle::GlobalMutex &GetGlobalSurfaceMutex();
 gl::Context *GetGlobalLastContext();
 void SetGlobalLastContext(gl::Context *context);
 Thread *GetCurrentThread();
@@ -119,8 +120,14 @@ class ScopedSyncCurrentContextFromThread
 
 }  // namespace egl
 
+#define ANGLE_GLOBAL_SURFACE_LOCK_VAR_NAME globalSurfaceMutexLock
+#define ANGLE_SCOPED_GLOBAL_SURFACE_LOCK()                                  \
+    std::lock_guard<angle::GlobalMutex> ANGLE_GLOBAL_SURFACE_LOCK_VAR_NAME( \
+        egl::GetGlobalSurfaceMutex())
+
+#define ANGLE_GLOBAL_LOCK_VAR_NAME globalMutexLock
 #define ANGLE_SCOPED_GLOBAL_LOCK() \
-    std::lock_guard<angle::GlobalMutex> globalMutexLock(egl::GetGlobalMutex())
+    std::lock_guard<angle::GlobalMutex> ANGLE_GLOBAL_LOCK_VAR_NAME(egl::GetGlobalMutex())
 
 namespace gl
 {

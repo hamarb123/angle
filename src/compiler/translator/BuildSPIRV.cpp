@@ -524,8 +524,8 @@ SpirvType SPIRVBuilder::getSpirvType(const TType &type, const SpirvTypeSpec &typ
 {
     SpirvType spirvType;
     spirvType.type                = type.getBasicType();
-    spirvType.primarySize         = static_cast<uint8_t>(type.getNominalSize());
-    spirvType.secondarySize       = static_cast<uint8_t>(type.getSecondarySize());
+    spirvType.primarySize         = type.getNominalSize();
+    spirvType.secondarySize       = type.getSecondarySize();
     spirvType.arraySizes          = type.getArraySizes();
     spirvType.imageInternalFormat = type.getLayoutQualifier().imageInternalFormat;
 
@@ -1543,15 +1543,6 @@ spirv::IdRef SPIRVBuilder::declareSpecConst(TBasicType type, int id, const char 
     }
 
     return specConstId;
-}
-
-void SPIRVBuilder::declareNamedConst(spirv::IdRef id, const char *name)
-{
-    // Output debug information.
-    if (name)
-    {
-        spirv::WriteName(&mSpirvDebug, id, name);
-    }
 }
 
 void SPIRVBuilder::startConditional(size_t blockCount, bool isContinuable, bool isBreakable)

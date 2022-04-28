@@ -375,6 +375,12 @@ angle::Result MultiDrawArraysGeneral(ContextImpl *contextImpl,
                                      const GLint *firsts,
                                      const GLsizei *counts,
                                      GLsizei drawcount);
+angle::Result MultiDrawArraysIndirectGeneral(ContextImpl *contextImpl,
+                                             const gl::Context *context,
+                                             gl::PrimitiveMode mode,
+                                             const void *indirect,
+                                             GLsizei drawcount,
+                                             GLsizei stride);
 angle::Result MultiDrawArraysInstancedGeneral(ContextImpl *contextImpl,
                                               const gl::Context *context,
                                               gl::PrimitiveMode mode,
@@ -389,6 +395,13 @@ angle::Result MultiDrawElementsGeneral(ContextImpl *contextImpl,
                                        gl::DrawElementsType type,
                                        const GLvoid *const *indices,
                                        GLsizei drawcount);
+angle::Result MultiDrawElementsIndirectGeneral(ContextImpl *contextImpl,
+                                               const gl::Context *context,
+                                               gl::PrimitiveMode mode,
+                                               gl::DrawElementsType type,
+                                               const void *indirect,
+                                               GLsizei drawcount,
+                                               GLsizei stride);
 angle::Result MultiDrawElementsInstancedGeneral(ContextImpl *contextImpl,
                                                 const gl::Context *context,
                                                 gl::PrimitiveMode mode,
@@ -435,6 +448,15 @@ class ResetBaseVertexBaseInstance : angle::NonCopyable
 angle::FormatID ConvertToSRGB(angle::FormatID formatID);
 angle::FormatID ConvertToLinear(angle::FormatID formatID);
 bool IsOverridableLinearFormat(angle::FormatID formatID);
+
+enum class PipelineType
+{
+    Graphics = 0,
+    Compute  = 1,
+
+    InvalidEnum = 2,
+    EnumCount   = 2,
+};
 }  // namespace rx
 
 // MultiDraw macro patterns

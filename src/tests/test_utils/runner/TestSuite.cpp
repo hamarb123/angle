@@ -57,19 +57,20 @@ constexpr char kSkippedTestString[] = "[  SKIPPED ] ";
 
 constexpr char kArtifactsFakeTestName[] = "TestArtifactsFakeTest";
 
+constexpr char kTSanOptionsEnvVar[]  = "TSAN_OPTIONS";
+constexpr char kUBSanOptionsEnvVar[] = "UBSAN_OPTIONS";
+
 // Note: we use a fairly high test timeout to allow for the first test in a batch to be slow.
 // Ideally we could use a separate timeout for the slow first test.
-#if defined(NDEBUG)
-constexpr int kDefaultTestTimeout = 60;
-#else
-constexpr int kDefaultTestTimeout  = 120;
-#endif
-constexpr int kSlowTestTimeoutScale = 3;
-#if defined(NDEBUG)
+// Allow sanitized tests to run more slowly.
+#if defined(NDEBUG) && !defined(ANGLE_WITH_SANITIZER)
+constexpr int kDefaultTestTimeout  = 60;
 constexpr int kDefaultBatchTimeout = 300;
 #else
+constexpr int kDefaultTestTimeout  = 120;
 constexpr int kDefaultBatchTimeout = 600;
 #endif
+constexpr int kSlowTestTimeoutScale  = 3;
 constexpr int kDefaultBatchSize      = 256;
 constexpr double kIdleMessageTimeout = 15.0;
 constexpr int kDefaultMaxProcesses   = 16;
@@ -429,7 +430,7 @@ void UpdateCurrentTestResult(const testing::TestResult &resultIn, TestResults *r
         resultOut.type = TestResultType::Pass;
     }
 
-    resultOut.elapsedTimeSeconds = resultsOut->currentTestTimer.getElapsedTime();
+    resultOut.elapsedTimeSeconds = resultsOut->currentTestTimer.getElapsedWallClockTime();
 }
 
 TestIdentifier GetTestIdentifier(const testing::TestInfo &testInfo)
@@ -960,6 +961,17 @@ void GTestListTests(const std::map<TestIdentifier, TestResult> &resultsMap)
         }
     }
 }
+
+// On Android, batching is done on the host, i.e. externally.
+// TestSuite executes on the device and should just passthrough all args to GTest.
+bool UsesExternalBatching()
+{
+#if defined(ANGLE_PLATFORM_ANDROID)
+    return true;
+#else
+    return false;
+#endif
+}
 }  // namespace
 
 // static
@@ -1038,7 +1050,8 @@ TestSuite::TestSuite(int *argc, char **argv)
       mBatchId(-1),
       mFlakyRetries(0),
       mMaxFailures(kDefaultMaxFailures),
-      mFailureCount(0)
+      mFailureCount(0),
+      mModifiedPreferredDevice(false)
 {
     ASSERT(mInstance == nullptr);
     mInstance = this;
@@ -1090,6 +1103,12 @@ TestSuite::TestSuite(int *argc, char **argv)
         ++argIndex;
     }
 
+    if (UsesExternalBatching() && mBotMode)
+    {
+        printf("Bot mode is mutually exclusive with external batching.\n");
+        exit(EXIT_FAILURE);
+    }
+
     mTestResults.currentTestTimeout = mTestTimeout;
 
 #if defined(ANGLE_PLATFORM_ANDROID)
@@ -1127,6 +1146,49 @@ TestSuite::TestSuite(int *argc, char **argv)
             std::stringstream shardCountStream(envTotalShards);
             shardCountStream >> mShardCount;
         }
+    }
+
+    // The test harness reads the active GPU from SystemInfo and uses that for test expectations.
+    // However, some ANGLE backends don't have a concept of an "active" GPU, and instead use power
+    // preference to select GPU. We can use the environment variable ANGLE_PREFERRED_DEVICE to
+    // ensure ANGLE's selected GPU matches the GPU expected for this test suite.
+    const GPUTestConfig testConfig      = GPUTestConfig();
+    const char kPreferredDeviceEnvVar[] = "ANGLE_PREFERRED_DEVICE";
+    if (GetEnvironmentVar(kPreferredDeviceEnvVar).empty())
+    {
+        mModifiedPreferredDevice                        = true;
+        const GPUTestConfig::ConditionArray &conditions = testConfig.getConditions();
+        if (conditions[GPUTestConfig::kConditionAMD])
+        {
+            SetEnvironmentVar(kPreferredDeviceEnvVar, "amd");
+        }
+        else if (conditions[GPUTestConfig::kConditionNVIDIA])
+        {
+            SetEnvironmentVar(kPreferredDeviceEnvVar, "nvidia");
+        }
+        else if (conditions[GPUTestConfig::kConditionIntel])
+        {
+            SetEnvironmentVar(kPreferredDeviceEnvVar, "intel");
+        }
+        else if (conditions[GPUTestConfig::kConditionApple])
+        {
+            SetEnvironmentVar(kPreferredDeviceEnvVar, "apple");
+        }
+    }
+
+    // Special handling for TSAN and UBSAN to force crashes when run in automated testing.
+    if (IsTSan())
+    {
+        std::string tsanOptions = GetEnvironmentVar(kTSanOptionsEnvVar);
+        tsanOptions += " halt_on_error=1";
+        SetEnvironmentVar(kTSanOptionsEnvVar, tsanOptions.c_str());
+    }
+
+    if (IsUBSan())
+    {
+        std::string ubsanOptions = GetEnvironmentVar(kUBSanOptionsEnvVar);
+        ubsanOptions += " halt_on_error=1";
+        SetEnvironmentVar(kUBSanOptionsEnvVar, ubsanOptions.c_str());
     }
 
     if ((mShardIndex == -1) != (mShardCount == -1))
@@ -1194,38 +1256,26 @@ TestSuite::TestSuite(int *argc, char **argv)
         // If there's only one shard, we can use the testSet as defined above.
         if (mShardCount > 1)
         {
-            testSet = GetShardTests(testSet, mShardIndex, mShardCount, &mTestFileLines,
-                                    alsoRunDisabledTests);
-
-            if (!mBotMode)
+            if (!mBotMode && !UsesExternalBatching())
             {
-                mFilterString = GetTestFilter(testSet);
-
-                if (filterArgIndex.valid())
-                {
-                    argv[filterArgIndex.value()] = const_cast<char *>(mFilterString.c_str());
-                }
-                else
-                {
-                    // Note that we only add a filter string if we previously deleted a shard
-                    // index/count argument. So we will have space for the new filter string in
-                    // argv.
-                    AddArg(argc, argv, mFilterString.c_str());
-                }
-
-                // Force-re-initialize GoogleTest flags to load the shard filter.
-                testing::internal::ParseGoogleTestFlagsOnly(argc, argv);
+                printf("Sharding is only supported in bot mode or external batching.\n");
+                exit(EXIT_FAILURE);
+            }
+            // With external batching, we must use exactly the testSet as defined externally.
+            // But when listing tests, we do need to apply sharding ourselves,
+            // since we use our own implementation for listing tests and not GTest directly.
+            if (!UsesExternalBatching() || mGTestListTests || mListTests)
+            {
+                testSet = GetShardTests(testSet, mShardIndex, mShardCount, &mTestFileLines,
+                                        alsoRunDisabledTests);
             }
         }
     }
 
+    if (!testSet.empty())
     {
         std::stringstream fakeTestName;
-        fakeTestName << kArtifactsFakeTestName;
-        if (mShardIndex != -1)
-        {
-            fakeTestName << "-Shard" << std::setfill('0') << std::setw(2) << mShardIndex;
-        }
+        fakeTestName << kArtifactsFakeTestName << '-' << testSet[0].testName;
         mTestResults.testArtifactsFakeTestName = fakeTestName.str();
     }
 
@@ -1283,6 +1333,12 @@ TestSuite::TestSuite(int *argc, char **argv)
 
 TestSuite::~TestSuite()
 {
+    const char kPreferredDeviceEnvVar[] = "ANGLE_PREFERRED_DEVICE";
+    if (mModifiedPreferredDevice && !angle::GetEnvironmentVar(kPreferredDeviceEnvVar).empty())
+    {
+        angle::UnsetEnvironmentVar(kPreferredDeviceEnvVar);
+    }
+
     if (mWatchdogThread.joinable())
     {
         mWatchdogThread.detach();
@@ -1328,7 +1384,7 @@ void TestSuite::onCrashOrTimeout(TestResultType crashOrTimeout)
     {
         TestResult &result        = mTestResults.results[mTestResults.currentTest];
         result.type               = crashOrTimeout;
-        result.elapsedTimeSeconds = mTestResults.currentTestTimer.getElapsedTime();
+        result.elapsedTimeSeconds = mTestResults.currentTestTimer.getElapsedWallClockTime();
     }
 
     if (mResultsFile.empty())
@@ -1726,6 +1782,20 @@ int TestSuite::run()
                 {
                     return 1;
                 }
+
+                const std::string &batchStdout = processInfo.process->getStdout();
+                std::vector<std::string> lines =
+                    SplitString(batchStdout, "\r\n", WhitespaceHandling::TRIM_WHITESPACE,
+                                SplitResult::SPLIT_WANT_NONEMPTY);
+                constexpr size_t kKeepLines = 10;
+                printf("Batch timeout! Last %d lines of batch stdout:\n",
+                       static_cast<int>(kKeepLines));
+                for (size_t lineNo = lines.size() - std::min(lines.size(), kKeepLines);
+                     lineNo < lines.size(); ++lineNo)
+                {
+                    printf("%s\n", lines[lineNo].c_str());
+                }
+
                 for (const TestIdentifier &testIdentifier : processInfo.testsInBatch)
                 {
                     // Because the whole batch failed we can't know how long each test took.
@@ -1747,7 +1817,7 @@ int TestSuite::run()
         {
             messageTimer.start();
         }
-        else if (messageTimer.getElapsedTime() > kIdleMessageTimeout)
+        else if (messageTimer.getElapsedWallClockTime() > kIdleMessageTimeout)
         {
             const ProcessInfo &processInfo = mCurrentProcesses[0];
             double processTime             = processInfo.process->getElapsedTimeSeconds();
@@ -1783,7 +1853,7 @@ int TestSuite::run()
     }
 
     totalRunTime.stop();
-    printf("Tests completed in %lf seconds\n", totalRunTime.getElapsedTime());
+    printf("Tests completed in %lf seconds\n", totalRunTime.getElapsedWallClockTime());
 
     return printFailuresAndReturnCount() == 0 ? 0 : 1;
 }
@@ -1836,7 +1906,7 @@ void TestSuite::startWatchdog()
         {
             {
                 std::lock_guard<std::mutex> guard(mTestResults.currentTestMutex);
-                if (mTestResults.currentTestTimer.getElapsedTime() >
+                if (mTestResults.currentTestTimer.getElapsedWallClockTime() >
                     mTestResults.currentTestTimeout)
                 {
                     break;

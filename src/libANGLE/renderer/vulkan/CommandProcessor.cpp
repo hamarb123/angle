@@ -17,7 +17,7 @@ namespace vk
 {
 namespace
 {
-constexpr size_t kInFlightCommandsLimit = 100u;
+constexpr size_t kInFlightCommandsLimit = 50u;
 constexpr bool kOutputVmaStatsString    = false;
 
 void InitializeSubmitInfo(VkSubmitInfo *submitInfo,
@@ -56,6 +56,30 @@ bool CommandsHaveValidOrdering(const std::vector<vk::CommandBatch> &commands)
     }
 
     return true;
+}
+
+template <typename SecondaryCommandBufferListT>
+void ResetSecondaryCommandBuffers(VkDevice device,
+                                  vk::CommandPool *commandPool,
+                                  SecondaryCommandBufferListT *commandBuffers)
+{
+    // Nothing to do when using ANGLE secondary command buffers.
+}
+
+template <>
+ANGLE_MAYBE_UNUSED void ResetSecondaryCommandBuffers<std::vector<VulkanSecondaryCommandBuffer>>(
+    VkDevice device,
+    vk::CommandPool *commandPool,
+    std::vector<VulkanSecondaryCommandBuffer> *commandBuffers)
+{
+    // Note: we currently free the command buffers individually, but we could potentially reset the
+    // entire command pool.  https://issuetracker.google.com/issues/166793850
+    for (VulkanSecondaryCommandBuffer &secondary : *commandBuffers)
+    {
+        commandPool->freeCommandBuffers(device, 1, secondary.ptr());
+        secondary.releaseHandle();
+    }
+    commandBuffers->clear();
 }
 }  // namespace
 
@@ -98,31 +122,44 @@ void FenceRecycler::destroy(vk::Context *context)
 // CommandProcessorTask implementation
 void CommandProcessorTask::initTask()
 {
-    mTask                        = CustomTask::Invalid;
-    mRenderPass                  = nullptr;
-    mCommandBuffer               = nullptr;
-    mSemaphore                   = nullptr;
-    mCommandPool                 = nullptr;
-    mOneOffFence                 = nullptr;
-    mPresentInfo                 = {};
-    mPresentInfo.pResults        = nullptr;
-    mPresentInfo.pSwapchains     = nullptr;
-    mPresentInfo.pImageIndices   = nullptr;
-    mPresentInfo.pNext           = nullptr;
-    mPresentInfo.pWaitSemaphores = nullptr;
-    mOneOffCommandBufferVk       = VK_NULL_HANDLE;
-    mPriority                    = egl::ContextPriority::Medium;
-    mHasProtectedContent         = false;
+    mTask                           = CustomTask::Invalid;
+    mOutsideRenderPassCommandBuffer = nullptr;
+    mRenderPassCommandBuffer        = nullptr;
+    mRenderPass                     = nullptr;
+    mSemaphore                      = nullptr;
+    mCommandPools                   = nullptr;
+    mOneOffWaitSemaphore            = nullptr;
+    mOneOffWaitSemaphoreStageMask   = 0;
+    mOneOffFence                    = nullptr;
+    mPresentInfo                    = {};
+    mPresentInfo.pResults           = nullptr;
+    mPresentInfo.pSwapchains        = nullptr;
+    mPresentInfo.pImageIndices      = nullptr;
+    mPresentInfo.pNext              = nullptr;
+    mPresentInfo.pWaitSemaphores    = nullptr;
+    mOneOffCommandBufferVk          = VK_NULL_HANDLE;
+    mPriority                       = egl::ContextPriority::Medium;
+    mHasProtectedContent            = false;
 }
 
-void CommandProcessorTask::initProcessCommands(bool hasProtectedContent,
-                                               CommandBufferHelper *commandBuffer,
-                                               const RenderPass *renderPass)
+void CommandProcessorTask::initOutsideRenderPassProcessCommands(
+    bool hasProtectedContent,
+    OutsideRenderPassCommandBufferHelper *commandBuffer)
 {
-    mTask                = CustomTask::ProcessCommands;
-    mCommandBuffer       = commandBuffer;
-    mRenderPass          = renderPass;
-    mHasProtectedContent = hasProtectedContent;
+    mTask                           = CustomTask::ProcessOutsideRenderPassCommands;
+    mOutsideRenderPassCommandBuffer = commandBuffer;
+    mHasProtectedContent            = hasProtectedContent;
+}
+
+void CommandProcessorTask::initRenderPassProcessCommands(
+    bool hasProtectedContent,
+    RenderPassCommandBufferHelper *commandBuffer,
+    const RenderPass *renderPass)
+{
+    mTask                    = CustomTask::ProcessRenderPassCommands;
+    mRenderPassCommandBuffer = commandBuffer;
+    mRenderPass              = renderPass;
+    mHasProtectedContent     = hasProtectedContent;
 }
 
 void CommandProcessorTask::copyPresentInfo(const VkPresentInfoKHR &other)
@@ -216,16 +253,16 @@ void CommandProcessorTask::initFlushAndQueueSubmit(
     const Semaphore *semaphore,
     bool hasProtectedContent,
     egl::ContextPriority priority,
-    CommandPool *commandPool,
+    SecondaryCommandPools *commandPools,
     GarbageList &&currentGarbage,
-    std::vector<CommandBuffer> &&commandBuffersToReset,
+    SecondaryCommandBufferList &&commandBuffersToReset,
     Serial submitQueueSerial)
 {
     mTask                    = CustomTask::FlushAndQueueSubmit;
     mWaitSemaphores          = waitSemaphores;
     mWaitSemaphoreStageMasks = waitSemaphoreStageMasks;
     mSemaphore               = semaphore;
-    mCommandPool             = commandPool;
+    mCommandPools            = commandPools;
     mGarbage                 = std::move(currentGarbage);
     mCommandBuffersToReset   = std::move(commandBuffersToReset);
     mPriority                = priority;
@@ -236,15 +273,19 @@ void CommandProcessorTask::initFlushAndQueueSubmit(
 void CommandProcessorTask::initOneOffQueueSubmit(VkCommandBuffer commandBufferHandle,
                                                  bool hasProtectedContent,
                                                  egl::ContextPriority priority,
+                                                 const Semaphore *waitSemaphore,
+                                                 VkPipelineStageFlags waitSemaphoreStageMask,
                                                  const Fence *fence,
                                                  Serial submitQueueSerial)
 {
-    mTask                  = CustomTask::OneOffQueueSubmit;
-    mOneOffCommandBufferVk = commandBufferHandle;
-    mOneOffFence           = fence;
-    mPriority              = priority;
-    mHasProtectedContent   = hasProtectedContent;
-    mSerial                = submitQueueSerial;
+    mTask                         = CustomTask::OneOffQueueSubmit;
+    mOneOffCommandBufferVk        = commandBufferHandle;
+    mOneOffWaitSemaphore          = waitSemaphore;
+    mOneOffWaitSemaphoreStageMask = waitSemaphoreStageMask;
+    mOneOffFence                  = fence;
+    mPriority                     = priority;
+    mHasProtectedContent          = hasProtectedContent;
+    mSerial                       = submitQueueSerial;
 }
 
 CommandProcessorTask &CommandProcessorTask::operator=(CommandProcessorTask &&rhs)
@@ -255,13 +296,16 @@ CommandProcessorTask &CommandProcessorTask::operator=(CommandProcessorTask &&rhs
     }
 
     std::swap(mRenderPass, rhs.mRenderPass);
-    std::swap(mCommandBuffer, rhs.mCommandBuffer);
+    std::swap(mOutsideRenderPassCommandBuffer, rhs.mOutsideRenderPassCommandBuffer);
+    std::swap(mRenderPassCommandBuffer, rhs.mRenderPassCommandBuffer);
     std::swap(mTask, rhs.mTask);
     std::swap(mWaitSemaphores, rhs.mWaitSemaphores);
     std::swap(mWaitSemaphoreStageMasks, rhs.mWaitSemaphoreStageMasks);
     std::swap(mSemaphore, rhs.mSemaphore);
+    std::swap(mOneOffWaitSemaphore, rhs.mOneOffWaitSemaphore);
+    std::swap(mOneOffWaitSemaphoreStageMask, rhs.mOneOffWaitSemaphoreStageMask);
     std::swap(mOneOffFence, rhs.mOneOffFence);
-    std::swap(mCommandPool, rhs.mCommandPool);
+    std::swap(mCommandPools, rhs.mCommandPools);
     std::swap(mGarbage, rhs.mGarbage);
     std::swap(mCommandBuffersToReset, rhs.mCommandBuffersToReset);
     std::swap(mSerial, rhs.mSerial);
@@ -278,7 +322,7 @@ CommandProcessorTask &CommandProcessorTask::operator=(CommandProcessorTask &&rhs
 }
 
 // CommandBatch implementation.
-CommandBatch::CommandBatch() : commandPool(nullptr), hasProtectedContent(false) {}
+CommandBatch::CommandBatch() : commandPools(nullptr), hasProtectedContent(false) {}
 
 CommandBatch::~CommandBatch() = default;
 
@@ -290,7 +334,7 @@ CommandBatch::CommandBatch(CommandBatch &&other) : CommandBatch()
 CommandBatch &CommandBatch::operator=(CommandBatch &&other)
 {
     std::swap(primaryCommands, other.primaryCommands);
-    std::swap(commandPool, other.commandPool);
+    std::swap(commandPools, other.commandPools);
     std::swap(commandBuffersToReset, other.commandBuffersToReset);
     std::swap(fence, other.fence);
     std::swap(serial, other.serial);
@@ -307,16 +351,10 @@ void CommandBatch::destroy(VkDevice device)
 
 void CommandBatch::resetSecondaryCommandBuffers(VkDevice device)
 {
-#if !ANGLE_USE_CUSTOM_VULKAN_CMD_BUFFERS
-    for (CommandBuffer &secondary : commandBuffersToReset)
-    {
-        // Note: we currently free the command buffers individually, but we could potentially reset
-        // the entire command pool.  https://issuetracker.google.com/issues/166793850
-        commandPool->freeCommandBuffers(device, 1, secondary.ptr());
-        secondary.releaseHandle();
-    }
-    commandBuffersToReset.clear();
-#endif
+    ResetSecondaryCommandBuffers(device, &commandPools->outsideRenderPassPool,
+                                 &commandBuffersToReset.outsideRenderPassCommandBuffers);
+    ResetSecondaryCommandBuffers(device, &commandPools->renderPassPool,
+                                 &commandBuffersToReset.renderPassCommandBuffers);
 }
 
 // CommandProcessor implementation.
@@ -458,7 +496,7 @@ angle::Result CommandProcessor::processTask(CommandProcessorTask *task)
                 this, task->hasProtectedContent(), task->getPriority(), task->getWaitSemaphores(),
                 task->getWaitSemaphoreStageMasks(), task->getSemaphore(),
                 std::move(task->getGarbage()), std::move(task->getCommandBuffersToReset()),
-                task->getCommandPool(), task->getQueueSerial()));
+                task->getCommandPools(), task->getQueueSerial()));
 
             ASSERT(task->getGarbage().empty());
             break;
@@ -469,7 +507,8 @@ angle::Result CommandProcessor::processTask(CommandProcessorTask *task)
 
             ANGLE_TRY(mCommandQueue.queueSubmitOneOff(
                 this, task->hasProtectedContent(), task->getPriority(),
-                task->getOneOffCommandBufferVk(), task->getOneOffFence(),
+                task->getOneOffCommandBufferVk(), task->getOneOffWaitSemaphore(),
+                task->getOneOffWaitSemaphoreStageMask(), task->getOneOffFence(),
                 SubmitPolicy::EnsureSubmitted, task->getQueueSerial()));
             ANGLE_TRY(mCommandQueue.checkCompletedCommands(this));
             break;
@@ -502,25 +541,29 @@ angle::Result CommandProcessor::processTask(CommandProcessorTask *task)
             }
             break;
         }
-        case CustomTask::ProcessCommands:
+        case CustomTask::ProcessOutsideRenderPassCommands:
         {
-            ASSERT(!task->getCommandBuffer()->empty());
+            OutsideRenderPassCommandBufferHelper *commandBuffer =
+                task->getOutsideRenderPassCommandBuffer();
+            ANGLE_TRY(mCommandQueue.flushOutsideRPCommands(this, task->hasProtectedContent(),
+                                                           &commandBuffer));
 
-            CommandBufferHelper *commandBuffer = task->getCommandBuffer();
-            if (task->getRenderPass())
-            {
-                ANGLE_TRY(mCommandQueue.flushRenderPassCommands(
-                    this, task->hasProtectedContent(), *task->getRenderPass(), &commandBuffer));
-            }
-            else
-            {
-                ANGLE_TRY(mCommandQueue.flushOutsideRPCommands(this, task->hasProtectedContent(),
-                                                               &commandBuffer));
-            }
+            OutsideRenderPassCommandBufferHelper *originalCommandBuffer =
+                task->getOutsideRenderPassCommandBuffer();
+            mRenderer->recycleOutsideRenderPassCommandBufferHelper(mRenderer->getDevice(),
+                                                                   &originalCommandBuffer);
+            break;
+        }
+        case CustomTask::ProcessRenderPassCommands:
+        {
+            RenderPassCommandBufferHelper *commandBuffer = task->getRenderPassCommandBuffer();
+            ANGLE_TRY(mCommandQueue.flushRenderPassCommands(
+                this, task->hasProtectedContent(), *task->getRenderPass(), &commandBuffer));
 
-            CommandBufferHelper *originalCommandBuffer = task->getCommandBuffer();
-            ASSERT(originalCommandBuffer->empty());
-            mRenderer->recycleCommandBufferHelper(mRenderer->getDevice(), &originalCommandBuffer);
+            RenderPassCommandBufferHelper *originalCommandBuffer =
+                task->getRenderPassCommandBuffer();
+            mRenderer->recycleRenderPassCommandBufferHelper(mRenderer->getDevice(),
+                                                            &originalCommandBuffer);
             break;
         }
         case CustomTask::CheckCompletedCommands:
@@ -680,15 +723,15 @@ angle::Result CommandProcessor::submitFrame(
     const std::vector<VkPipelineStageFlags> &waitSemaphoreStageMasks,
     const Semaphore *signalSemaphore,
     GarbageList &&currentGarbage,
-    std::vector<CommandBuffer> &&commandBuffersToReset,
-    CommandPool *commandPool,
+    SecondaryCommandBufferList &&commandBuffersToReset,
+    SecondaryCommandPools *commandPools,
     Serial submitQueueSerial)
 {
     ANGLE_TRY(checkAndPopPendingError(context));
 
     CommandProcessorTask task;
     task.initFlushAndQueueSubmit(waitSemaphores, waitSemaphoreStageMasks, signalSemaphore,
-                                 hasProtectedContent, priority, commandPool,
+                                 hasProtectedContent, priority, commandPools,
                                  std::move(currentGarbage), std::move(commandBuffersToReset),
                                  submitQueueSerial);
 
@@ -701,6 +744,8 @@ angle::Result CommandProcessor::queueSubmitOneOff(Context *context,
                                                   bool hasProtectedContent,
                                                   egl::ContextPriority contextPriority,
                                                   VkCommandBuffer commandBufferHandle,
+                                                  const Semaphore *waitSemaphore,
+                                                  VkPipelineStageFlags waitSemaphoreStageMask,
                                                   const Fence *fence,
                                                   SubmitPolicy submitPolicy,
                                                   Serial submitQueueSerial)
@@ -708,8 +753,8 @@ angle::Result CommandProcessor::queueSubmitOneOff(Context *context,
     ANGLE_TRY(checkAndPopPendingError(context));
 
     CommandProcessorTask task;
-    task.initOneOffQueueSubmit(commandBufferHandle, hasProtectedContent, contextPriority, fence,
-                               submitQueueSerial);
+    task.initOneOffQueueSubmit(commandBufferHandle, hasProtectedContent, contextPriority,
+                               waitSemaphore, waitSemaphoreStageMask, fence, submitQueueSerial);
     queueCommand(std::move(task));
     if (submitPolicy == SubmitPolicy::EnsureSubmitted)
     {
@@ -746,33 +791,35 @@ angle::Result CommandProcessor::waitForSerialWithUserTimeout(vk::Context *contex
     return finishToSerial(context, serial, mRenderer->getMaxFenceWaitTimeNs());
 }
 
-angle::Result CommandProcessor::flushOutsideRPCommands(Context *context,
-                                                       bool hasProtectedContent,
-                                                       CommandBufferHelper **outsideRPCommands)
+angle::Result CommandProcessor::flushOutsideRPCommands(
+    Context *context,
+    bool hasProtectedContent,
+    OutsideRenderPassCommandBufferHelper **outsideRPCommands)
 {
     ANGLE_TRY(checkAndPopPendingError(context));
 
     (*outsideRPCommands)->markClosed();
     CommandProcessorTask task;
-    task.initProcessCommands(hasProtectedContent, *outsideRPCommands, nullptr);
+    task.initOutsideRenderPassProcessCommands(hasProtectedContent, *outsideRPCommands);
     queueCommand(std::move(task));
-    return mRenderer->getCommandBufferHelper(context, false, (*outsideRPCommands)->getCommandPool(),
-                                             outsideRPCommands);
+    return mRenderer->getOutsideRenderPassCommandBufferHelper(
+        context, (*outsideRPCommands)->getCommandPool(), outsideRPCommands);
 }
 
-angle::Result CommandProcessor::flushRenderPassCommands(Context *context,
-                                                        bool hasProtectedContent,
-                                                        const RenderPass &renderPass,
-                                                        CommandBufferHelper **renderPassCommands)
+angle::Result CommandProcessor::flushRenderPassCommands(
+    Context *context,
+    bool hasProtectedContent,
+    const RenderPass &renderPass,
+    RenderPassCommandBufferHelper **renderPassCommands)
 {
     ANGLE_TRY(checkAndPopPendingError(context));
 
     (*renderPassCommands)->markClosed();
     CommandProcessorTask task;
-    task.initProcessCommands(hasProtectedContent, *renderPassCommands, &renderPass);
+    task.initRenderPassProcessCommands(hasProtectedContent, *renderPassCommands, &renderPass);
     queueCommand(std::move(task));
-    return mRenderer->getCommandBufferHelper(context, true, (*renderPassCommands)->getCommandPool(),
-                                             renderPassCommands);
+    return mRenderer->getRenderPassCommandBufferHelper(
+        context, (*renderPassCommands)->getCommandPool(), renderPassCommands);
 }
 
 angle::Result CommandProcessor::ensureNoPendingWork(Context *context)
@@ -881,16 +928,16 @@ angle::Result CommandQueue::retireFinishedCommands(Context *context, size_t fini
         mInFlightCommands.erase(beginIter, beginIter + finishedCount);
     }
 
-    size_t freeIndex = 0;
-    for (; freeIndex < mGarbageQueue.size(); ++freeIndex)
+    while (!mGarbageQueue.empty())
     {
-        GarbageAndSerial &garbageList = mGarbageQueue[freeIndex];
+        GarbageAndSerial &garbageList = mGarbageQueue.front();
         if (garbageList.getSerial() < mLastCompletedQueueSerial)
         {
             for (GarbageObject &garbage : garbageList.get())
             {
                 garbage.destroy(renderer);
             }
+            mGarbageQueue.pop();
         }
         else
         {
@@ -898,37 +945,32 @@ angle::Result CommandQueue::retireFinishedCommands(Context *context, size_t fini
         }
     }
 
-    // Remove the entries from the garbage list - they should be ready to go.
-    if (freeIndex > 0)
-    {
-        mGarbageQueue.erase(mGarbageQueue.begin(), mGarbageQueue.begin() + freeIndex);
-    }
-
     return angle::Result::Continue;
 }
 
 void CommandQueue::releaseToCommandBatch(bool hasProtectedContent,
                                          PrimaryCommandBuffer &&commandBuffer,
-                                         CommandPool *commandPool,
+                                         SecondaryCommandPools *commandPools,
                                          CommandBatch *batch)
 {
     ANGLE_TRACE_EVENT0("gpu.angle", "CommandQueue::releaseToCommandBatch");
 
     batch->primaryCommands     = std::move(commandBuffer);
-    batch->commandPool         = commandPool;
+    batch->commandPools        = commandPools;
     batch->hasProtectedContent = hasProtectedContent;
 }
 
 void CommandQueue::clearAllGarbage(RendererVk *renderer)
 {
-    for (GarbageAndSerial &garbageList : mGarbageQueue)
+    while (!mGarbageQueue.empty())
     {
+        GarbageAndSerial &garbageList = mGarbageQueue.front();
         for (GarbageObject &garbage : garbageList.get())
         {
             garbage.destroy(renderer);
         }
+        mGarbageQueue.pop();
     }
-    mGarbageQueue.clear();
 }
 
 void CommandQueue::handleDeviceLost(RendererVk *renderer)
@@ -1018,8 +1060,8 @@ angle::Result CommandQueue::submitFrame(
     const std::vector<VkPipelineStageFlags> &waitSemaphoreStageMasks,
     const Semaphore *signalSemaphore,
     GarbageList &&currentGarbage,
-    std::vector<CommandBuffer> &&commandBuffersToReset,
-    CommandPool *commandPool,
+    SecondaryCommandBufferList &&commandBuffersToReset,
+    SecondaryCommandPools *commandPools,
     Serial submitQueueSerial)
 {
     // Start an empty primary buffer if we have an empty submit.
@@ -1057,7 +1099,7 @@ angle::Result CommandQueue::submitFrame(
 
     if (!currentGarbage.empty())
     {
-        mGarbageQueue.emplace_back(std::move(currentGarbage), batch.serial);
+        mGarbageQueue.emplace(std::move(currentGarbage), batch.serial);
     }
 
     // Store the primary CommandBuffer and command pool used for secondary CommandBuffers
@@ -1065,11 +1107,11 @@ angle::Result CommandQueue::submitFrame(
     if (hasProtectedContent)
     {
         releaseToCommandBatch(hasProtectedContent, std::move(mProtectedPrimaryCommands),
-                              commandPool, &batch);
+                              commandPools, &batch);
     }
     else
     {
-        releaseToCommandBatch(hasProtectedContent, std::move(mPrimaryCommands), commandPool,
+        releaseToCommandBatch(hasProtectedContent, std::move(mPrimaryCommands), commandPools,
                               &batch);
     }
     mInFlightCommands.emplace_back(scopedBatch.release());
@@ -1157,19 +1199,21 @@ angle::Result CommandQueue::ensurePrimaryCommandBufferValid(Context *context,
     return angle::Result::Continue;
 }
 
-angle::Result CommandQueue::flushOutsideRPCommands(Context *context,
-                                                   bool hasProtectedContent,
-                                                   CommandBufferHelper **outsideRPCommands)
+angle::Result CommandQueue::flushOutsideRPCommands(
+    Context *context,
+    bool hasProtectedContent,
+    OutsideRenderPassCommandBufferHelper **outsideRPCommands)
 {
     ANGLE_TRY(ensurePrimaryCommandBufferValid(context, hasProtectedContent));
     PrimaryCommandBuffer &commandBuffer = getCommandBuffer(hasProtectedContent);
-    return (*outsideRPCommands)->flushToPrimary(context, &commandBuffer, nullptr);
+    return (*outsideRPCommands)->flushToPrimary(context, &commandBuffer);
 }
 
-angle::Result CommandQueue::flushRenderPassCommands(Context *context,
-                                                    bool hasProtectedContent,
-                                                    const RenderPass &renderPass,
-                                                    CommandBufferHelper **renderPassCommands)
+angle::Result CommandQueue::flushRenderPassCommands(
+    Context *context,
+    bool hasProtectedContent,
+    const RenderPass &renderPass,
+    RenderPassCommandBufferHelper **renderPassCommands)
 {
     ANGLE_TRY(ensurePrimaryCommandBufferValid(context, hasProtectedContent));
     PrimaryCommandBuffer &commandBuffer = getCommandBuffer(hasProtectedContent);
@@ -1180,6 +1224,8 @@ angle::Result CommandQueue::queueSubmitOneOff(Context *context,
                                               bool hasProtectedContent,
                                               egl::ContextPriority contextPriority,
                                               VkCommandBuffer commandBufferHandle,
+                                              const Semaphore *waitSemaphore,
+                                              VkPipelineStageFlags waitSemaphoreStageMask,
                                               const Fence *fence,
                                               SubmitPolicy submitPolicy,
                                               Serial submitQueueSerial)
@@ -1200,6 +1246,13 @@ angle::Result CommandQueue::queueSubmitOneOff(Context *context,
     {
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers    = &commandBufferHandle;
+    }
+
+    if (waitSemaphore != nullptr)
+    {
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores    = waitSemaphore->ptr();
+        submitInfo.pWaitDstStageMask  = &waitSemaphoreStageMask;
     }
 
     return queueSubmit(context, contextPriority, submitInfo, fence, submitQueueSerial);

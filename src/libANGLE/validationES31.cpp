@@ -574,6 +574,34 @@ bool ValidateDrawElementsIndirect(const Context *context,
     return true;
 }
 
+bool ValidateMultiDrawIndirectBase(const Context *context,
+                                   angle::EntryPoint entryPoint,
+                                   GLsizei drawcount,
+                                   GLsizei stride)
+{
+    if (!context->getExtensions().multiDrawIndirectEXT)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    // An INVALID_VALUE error is generated if stride is neither 0 nor a multiple of 4.
+    if ((stride & 3) != 0)
+    {
+        context->validationError(entryPoint, GL_INVALID_VALUE, kInvalidDrawBufferValue);
+        return false;
+    }
+
+    // An INVALID_VALUE error is generated if drawcount is not positive.
+    if (drawcount <= 0)
+    {
+        context->validationError(entryPoint, GL_INVALID_VALUE, kInvalidValueNonPositive);
+        return false;
+    }
+
+    return true;
+}
+
 bool ValidateProgramUniform1iBase(const Context *context,
                                   angle::EntryPoint entryPoint,
                                   ShaderProgramID program,
@@ -1082,80 +1110,7 @@ bool ValidateFramebufferParameteri(const Context *context,
         return false;
     }
 
-    if (!ValidFramebufferTarget(context, target))
-    {
-        context->validationError(entryPoint, GL_INVALID_ENUM, kInvalidFramebufferTarget);
-        return false;
-    }
-
-    switch (pname)
-    {
-        case GL_FRAMEBUFFER_DEFAULT_WIDTH:
-        {
-            GLint maxWidth = context->getCaps().maxFramebufferWidth;
-            if (param < 0 || param > maxWidth)
-            {
-                context->validationError(entryPoint, GL_INVALID_VALUE, kExceedsFramebufferWidth);
-                return false;
-            }
-            break;
-        }
-        case GL_FRAMEBUFFER_DEFAULT_HEIGHT:
-        {
-            GLint maxHeight = context->getCaps().maxFramebufferHeight;
-            if (param < 0 || param > maxHeight)
-            {
-                context->validationError(entryPoint, GL_INVALID_VALUE, kExceedsFramebufferHeight);
-                return false;
-            }
-            break;
-        }
-        case GL_FRAMEBUFFER_DEFAULT_SAMPLES:
-        {
-            GLint maxSamples = context->getCaps().maxFramebufferSamples;
-            if (param < 0 || param > maxSamples)
-            {
-                context->validationError(entryPoint, GL_INVALID_VALUE, kExceedsFramebufferSamples);
-                return false;
-            }
-            break;
-        }
-        case GL_FRAMEBUFFER_DEFAULT_FIXED_SAMPLE_LOCATIONS:
-        {
-            break;
-        }
-        case GL_FRAMEBUFFER_DEFAULT_LAYERS_EXT:
-        {
-            if (!context->getExtensions().geometryShaderAny() &&
-                context->getClientVersion() < ES_3_2)
-            {
-                context->validationError(entryPoint, GL_INVALID_ENUM,
-                                         kGeometryShaderExtensionNotEnabled);
-                return false;
-            }
-            GLint maxLayers = context->getCaps().maxFramebufferLayers;
-            if (param < 0 || param > maxLayers)
-            {
-                context->validationError(entryPoint, GL_INVALID_VALUE, kInvalidFramebufferLayer);
-                return false;
-            }
-            break;
-        }
-        default:
-        {
-            context->validationError(entryPoint, GL_INVALID_ENUM, kInvalidPname);
-            return false;
-        }
-    }
-
-    const Framebuffer *framebuffer = context->getState().getTargetFramebuffer(target);
-    ASSERT(framebuffer);
-    if (framebuffer->isDefault())
-    {
-        context->validationError(entryPoint, GL_INVALID_OPERATION, kDefaultFramebuffer);
-        return false;
-    }
-    return true;
+    return ValidateFramebufferParameteriBase(context, entryPoint, target, pname, param);
 }
 
 bool ValidateGetFramebufferParameteriv(const Context *context,
@@ -1170,42 +1125,7 @@ bool ValidateGetFramebufferParameteriv(const Context *context,
         return false;
     }
 
-    if (!ValidFramebufferTarget(context, target))
-    {
-        context->validationError(entryPoint, GL_INVALID_ENUM, kInvalidFramebufferTarget);
-        return false;
-    }
-
-    switch (pname)
-    {
-        case GL_FRAMEBUFFER_DEFAULT_WIDTH:
-        case GL_FRAMEBUFFER_DEFAULT_HEIGHT:
-        case GL_FRAMEBUFFER_DEFAULT_SAMPLES:
-        case GL_FRAMEBUFFER_DEFAULT_FIXED_SAMPLE_LOCATIONS:
-            break;
-        case GL_FRAMEBUFFER_DEFAULT_LAYERS_EXT:
-            if (!context->getExtensions().geometryShaderAny() &&
-                context->getClientVersion() < ES_3_2)
-            {
-                context->validationError(entryPoint, GL_INVALID_ENUM,
-                                         kGeometryShaderExtensionNotEnabled);
-                return false;
-            }
-            break;
-        default:
-            context->validationError(entryPoint, GL_INVALID_ENUM, kInvalidPname);
-            return false;
-    }
-
-    const Framebuffer *framebuffer = context->getState().getTargetFramebuffer(target);
-    ASSERT(framebuffer);
-
-    if (framebuffer->isDefault())
-    {
-        context->validationError(entryPoint, GL_INVALID_OPERATION, kDefaultFramebuffer);
-        return false;
-    }
-    return true;
+    return ValidateGetFramebufferParameterivBase(context, entryPoint, target, pname, params);
 }
 
 bool ValidateGetFramebufferParameterivRobustANGLE(const Context *context,

@@ -327,6 +327,85 @@ bool TextureState::computeSamplerCompleteness(const SamplerState &samplerState,
         return true;
     }
 
+    // Check for all non-format-based completeness rules
+    if (!computeSamplerCompletenessForCopyImage(samplerState, state))
+    {
+        return false;
+    }
+
+    const ImageDesc &baseImageDesc = getImageDesc(getBaseImageTarget(), getEffectiveBaseLevel());
+
+    // According to es 3.1 spec, texture is justified as incomplete if sized internalformat is
+    // unfilterable(table 20.11) and filter is not GL_NEAREST(8.16). The default value of minFilter
+    // is NEAREST_MIPMAP_LINEAR and magFilter is LINEAR(table 20.11,). For multismaple texture,
+    // filter state of multisample texture is ignored(11.1.3.3). So it shouldn't be judged as
+    // incomplete texture. So, we ignore filtering for multisample texture completeness here.
+    if (!IsMultisampled(mType) &&
+        !baseImageDesc.format.info->filterSupport(state.getClientVersion(),
+                                                  state.getExtensions()) &&
+        !IsPointSampled(samplerState))
+    {
+        return false;
+    }
+
+    // OpenGLES 3.0.2 spec section 3.8.13 states that a texture is not mipmap complete if:
+    // The internalformat specified for the texture arrays is a sized internal depth or
+    // depth and stencil format (see table 3.13), the value of TEXTURE_COMPARE_-
+    // MODE is NONE, and either the magnification filter is not NEAREST or the mini-
+    // fication filter is neither NEAREST nor NEAREST_MIPMAP_NEAREST.
+    if (!IsMultisampled(mType) && baseImageDesc.format.info->depthBits > 0 &&
+        state.getClientMajorVersion() >= 3)
+    {
+        // Note: we restrict this validation to sized types. For the OES_depth_textures
+        // extension, due to some underspecification problems, we must allow linear filtering
+        // for legacy compatibility with WebGL 1.
+        // See http://crbug.com/649200
+        if (samplerState.getCompareMode() == GL_NONE && baseImageDesc.format.info->sized)
+        {
+            if ((samplerState.getMinFilter() != GL_NEAREST &&
+                 samplerState.getMinFilter() != GL_NEAREST_MIPMAP_NEAREST) ||
+                samplerState.getMagFilter() != GL_NEAREST)
+            {
+                return false;
+            }
+        }
+    }
+
+    // OpenGLES 3.1 spec section 8.16 states that a texture is not mipmap complete if:
+    // The internalformat specified for the texture is DEPTH_STENCIL format, the value of
+    // DEPTH_STENCIL_TEXTURE_MODE is STENCIL_INDEX, and either the magnification filter is
+    // not NEAREST or the minification filter is neither NEAREST nor NEAREST_MIPMAP_NEAREST.
+    // However, the ES 3.1 spec differs from the statement above, because it is incorrect.
+    // See the issue at https://github.com/KhronosGroup/OpenGL-API/issues/33.
+    // For multismaple texture, filter state of multisample texture is ignored(11.1.3.3).
+    // So it shouldn't be judged as incomplete texture. So, we ignore filtering for multisample
+    // texture completeness here.
+    if (!IsMultisampled(mType) && baseImageDesc.format.info->depthBits > 0 &&
+        mDepthStencilTextureMode == GL_STENCIL_INDEX)
+    {
+        if ((samplerState.getMinFilter() != GL_NEAREST &&
+             samplerState.getMinFilter() != GL_NEAREST_MIPMAP_NEAREST) ||
+            samplerState.getMagFilter() != GL_NEAREST)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// CopyImageSubData has more lax rules for texture completeness: format-based completeness rules are
+// ignored, so a texture can still be considered complete even if it violates format-specific
+// conditions
+bool TextureState::computeSamplerCompletenessForCopyImage(const SamplerState &samplerState,
+                                                          const State &state) const
+{
+    // Buffer textures cannot be incomplete.
+    if (mType == TextureType::Buffer)
+    {
+        return true;
+    }
+
     if (!mImmutableFormat && mBaseLevel > mMaxLevel)
     {
         return false;
@@ -346,18 +425,6 @@ bool TextureState::computeSamplerCompleteness(const SamplerState &samplerState,
         return false;
     }
 
-    // According to es 3.1 spec, texture is justified as incomplete if sized internalformat is
-    // unfilterable(table 20.11) and filter is not GL_NEAREST(8.16). The default value of minFilter
-    // is NEAREST_MIPMAP_LINEAR and magFilter is LINEAR(table 20.11,). For multismaple texture,
-    // filter state of multisample texture is ignored(11.1.3.3). So it shouldn't be judged as
-    // incomplete texture. So, we ignore filtering for multisample texture completeness here.
-    if (!IsMultisampled(mType) &&
-        !baseImageDesc.format.info->filterSupport(state.getClientVersion(),
-                                                  state.getExtensions()) &&
-        !IsPointSampled(samplerState))
-    {
-        return false;
-    }
     bool npotSupport = state.getExtensions().textureNpotOES || state.getClientMajorVersion() >= 3;
     if (!npotSupport)
     {
@@ -415,49 +482,6 @@ bool TextureState::computeSamplerCompleteness(const SamplerState &samplerState,
         }
 
         if (samplerState.getMinFilter() != GL_LINEAR && samplerState.getMinFilter() != GL_NEAREST)
-        {
-            return false;
-        }
-    }
-
-    // OpenGLES 3.0.2 spec section 3.8.13 states that a texture is not mipmap complete if:
-    // The internalformat specified for the texture arrays is a sized internal depth or
-    // depth and stencil format (see table 3.13), the value of TEXTURE_COMPARE_-
-    // MODE is NONE, and either the magnification filter is not NEAREST or the mini-
-    // fication filter is neither NEAREST nor NEAREST_MIPMAP_NEAREST.
-    if (!IsMultisampled(mType) && baseImageDesc.format.info->depthBits > 0 &&
-        state.getClientMajorVersion() >= 3)
-    {
-        // Note: we restrict this validation to sized types. For the OES_depth_textures
-        // extension, due to some underspecification problems, we must allow linear filtering
-        // for legacy compatibility with WebGL 1.
-        // See http://crbug.com/649200
-        if (samplerState.getCompareMode() == GL_NONE && baseImageDesc.format.info->sized)
-        {
-            if ((samplerState.getMinFilter() != GL_NEAREST &&
-                 samplerState.getMinFilter() != GL_NEAREST_MIPMAP_NEAREST) ||
-                samplerState.getMagFilter() != GL_NEAREST)
-            {
-                return false;
-            }
-        }
-    }
-
-    // OpenGLES 3.1 spec section 8.16 states that a texture is not mipmap complete if:
-    // The internalformat specified for the texture is DEPTH_STENCIL format, the value of
-    // DEPTH_STENCIL_TEXTURE_MODE is STENCIL_INDEX, and either the magnification filter is
-    // not NEAREST or the minification filter is neither NEAREST nor NEAREST_MIPMAP_NEAREST.
-    // However, the ES 3.1 spec differs from the statement above, because it is incorrect.
-    // See the issue at https://github.com/KhronosGroup/OpenGL-API/issues/33.
-    // For multismaple texture, filter state of multisample texture is ignored(11.1.3.3).
-    // So it shouldn't be judged as incomplete texture. So, we ignore filtering for multisample
-    // texture completeness here.
-    if (!IsMultisampled(mType) && baseImageDesc.format.info->depthBits > 0 &&
-        mDepthStencilTextureMode == GL_STENCIL_INDEX)
-    {
-        if ((samplerState.getMinFilter() != GL_NEAREST &&
-             samplerState.getMinFilter() != GL_NEAREST_MIPMAP_NEAREST) ||
-            samplerState.getMagFilter() != GL_NEAREST)
         {
             return false;
         }
@@ -1189,7 +1213,15 @@ void Texture::signalDirtyState(size_t dirtyBit)
     mDirtyBits.set(dirtyBit);
     invalidateCompletenessCache();
     mState.mCachedSamplerFormatValid = false;
-    onStateChange(angle::SubjectMessage::DirtyBitsFlagged);
+
+    if (dirtyBit == DIRTY_BIT_BASE_LEVEL || dirtyBit == DIRTY_BIT_MAX_LEVEL)
+    {
+        onStateChange(angle::SubjectMessage::SubjectChanged);
+    }
+    else
+    {
+        onStateChange(angle::SubjectMessage::DirtyBitsFlagged);
+    }
 }
 
 angle::Result Texture::setImage(Context *context,
@@ -1351,6 +1383,8 @@ angle::Result Texture::copyImage(Context *context,
         }
     }
 
+    InitState initState = DetermineInitState(context, nullptr, nullptr);
+
     // If we need to initialize the destination texture we split the call into a create call,
     // an initializeContents call, and then a copySubImage call. This ensures the destination
     // texture exists before we try to clear it.
@@ -1360,8 +1394,7 @@ angle::Result Texture::copyImage(Context *context,
         ANGLE_TRY(mTexture->setImage(context, index, internalFormat, size,
                                      internalFormatInfo.format, internalFormatInfo.type,
                                      PixelUnpackState(), nullptr, nullptr));
-        mState.setImageDesc(target, level,
-                            ImageDesc(size, Format(internalFormatInfo), InitState::MayNeedInit));
+        mState.setImageDesc(target, level, ImageDesc(size, Format(internalFormatInfo), initState));
         ANGLE_TRY(ensureSubImageInitialized(context, index, destBox));
         ANGLE_TRY(mTexture->copySubImage(context, index, Offset(), sourceArea, source));
     }
@@ -1376,7 +1409,7 @@ angle::Result Texture::copyImage(Context *context,
     ANGLE_TRY(handleMipmapGenerationHint(context, level));
 
     // Because this could affect the texture storage we might need to init other layers/levels.
-    signalDirtyStorage(InitState::MayNeedInit);
+    signalDirtyStorage(initState);
 
     return angle::Result::Continue;
 }
@@ -1572,8 +1605,9 @@ angle::Result Texture::setStorage(Context *context,
     mState.mImmutableFormat = true;
     mState.mImmutableLevels = static_cast<GLuint>(levels);
     mState.clearImageDescs();
+    InitState initState = DetermineInitState(context, nullptr, nullptr);
     mState.setImageDescChain(0, static_cast<GLuint>(levels - 1), size, Format(internalFormat),
-                             InitState::MayNeedInit);
+                             initState);
 
     ANGLE_TRY(mTexture->setStorage(context, type, levels, internalFormat, size));
 
@@ -1584,7 +1618,7 @@ angle::Result Texture::setStorage(Context *context,
     mDirtyBits.set(DIRTY_BIT_BASE_LEVEL);
     mDirtyBits.set(DIRTY_BIT_MAX_LEVEL);
 
-    signalDirtyStorage(InitState::MayNeedInit);
+    signalDirtyStorage(initState);
 
     return angle::Result::Continue;
 }
@@ -1641,13 +1675,13 @@ angle::Result Texture::setStorageMultisample(Context *context,
     mState.mImmutableFormat = true;
     mState.mImmutableLevels = static_cast<GLuint>(1);
     mState.clearImageDescs();
+    InitState initState = DetermineInitState(context, nullptr, nullptr);
     mState.setImageDescChainMultisample(size, Format(internalFormat), samples, fixedSampleLocations,
-                                        InitState::MayNeedInit);
+                                        initState);
 
     ANGLE_TRY(mTexture->setStorageMultisample(context, type, samples, internalFormat, size,
                                               fixedSampleLocations));
-
-    signalDirtyStorage(InitState::MayNeedInit);
+    signalDirtyStorage(initState);
 
     return angle::Result::Continue;
 }
@@ -1660,7 +1694,8 @@ angle::Result Texture::setStorageExternalMemory(Context *context,
                                                 MemoryObject *memoryObject,
                                                 GLuint64 offset,
                                                 GLbitfield createFlags,
-                                                GLbitfield usageFlags)
+                                                GLbitfield usageFlags,
+                                                const void *imageCreateInfoPNext)
 {
     ASSERT(type == mState.mType);
 
@@ -1671,13 +1706,15 @@ angle::Result Texture::setStorageExternalMemory(Context *context,
     ANGLE_TRY(orphanImages(context, &releaseImage));
 
     ANGLE_TRY(mTexture->setStorageExternalMemory(context, type, levels, internalFormat, size,
-                                                 memoryObject, offset, createFlags, usageFlags));
+                                                 memoryObject, offset, createFlags, usageFlags,
+                                                 imageCreateInfoPNext));
 
     mState.mImmutableFormat = true;
     mState.mImmutableLevels = static_cast<GLuint>(levels);
     mState.clearImageDescs();
+    InitState initState = DetermineInitState(context, nullptr, nullptr);
     mState.setImageDescChain(0, static_cast<GLuint>(levels - 1), size, Format(internalFormat),
-                             InitState::MayNeedInit);
+                             initState);
 
     // Changing the texture to immutable can trigger a change in the base and max levels:
     // GLES 3.0.4 section 3.8.10 pg 158:
@@ -1686,7 +1723,7 @@ angle::Result Texture::setStorageExternalMemory(Context *context,
     mDirtyBits.set(DIRTY_BIT_BASE_LEVEL);
     mDirtyBits.set(DIRTY_BIT_MAX_LEVEL);
 
-    signalDirtyStorage(InitState::Initialized);
+    signalDirtyStorage(initState);
 
     return angle::Result::Continue;
 }
@@ -2030,7 +2067,8 @@ angle::Result Texture::setBufferRange(const gl::Context *context,
     if (buffer == nullptr)
     {
         mBufferObserver.reset();
-        signalDirtyStorage(InitState::MayNeedInit);
+        InitState initState = DetermineInitState(context, nullptr, nullptr);
+        signalDirtyStorage(initState);
         return angle::Result::Continue;
     }
 
@@ -2040,10 +2078,10 @@ angle::Result Texture::setBufferRange(const gl::Context *context,
     InternalFormat internalFormatInfo = GetSizedInternalFormatInfo(internalFormat);
     Format format(internalFormat);
     Extents extents(static_cast<GLuint>(size / internalFormatInfo.pixelBytes), 1, 1);
-    mState.setImageDesc(TextureTarget::Buffer, 0,
-                        ImageDesc(extents, format, InitState::MayNeedInit));
+    InitState initState = buffer->initState();
+    mState.setImageDesc(TextureTarget::Buffer, 0, ImageDesc(extents, format, initState));
 
-    signalDirtyStorage(InitState::MayNeedInit);
+    signalDirtyStorage(initState);
 
     // Observe modifications to the buffer, so that extents can be updated.
     mBufferObserver.bind(buffer);
@@ -2119,6 +2157,16 @@ bool Texture::isSamplerComplete(const Context *context, const Sampler *optionalS
     }
 
     return mCompletenessCache.samplerComplete;
+}
+
+// CopyImageSubData requires that we ignore format-based completeness rules
+bool Texture::isSamplerCompleteForCopyImage(const Context *context,
+                                            const Sampler *optionalSampler) const
+{
+    const gl::SamplerState &samplerState =
+        optionalSampler ? optionalSampler->getSamplerState() : mState.mSamplerState;
+    const gl::State &contextState = context->getState();
+    return mState.computeSamplerCompletenessForCopyImage(samplerState, contextState);
 }
 
 Texture::SamplerCompletenessCache::SamplerCompletenessCache()
@@ -2332,6 +2380,8 @@ void Texture::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMess
             // buffer. For example, the Vulkan back end needs to create a new buffer view that
             // points to the newly allocated buffer and update the texture descriptor set.
             signalDirtyState(DIRTY_BIT_IMPLEMENTATION);
+            break;
+        case angle::SubjectMessage::BufferVkStorageChanged:
             break;
         default:
             UNREACHABLE();

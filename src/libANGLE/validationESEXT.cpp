@@ -234,13 +234,10 @@ bool ValidateObjectIdentifierAndName(const Context *context,
 }
 }  // namespace
 
-bool ValidateGetTexImageANGLE(const Context *context,
-                              angle::EntryPoint entryPoint,
-                              TextureTarget target,
-                              GLint level,
-                              GLenum format,
-                              GLenum type,
-                              const void *pixels)
+bool ValidateGetTexImage(const Context *context,
+                         angle::EntryPoint entryPoint,
+                         TextureTarget target,
+                         GLint level)
 {
     if (!context->getExtensions().getImageANGLE)
     {
@@ -265,6 +262,22 @@ bool ValidateGetTexImageANGLE(const Context *context,
     if (!ValidMipLevel(context, textureType, level))
     {
         context->validationError(entryPoint, GL_INVALID_VALUE, kInvalidMipLevel);
+        return false;
+    }
+
+    return true;
+}
+
+bool ValidateGetTexImageANGLE(const Context *context,
+                              angle::EntryPoint entryPoint,
+                              TextureTarget target,
+                              GLint level,
+                              GLenum format,
+                              GLenum type,
+                              const void *pixels)
+{
+    if (!ValidateGetTexImage(context, entryPoint, target, level))
+    {
         return false;
     }
 
@@ -298,14 +311,29 @@ bool ValidateGetCompressedTexImageANGLE(const Context *context,
                                         GLint level,
                                         const void *pixels)
 {
-    if (!context->getExtensions().getImageANGLE)
+    if (!ValidateGetTexImage(context, entryPoint, target, level))
     {
-        context->validationError(entryPoint, GL_INVALID_OPERATION, kGetImageExtensionNotEnabled);
         return false;
     }
 
-    // TODO: Validate all the things. http://anglebug.com/6177
-    return false;
+    Texture *texture = context->getTextureByTarget(target);
+    if (!texture->getFormat(target, level).info->compressed)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kGetImageNotCompressed);
+        return false;
+    }
+
+    // Check if format is emulated
+    // TODO(anglebug.com/6177): Check here for all the formats that ANGLE will use to emulate a
+    // compressed texture
+    GLenum implFormat = texture->getImplementationColorReadFormat(context);
+    if (implFormat == GL_RGBA || implFormat == GL_RG || implFormat == GL_RED)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kInvalidEmulatedFormat);
+        return false;
+    }
+
+    return true;
 }
 
 bool ValidateGetRenderbufferImageANGLE(const Context *context,
@@ -440,6 +468,74 @@ bool ValidateMultiDrawElementsBaseVertexEXT(const Context *context,
     return true;
 }
 
+bool ValidateMultiDrawArraysIndirectEXT(const Context *context,
+                                        angle::EntryPoint entryPoint,
+                                        PrimitiveMode modePacked,
+                                        const void *indirect,
+                                        GLsizei drawcount,
+                                        GLsizei stride)
+{
+    if (!ValidateMultiDrawIndirectBase(context, entryPoint, drawcount, stride))
+    {
+        return false;
+    }
+
+    if (!ValidateDrawArraysIndirect(context, entryPoint, modePacked, indirect))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool ValidateMultiDrawElementsIndirectEXT(const Context *context,
+                                          angle::EntryPoint entryPoint,
+                                          PrimitiveMode modePacked,
+                                          DrawElementsType typePacked,
+                                          const void *indirect,
+                                          GLsizei drawcount,
+                                          GLsizei stride)
+{
+    if (!ValidateMultiDrawIndirectBase(context, entryPoint, drawcount, stride))
+    {
+        return false;
+    }
+
+    const State &state                      = context->getState();
+    TransformFeedback *curTransformFeedback = state.getCurrentTransformFeedback();
+    if (!ValidateDrawElementsIndirect(context, entryPoint, modePacked, typePacked, indirect))
+    {
+        return false;
+    }
+
+    if (curTransformFeedback && curTransformFeedback->isActive() &&
+        !curTransformFeedback->isPaused())
+    {
+        // EXT_geometry_shader allows transform feedback to work with all draw commands.
+        // [EXT_geometry_shader] Section 12.1, "Transform Feedback"
+        if (context->getExtensions().geometryShaderAny() || context->getClientVersion() >= ES_3_2)
+        {
+            if (!ValidateTransformFeedbackPrimitiveMode(
+                    context, entryPoint, curTransformFeedback->getPrimitiveMode(), modePacked))
+            {
+                context->validationError(entryPoint, GL_INVALID_OPERATION,
+                                         kInvalidDrawModeTransformFeedback);
+                return false;
+            }
+        }
+        else
+        {
+            // An INVALID_OPERATION error is generated if transform feedback is active and not
+            // paused.
+            context->validationError(entryPoint, GL_INVALID_OPERATION,
+                                     kUnsupportedDrawModeForTransformFeedback);
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool ValidateDrawElementsBaseVertexOES(const Context *context,
                                        angle::EntryPoint entryPoint,
                                        PrimitiveMode mode,
@@ -526,8 +622,14 @@ bool ValidateDrawRangeElementsBaseVertexOES(const Context *context,
 // GL_KHR_blend_equation_advanced
 bool ValidateBlendBarrierKHR(const Context *context, angle::EntryPoint entryPoint)
 {
-    context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
-    return false;
+    const Extensions &extensions = context->getExtensions();
+
+    if (!extensions.blendEquationAdvancedKHR)
+    {
+        context->validationError(entryPoint, GL_INVALID_ENUM, kAdvancedBlendExtensionNotEnabled);
+    }
+
+    return true;
 }
 
 bool ValidateBlendEquationSeparateiEXT(const Context *context,
@@ -1185,8 +1287,22 @@ bool ValidateSignalSemaphoreEXT(const Context *context,
         return false;
     }
 
+    for (GLuint i = 0; i < numBufferBarriers; ++i)
+    {
+        if (!context->getBuffer(buffers[i]))
+        {
+            context->validationError(entryPoint, GL_INVALID_OPERATION, kInvalidBufferName);
+            return false;
+        }
+    }
+
     for (GLuint i = 0; i < numTextureBarriers; ++i)
     {
+        if (!context->getTexture(textures[i]))
+        {
+            context->validationError(entryPoint, GL_INVALID_OPERATION, kInvalidTextureName);
+            return false;
+        }
         if (!IsValidImageLayout(FromGLenum<ImageLayout>(dstLayouts[i])))
         {
             context->validationError(entryPoint, GL_INVALID_ENUM, kInvalidImageLayout);
@@ -1212,8 +1328,22 @@ bool ValidateWaitSemaphoreEXT(const Context *context,
         return false;
     }
 
+    for (GLuint i = 0; i < numBufferBarriers; ++i)
+    {
+        if (!context->getBuffer(buffers[i]))
+        {
+            context->validationError(entryPoint, GL_INVALID_OPERATION, kInvalidBufferName);
+            return false;
+        }
+    }
+
     for (GLuint i = 0; i < numTextureBarriers; ++i)
     {
+        if (!context->getTexture(textures[i]))
+        {
+            context->validationError(entryPoint, GL_INVALID_OPERATION, kInvalidTextureName);
+            return false;
+        }
         if (!IsValidImageLayout(FromGLenum<ImageLayout>(srcLayouts[i])))
         {
             context->validationError(entryPoint, GL_INVALID_ENUM, kInvalidImageLayout);
@@ -1432,7 +1562,8 @@ bool ValidateTexStorageMemFlags2DANGLE(const Context *context,
                                        MemoryObjectID memoryPacked,
                                        GLuint64 offset,
                                        GLbitfield createFlags,
-                                       GLbitfield usageFlags)
+                                       GLbitfield usageFlags,
+                                       const void *imageCreateInfoPNext)
 {
     if (!context->getExtensions().memoryObjectFlagsANGLE)
     {
@@ -1490,7 +1621,8 @@ bool ValidateTexStorageMemFlags2DMultisampleANGLE(const Context *context,
                                                   MemoryObjectID memoryPacked,
                                                   GLuint64 offset,
                                                   GLbitfield createFlags,
-                                                  GLbitfield usageFlags)
+                                                  GLbitfield usageFlags,
+                                                  const void *imageCreateInfoPNext)
 {
     UNIMPLEMENTED();
     return false;
@@ -1507,7 +1639,8 @@ bool ValidateTexStorageMemFlags3DANGLE(const Context *context,
                                        MemoryObjectID memoryPacked,
                                        GLuint64 offset,
                                        GLbitfield createFlags,
-                                       GLbitfield usageFlags)
+                                       GLbitfield usageFlags,
+                                       const void *imageCreateInfoPNext)
 {
     UNIMPLEMENTED();
     return false;
@@ -1525,7 +1658,8 @@ bool ValidateTexStorageMemFlags3DMultisampleANGLE(const Context *context,
                                                   MemoryObjectID memoryPacked,
                                                   GLuint64 offset,
                                                   GLbitfield createFlags,
-                                                  GLbitfield usageFlags)
+                                                  GLbitfield usageFlags,
+                                                  const void *imageCreateInfoPNext)
 {
     UNIMPLEMENTED();
     return false;
@@ -1665,6 +1799,27 @@ bool ValidatePrimitiveBoundingBoxEXT(const Context *context,
                                      GLfloat maxW)
 {
     if (!context->getExtensions().primitiveBoundingBoxEXT)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    return true;
+}
+
+// GL_OES_primitive_bounding_box
+bool ValidatePrimitiveBoundingBoxOES(const Context *context,
+                                     angle::EntryPoint entryPoint,
+                                     GLfloat minX,
+                                     GLfloat minY,
+                                     GLfloat minZ,
+                                     GLfloat minW,
+                                     GLfloat maxX,
+                                     GLfloat maxY,
+                                     GLfloat maxZ,
+                                     GLfloat maxW)
+{
+    if (!context->getExtensions().primitiveBoundingBoxOES)
     {
         context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
         return false;
@@ -2457,4 +2612,329 @@ bool ValidateEGLImageTargetTexStorageEXT(const Context *context,
     return false;
 }
 
+bool ValidateAcquireTexturesANGLE(const Context *context,
+                                  angle::EntryPoint entryPoint,
+                                  GLuint numTextures,
+                                  const TextureID *textures,
+                                  const GLenum *layouts)
+{
+    if (!context->getExtensions().vulkanImageANGLE)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    for (GLuint i = 0; i < numTextures; ++i)
+    {
+        if (!context->getTexture(textures[i]))
+        {
+            context->validationError(entryPoint, GL_INVALID_OPERATION, kInvalidTextureName);
+            return false;
+        }
+        if (!IsValidImageLayout(FromGLenum<ImageLayout>(layouts[i])))
+        {
+            context->validationError(entryPoint, GL_INVALID_ENUM, kInvalidImageLayout);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool ValidateReleaseTexturesANGLE(const Context *context,
+                                  angle::EntryPoint entryPoint,
+                                  GLuint numTextures,
+                                  const TextureID *textures,
+                                  const GLenum *layouts)
+{
+    if (!context->getExtensions().vulkanImageANGLE)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+    for (GLuint i = 0; i < numTextures; ++i)
+    {
+        if (!context->getTexture(textures[i]))
+        {
+            context->validationError(entryPoint, GL_INVALID_OPERATION, kInvalidTextureName);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool ValidateFramebufferParameteriMESA(const Context *context,
+                                       angle::EntryPoint entryPoint,
+                                       GLenum target,
+                                       GLenum pname,
+                                       GLint param)
+{
+    if (pname != GL_FRAMEBUFFER_FLIP_Y_MESA)
+    {
+        context->validationError(entryPoint, GL_INVALID_ENUM, kInvalidPname);
+        return false;
+    }
+    return ValidateFramebufferParameteriBase(context, entryPoint, target, pname, param);
+}
+
+bool ValidateGetFramebufferParameterivMESA(const Context *context,
+                                           angle::EntryPoint entryPoint,
+                                           GLenum target,
+                                           GLenum pname,
+                                           const GLint *params)
+{
+    if (pname != GL_FRAMEBUFFER_FLIP_Y_MESA)
+    {
+        context->validationError(entryPoint, GL_INVALID_ENUM, kInvalidPname);
+        return false;
+    }
+    return ValidateGetFramebufferParameterivBase(context, entryPoint, target, pname, params);
+}
+
+// GL_AMD_performance_monitor
+bool ValidateBeginPerfMonitorAMD(const Context *context,
+                                 angle::EntryPoint entryPoint,
+                                 GLuint monitor)
+{
+    if (!context->getExtensions().performanceMonitorAMD)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    UNIMPLEMENTED();
+    return false;
+}
+
+bool ValidateDeletePerfMonitorsAMD(const Context *context,
+                                   angle::EntryPoint entryPoint,
+                                   GLsizei n,
+                                   const GLuint *monitors)
+{
+    if (!context->getExtensions().performanceMonitorAMD)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    UNIMPLEMENTED();
+    return false;
+}
+
+bool ValidateEndPerfMonitorAMD(const Context *context, angle::EntryPoint entryPoint, GLuint monitor)
+{
+    if (!context->getExtensions().performanceMonitorAMD)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    UNIMPLEMENTED();
+    return false;
+}
+
+bool ValidateGenPerfMonitorsAMD(const Context *context,
+                                angle::EntryPoint entryPoint,
+                                GLsizei n,
+                                const GLuint *monitors)
+{
+    if (!context->getExtensions().performanceMonitorAMD)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    UNIMPLEMENTED();
+    return false;
+}
+
+bool ValidateGetPerfMonitorCounterDataAMD(const Context *context,
+                                          angle::EntryPoint entryPoint,
+                                          GLuint monitor,
+                                          GLenum pname,
+                                          GLsizei dataSize,
+                                          const GLuint *data,
+                                          const GLint *bytesWritten)
+{
+    if (!context->getExtensions().performanceMonitorAMD)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    if (monitor != 0)
+    {
+        context->validationError(entryPoint, GL_INVALID_VALUE, kInvalidPerfMonitor);
+        return false;
+    }
+
+    switch (pname)
+    {
+        case GL_PERFMON_RESULT_AVAILABLE_AMD:
+        case GL_PERFMON_RESULT_SIZE_AMD:
+        case GL_PERFMON_RESULT_AMD:
+            break;
+
+        default:
+            context->validationError(entryPoint, GL_INVALID_ENUM, kInvalidPname);
+            return false;
+    }
+
+    return true;
+}
+
+bool ValidateGetPerfMonitorCounterInfoAMD(const Context *context,
+                                          angle::EntryPoint entryPoint,
+                                          GLuint group,
+                                          GLuint counter,
+                                          GLenum pname,
+                                          const void *data)
+{
+    if (!context->getExtensions().performanceMonitorAMD)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    const angle::PerfMonitorCounterGroups &groups = context->getPerfMonitorCounterGroups();
+
+    if (group >= groups.size())
+    {
+        context->validationError(entryPoint, GL_INVALID_VALUE, kInvalidPerfMonitorGroup);
+        return false;
+    }
+
+    if (counter >= groups[group].counters.size())
+    {
+        context->validationError(entryPoint, GL_INVALID_VALUE, kInvalidPerfMonitorCounter);
+        return false;
+    }
+
+    switch (pname)
+    {
+        case GL_COUNTER_TYPE_AMD:
+        case GL_COUNTER_RANGE_AMD:
+            break;
+
+        default:
+            context->validationError(entryPoint, GL_INVALID_ENUM, kInvalidPname);
+            return false;
+    }
+
+    return true;
+}
+
+bool ValidateGetPerfMonitorCounterStringAMD(const Context *context,
+                                            angle::EntryPoint entryPoint,
+                                            GLuint group,
+                                            GLuint counter,
+                                            GLsizei bufSize,
+                                            const GLsizei *length,
+                                            const GLchar *counterString)
+{
+    if (!context->getExtensions().performanceMonitorAMD)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    const angle::PerfMonitorCounterGroups &groups = context->getPerfMonitorCounterGroups();
+
+    if (group >= groups.size())
+    {
+        context->validationError(entryPoint, GL_INVALID_VALUE, kInvalidPerfMonitorGroup);
+        return false;
+    }
+
+    if (counter >= groups[group].counters.size())
+    {
+        context->validationError(entryPoint, GL_INVALID_VALUE, kInvalidPerfMonitorCounter);
+        return false;
+    }
+
+    return true;
+}
+
+bool ValidateGetPerfMonitorCountersAMD(const Context *context,
+                                       angle::EntryPoint entryPoint,
+                                       GLuint group,
+                                       const GLint *numCounters,
+                                       const GLint *maxActiveCounters,
+                                       GLsizei counterSize,
+                                       const GLuint *counters)
+{
+    if (!context->getExtensions().performanceMonitorAMD)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    const angle::PerfMonitorCounterGroups &groups = context->getPerfMonitorCounterGroups();
+
+    if (group >= groups.size())
+    {
+        context->validationError(entryPoint, GL_INVALID_VALUE, kInvalidPerfMonitorGroup);
+        return false;
+    }
+
+    return true;
+}
+
+bool ValidateGetPerfMonitorGroupStringAMD(const Context *context,
+                                          angle::EntryPoint entryPoint,
+                                          GLuint group,
+                                          GLsizei bufSize,
+                                          const GLsizei *length,
+                                          const GLchar *groupString)
+{
+    if (!context->getExtensions().performanceMonitorAMD)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    const angle::PerfMonitorCounterGroups &groups = context->getPerfMonitorCounterGroups();
+
+    if (group >= groups.size())
+    {
+        context->validationError(entryPoint, GL_INVALID_VALUE, kInvalidPerfMonitorGroup);
+        return false;
+    }
+
+    return true;
+}
+
+bool ValidateGetPerfMonitorGroupsAMD(const Context *context,
+                                     angle::EntryPoint entryPoint,
+                                     const GLint *numGroups,
+                                     GLsizei groupsSize,
+                                     const GLuint *groups)
+{
+    if (!context->getExtensions().performanceMonitorAMD)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    return true;
+}
+
+bool ValidateSelectPerfMonitorCountersAMD(const Context *context,
+                                          angle::EntryPoint entryPoint,
+                                          GLuint monitor,
+                                          GLboolean enable,
+                                          GLuint group,
+                                          GLint numCounters,
+                                          const GLuint *counterList)
+{
+    if (!context->getExtensions().performanceMonitorAMD)
+    {
+        context->validationError(entryPoint, GL_INVALID_OPERATION, kExtensionNotEnabled);
+        return false;
+    }
+
+    UNIMPLEMENTED();
+    return false;
+}
 }  // namespace gl

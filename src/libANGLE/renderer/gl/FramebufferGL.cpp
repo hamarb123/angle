@@ -305,8 +305,9 @@ class ScopedEXTTextureNorm16ReadbackWorkaround
                 checkedAllocatedBytes += area.width * pixelBytes - rowBytes;
             }
             ANGLE_CHECK_GL_MATH(contextGL, checkedAllocatedBytes.IsValid());
-            tmpPixels = new GLubyte[checkedAllocatedBytes.ValueOrDie()];
-            memset(tmpPixels, 0, checkedAllocatedBytes.ValueOrDie());
+            const GLuint allocatedBytes = checkedAllocatedBytes.ValueOrDie();
+            tmpPixels                   = new GLubyte[allocatedBytes];
+            memset(tmpPixels, 0, allocatedBytes);
         }
 
         return angle::Result::Continue;
@@ -1313,6 +1314,10 @@ angle::Result FramebufferGL::syncState(const gl::Context *context,
             case Framebuffer::DIRTY_BIT_DEFAULT_LAYERS:
                 functions->framebufferParameteri(GL_FRAMEBUFFER, GL_FRAMEBUFFER_DEFAULT_LAYERS_EXT,
                                                  mState.getDefaultLayers());
+                break;
+            case Framebuffer::DIRTY_BIT_FLIP_Y:
+                functions->framebufferParameteri(GL_FRAMEBUFFER, GL_FRAMEBUFFER_FLIP_Y_MESA,
+                                                 gl::ConvertToGLBoolean(mState.getFlipY()));
                 break;
             default:
             {

@@ -214,8 +214,8 @@ FramebufferStatus CheckAttachmentSampleCompleteness(const Context *context,
     {
         const Texture *texture = attachment.getTexture();
         ASSERT(texture);
-        GLenum internalFormat         = attachment.getFormat().info->internalFormat;
-        const TextureCaps &formatCaps = context->getTextureCaps().get(internalFormat);
+        GLenum sizedInternalFormat    = attachment.getFormat().info->sizedInternalFormat;
+        const TextureCaps &formatCaps = context->getTextureCaps().get(sizedInternalFormat);
         if (static_cast<GLuint>(attachment.getSamples()) > formatCaps.getMaxSamples())
         {
             return FramebufferStatus::Incomplete(
@@ -363,6 +363,7 @@ FramebufferState::FramebufferState(rx::Serial serial)
       mDefaultSamples(0),
       mDefaultFixedSampleLocations(GL_FALSE),
       mDefaultLayers(0),
+      mFlipY(GL_FALSE),
       mWebGLDepthStencilConsistent(true),
       mDefaultFramebufferReadAttachmentInitialized(false),
       mSrgbWriteControlMode(SrgbWriteControlMode::Default)
@@ -385,6 +386,7 @@ FramebufferState::FramebufferState(const Caps &caps, FramebufferID id, rx::Seria
       mDefaultSamples(0),
       mDefaultFixedSampleLocations(GL_FALSE),
       mDefaultLayers(0),
+      mFlipY(GL_FALSE),
       mWebGLDepthStencilConsistent(true),
       mDefaultFramebufferReadAttachmentInitialized(false),
       mSrgbWriteControlMode(SrgbWriteControlMode::Default)
@@ -1809,8 +1811,8 @@ void Framebuffer::setAttachment(const Context *context,
     {
         const InternalFormat *info = resource->getAttachmentFormat(binding, textureIndex).info;
         ASSERT(info);
-        GLenum internalformat         = info->internalFormat;
-        const TextureCaps &formatCaps = context->getTextureCaps().get(internalformat);
+        GLenum sizedInternalFormat    = info->sizedInternalFormat;
+        const TextureCaps &formatCaps = context->getTextureCaps().get(sizedInternalFormat);
         samples                       = formatCaps.getNearestSamples(samples);
     }
 
@@ -2227,6 +2229,11 @@ GLint Framebuffer::getDefaultLayers() const
     return mState.getDefaultLayers();
 }
 
+bool Framebuffer::getFlipY() const
+{
+    return mState.getFlipY();
+}
+
 void Framebuffer::setDefaultWidth(const Context *context, GLint defaultWidth)
 {
     mState.mDefaultWidth = defaultWidth;
@@ -2260,6 +2267,13 @@ void Framebuffer::setDefaultLayers(GLint defaultLayers)
 {
     mState.mDefaultLayers = defaultLayers;
     mDirtyBits.set(DIRTY_BIT_DEFAULT_LAYERS);
+}
+
+void Framebuffer::setFlipY(bool flipY)
+{
+    mState.mFlipY = flipY;
+    mDirtyBits.set(DIRTY_BIT_FLIP_Y);
+    invalidateCompletenessCache();
 }
 
 GLsizei Framebuffer::getNumViews() const

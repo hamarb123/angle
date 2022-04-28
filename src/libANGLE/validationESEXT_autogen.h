@@ -18,6 +18,69 @@ namespace gl
 {
 class Context;
 
+// GL_AMD_performance_monitor
+bool ValidateBeginPerfMonitorAMD(const Context *context,
+                                 angle::EntryPoint entryPoint,
+                                 GLuint monitor);
+bool ValidateDeletePerfMonitorsAMD(const Context *context,
+                                   angle::EntryPoint entryPoint,
+                                   GLsizei n,
+                                   const GLuint *monitors);
+bool ValidateEndPerfMonitorAMD(const Context *context,
+                               angle::EntryPoint entryPoint,
+                               GLuint monitor);
+bool ValidateGenPerfMonitorsAMD(const Context *context,
+                                angle::EntryPoint entryPoint,
+                                GLsizei n,
+                                const GLuint *monitors);
+bool ValidateGetPerfMonitorCounterDataAMD(const Context *context,
+                                          angle::EntryPoint entryPoint,
+                                          GLuint monitor,
+                                          GLenum pname,
+                                          GLsizei dataSize,
+                                          const GLuint *data,
+                                          const GLint *bytesWritten);
+bool ValidateGetPerfMonitorCounterInfoAMD(const Context *context,
+                                          angle::EntryPoint entryPoint,
+                                          GLuint group,
+                                          GLuint counter,
+                                          GLenum pname,
+                                          const void *data);
+bool ValidateGetPerfMonitorCounterStringAMD(const Context *context,
+                                            angle::EntryPoint entryPoint,
+                                            GLuint group,
+                                            GLuint counter,
+                                            GLsizei bufSize,
+                                            const GLsizei *length,
+                                            const GLchar *counterString);
+bool ValidateGetPerfMonitorCountersAMD(const Context *context,
+                                       angle::EntryPoint entryPoint,
+                                       GLuint group,
+                                       const GLint *numCounters,
+                                       const GLint *maxActiveCounters,
+                                       GLsizei counterSize,
+                                       const GLuint *counters);
+bool ValidateGetPerfMonitorGroupStringAMD(const Context *context,
+                                          angle::EntryPoint entryPoint,
+                                          GLuint group,
+                                          GLsizei bufSize,
+                                          const GLsizei *length,
+                                          const GLchar *groupString);
+bool ValidateGetPerfMonitorGroupsAMD(const Context *context,
+                                     angle::EntryPoint entryPoint,
+                                     const GLint *numGroups,
+                                     GLsizei groupsSize,
+                                     const GLuint *groups);
+bool ValidateSelectPerfMonitorCountersAMD(const Context *context,
+                                          angle::EntryPoint entryPoint,
+                                          GLuint monitor,
+                                          GLboolean enable,
+                                          GLuint group,
+                                          GLint numCounters,
+                                          const GLuint *counterList);
+
+// GL_ANDROID_extension_pack_es31a
+
 // GL_ANGLE_base_vertex_base_instance
 bool ValidateDrawArraysInstancedBaseInstanceANGLE(const Context *context,
                                                   angle::EntryPoint entryPoint,
@@ -32,7 +95,7 @@ bool ValidateDrawElementsInstancedBaseVertexBaseInstanceANGLE(const Context *con
                                                               GLsizei count,
                                                               DrawElementsType typePacked,
                                                               const GLvoid *indices,
-                                                              GLsizei instanceCounts,
+                                                              GLsizei instanceCount,
                                                               GLint baseVertex,
                                                               GLuint baseInstance);
 bool ValidateMultiDrawArraysInstancedBaseInstanceANGLE(const Context *context,
@@ -176,7 +239,8 @@ bool ValidateTexStorageMemFlags2DANGLE(const Context *context,
                                        MemoryObjectID memoryPacked,
                                        GLuint64 offset,
                                        GLbitfield createFlags,
-                                       GLbitfield usageFlags);
+                                       GLbitfield usageFlags,
+                                       const void *imageCreateInfoPNext);
 bool ValidateTexStorageMemFlags2DMultisampleANGLE(const Context *context,
                                                   angle::EntryPoint entryPoint,
                                                   TextureType targetPacked,
@@ -188,7 +252,8 @@ bool ValidateTexStorageMemFlags2DMultisampleANGLE(const Context *context,
                                                   MemoryObjectID memoryPacked,
                                                   GLuint64 offset,
                                                   GLbitfield createFlags,
-                                                  GLbitfield usageFlags);
+                                                  GLbitfield usageFlags,
+                                                  const void *imageCreateInfoPNext);
 bool ValidateTexStorageMemFlags3DANGLE(const Context *context,
                                        angle::EntryPoint entryPoint,
                                        TextureType targetPacked,
@@ -200,7 +265,8 @@ bool ValidateTexStorageMemFlags3DANGLE(const Context *context,
                                        MemoryObjectID memoryPacked,
                                        GLuint64 offset,
                                        GLbitfield createFlags,
-                                       GLbitfield usageFlags);
+                                       GLbitfield usageFlags,
+                                       const void *imageCreateInfoPNext);
 bool ValidateTexStorageMemFlags3DMultisampleANGLE(const Context *context,
                                                   angle::EntryPoint entryPoint,
                                                   TextureType targetPacked,
@@ -213,7 +279,8 @@ bool ValidateTexStorageMemFlags3DMultisampleANGLE(const Context *context,
                                                   MemoryObjectID memoryPacked,
                                                   GLuint64 offset,
                                                   GLbitfield createFlags,
-                                                  GLbitfield usageFlags);
+                                                  GLbitfield usageFlags,
+                                                  const void *imageCreateInfoPNext);
 
 // GL_ANGLE_memory_object_fuchsia
 bool ValidateImportMemoryZirconHandleANGLE(const Context *context,
@@ -824,6 +891,18 @@ bool ValidateGetTranslatedShaderSourceANGLE(const Context *context,
                                             const GLsizei *length,
                                             const GLchar *source);
 
+// GL_ANGLE_vulkan_image
+bool ValidateAcquireTexturesANGLE(const Context *context,
+                                  angle::EntryPoint entryPoint,
+                                  GLuint numTextures,
+                                  const TextureID *texturesPacked,
+                                  const GLenum *layouts);
+bool ValidateReleaseTexturesANGLE(const Context *context,
+                                  angle::EntryPoint entryPoint,
+                                  GLuint numTextures,
+                                  const TextureID *texturesPacked,
+                                  const GLenum *layouts);
+
 // GL_APPLE_clip_distance
 
 // GL_ARB_sync
@@ -1273,6 +1352,21 @@ bool ValidateImportMemoryFdEXT(const Context *context,
                                HandleType handleTypePacked,
                                GLint fd);
 
+// GL_EXT_multi_draw_indirect
+bool ValidateMultiDrawArraysIndirectEXT(const Context *context,
+                                        angle::EntryPoint entryPoint,
+                                        PrimitiveMode modePacked,
+                                        const void *indirect,
+                                        GLsizei drawcount,
+                                        GLsizei stride);
+bool ValidateMultiDrawElementsIndirectEXT(const Context *context,
+                                          angle::EntryPoint entryPoint,
+                                          PrimitiveMode modePacked,
+                                          DrawElementsType typePacked,
+                                          const void *indirect,
+                                          GLsizei drawcount,
+                                          GLsizei stride);
+
 // GL_EXT_multisampled_render_to_texture
 bool ValidateFramebufferTexture2DMultisampleEXT(const Context *context,
                                                 angle::EntryPoint entryPoint,
@@ -1647,6 +1741,8 @@ bool ValidateValidateProgramPipelineEXT(const Context *context,
                                         angle::EntryPoint entryPoint,
                                         ProgramPipelineID pipelinePacked);
 
+// GL_EXT_shader_framebuffer_fetch
+
 // GL_EXT_shader_framebuffer_fetch_non_coherent
 bool ValidateFramebufferFetchBarrierEXT(const Context *context, angle::EntryPoint entryPoint);
 
@@ -1863,6 +1959,18 @@ bool ValidateMaxShaderCompilerThreadsKHR(const Context *context,
 // GL_KHR_texture_compression_astc_ldr
 
 // GL_KHR_texture_compression_astc_sliced_3d
+
+// GL_MESA_framebuffer_flip_y
+bool ValidateFramebufferParameteriMESA(const Context *context,
+                                       angle::EntryPoint entryPoint,
+                                       GLenum target,
+                                       GLenum pname,
+                                       GLint param);
+bool ValidateGetFramebufferParameterivMESA(const Context *context,
+                                           angle::EntryPoint entryPoint,
+                                           GLenum target,
+                                           GLenum pname,
+                                           const GLint *params);
 
 // GL_NV_fence
 bool ValidateDeleteFencesNV(const Context *context,
@@ -2203,6 +2311,18 @@ bool ValidatePointSizePointerOES(const Context *context,
                                  const void *pointer);
 
 // GL_OES_point_sprite
+
+// GL_OES_primitive_bounding_box
+bool ValidatePrimitiveBoundingBoxOES(const Context *context,
+                                     angle::EntryPoint entryPoint,
+                                     GLfloat minX,
+                                     GLfloat minY,
+                                     GLfloat minZ,
+                                     GLfloat minW,
+                                     GLfloat maxX,
+                                     GLfloat maxY,
+                                     GLfloat maxZ,
+                                     GLfloat maxW);
 
 // GL_OES_query_matrix
 bool ValidateQueryMatrixxOES(const Context *context,

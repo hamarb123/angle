@@ -1,15 +1,4 @@
-#! /usr/bin/env vpython
-#
-# [VPYTHON:BEGIN]
-# wheel: <
-#  name: "infra/python/wheels/psutil/${vpython_platform}"
-#  version: "version:5.2.2"
-# >
-# wheel: <
-#  name: "infra/python/wheels/six-py2_py3"
-#  version: "version:1.10.0"
-# >
-# [VPYTHON:END]
+#! /usr/bin/env vpython3
 #
 # Copyright 2020 The ANGLE Project Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -63,7 +52,9 @@ def IsWindows():
 
 DEFAULT_TEST_SUITE = 'angle_perftests'
 DEFAULT_TEST_PREFIX = 'TracePerfTest.Run/vulkan_'
+SWIFTSHADER_TEST_PREFIX = 'TracePerfTest.Run/vulkan_swiftshader_'
 DEFAULT_SCREENSHOT_PREFIX = 'angle_vulkan_'
+SWIFTSHADER_SCREENSHOT_PREFIX = 'angle_vulkan_swiftshader_'
 DEFAULT_BATCH_SIZE = 5
 DEFAULT_LOG = 'info'
 
@@ -173,52 +164,17 @@ def get_skia_gold_keys(args, env):
         logging.exception('get_skia_gold_keys may only be called once')
     get_skia_gold_keys.called = True
 
-    class Filter:
-
-        def __init__(self):
-            self.accepting_lines = True
-            self.done_accepting_lines = False
-            self.android_prefix = re.compile(ANDROID_LOGGING_PREFIX)
-            self.lines = []
-            self.is_android = False
-
-        def append(self, line):
-            if self.done_accepting_lines:
-                return
-            if 'Additional test environment' in line or 'android/test_runner.py' in line:
-                self.accepting_lines = False
-                self.is_android = True
-            if ANDROID_BEGIN_SYSTEM_INFO in line:
-                self.accepting_lines = True
-                return
-            if not self.accepting_lines:
-                return
-
-            if self.is_android:
-                line = self.android_prefix.sub('', line)
-
-            if line[0] == '}':
-                self.done_accepting_lines = True
-
-            self.lines.append(line)
-
-        def get(self):
-            return self.lines
-
-    with common.temporary_file() as tempfile_path:
+    with temporary_dir() as temp_dir:
         binary = get_binary_name('angle_system_info_test')
-        if run_wrapper(args, [binary, '--vulkan', '-v'], env, tempfile_path):
+        sysinfo_args = [binary, '--vulkan', '-v', '--render-test-output-dir=' + temp_dir]
+        if args.swiftshader:
+            sysinfo_args.append('--swiftshader')
+        tempfile_path = os.path.join(temp_dir, 'stdout')
+        if run_wrapper(args, sysinfo_args, env, tempfile_path):
             raise Exception('Error getting system info.')
 
-        filter = Filter()
-
-        with open(tempfile_path) as f:
-            for line in f:
-                filter.append(line)
-
-        str = ''.join(filter.get())
-        logging.info(str)
-        json_data = json.loads(str)
+        with open(os.path.join(temp_dir, 'angle_system_info.json')) as f:
+            json_data = json.load(f)
 
     if len(json_data.get('gpus', [])) == 0 or not 'activeGPUIndex' in json_data:
         raise Exception('Error getting system info.')
@@ -278,7 +234,8 @@ def upload_test_result_to_skia_gold(args, gold_session_manager, gold_session, go
     use_luci = not (gold_properties.local_pixel_tests or gold_properties.no_luci_auth)
 
     # Note: this would be better done by iterating the screenshot directory.
-    png_file_name = os.path.join(screenshot_dir, DEFAULT_SCREENSHOT_PREFIX + image_name + '.png')
+    prefix = SWIFTSHADER_SCREENSHOT_PREFIX if args.swiftshader else DEFAULT_SCREENSHOT_PREFIX
+    png_file_name = os.path.join(screenshot_dir, prefix + image_name + '.png')
 
     if not os.path.isfile(png_file_name):
         logging.info('Screenshot not found, test skipped.')
@@ -331,8 +288,9 @@ def _get_batches(traces, batch_size):
         yield traces[i:i + batch_size]
 
 
-def _get_gtest_filter_for_batch(batch):
-    expanded = ['%s%s' % (DEFAULT_TEST_PREFIX, trace) for trace in batch]
+def _get_gtest_filter_for_batch(args, batch):
+    prefix = SWIFTSHADER_TEST_PREFIX if args.swiftshader else DEFAULT_TEST_PREFIX
+    expanded = ['%s%s' % (prefix, trace) for trace in batch]
     return '--gtest_filter=%s' % ':'.join(expanded)
 
 
@@ -371,13 +329,14 @@ def _run_tests(args, tests, extra_flags, env, screenshot_dir, results, test_resu
                     if iteration > 0:
                         logging.info('Test run failed, running retry #%d...' % iteration)
 
-                    gtest_filter = _get_gtest_filter_for_batch(batch)
+                    gtest_filter = _get_gtest_filter_for_batch(args, batch)
                     cmd = [
-                        args.test_suite,
+                        get_binary_name(args.test_suite),
                         gtest_filter,
                         '--render-test-output-dir=%s' % screenshot_dir,
                         '--one-frame-only',
                         '--verbose-logging',
+                        '--enable-all-trace-tests',
                     ] + extra_flags
                     batch_result = PASS if run_wrapper(args, cmd, env,
                                                        tempfile_path) == 0 else FAIL
@@ -421,7 +380,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--isolated-script-test-output', type=str)
     parser.add_argument('--isolated-script-test-perf-output', type=str)
-    parser.add_argument('--isolated-script-test-filter', type=str)
+    parser.add_argument('-f', '--isolated-script-test-filter', '--filter', type=str)
     parser.add_argument('--test-suite', help='Test suite to run.', default=DEFAULT_TEST_SUITE)
     parser.add_argument('--render-test-output-dir', help='Directory to store screenshots')
     parser.add_argument('--xvfb', help='Start xvfb.', action='store_true')
@@ -444,6 +403,7 @@ def main():
         default=DEFAULT_BATCH_SIZE)
     parser.add_argument(
         '-l', '--log', help='Log output level. Default is %s.' % DEFAULT_LOG, default=DEFAULT_LOG)
+    parser.add_argument('--swiftshader', help='Test with SwiftShader.', action='store_true')
 
     add_skia_gold_args(parser)
 
@@ -458,6 +418,10 @@ def main():
             sys.exit(1)
         args.shard_count = int(env.pop('GTEST_TOTAL_SHARDS'))
         args.shard_index = int(env.pop('GTEST_SHARD_INDEX'))
+
+    # The harness currently uploads all traces in a batch, which is very slow.
+    # TODO: Reduce lag from trace uploads and remove this. http://anglebug.com/6854
+    env['DEVICE_TIMEOUT_MULTIPLIER'] = '20'
 
     results = {
         'tests': {},
@@ -477,11 +441,6 @@ def main():
     rc = 0
 
     try:
-        if IsWindows():
-            args.test_suite = '.\\%s.exe' % args.test_suite
-        else:
-            args.test_suite = './%s' % args.test_suite
-
         # read test set
         json_name = os.path.join(ANGLE_SRC_DIR, 'src', 'tests', 'restricted_traces',
                                  'restricted_traces.json')

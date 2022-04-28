@@ -59,6 +59,10 @@ struct Extensions
     bool framebufferBlitAny() const { return (framebufferBlitANGLE || framebufferBlitNV); }
     bool geometryShaderAny() const { return (geometryShaderEXT || geometryShaderOES); }
     bool instancedArraysAny() const { return (instancedArraysANGLE || instancedArraysEXT); }
+    bool primitiveBoundingBoxAny() const
+    {
+        return (primitiveBoundingBoxEXT || primitiveBoundingBoxOES);
+    }
     bool shaderIoBlocksAny() const { return (shaderIoBlocksEXT || shaderIoBlocksOES); }
     bool textureBorderClampAny() const { return (textureBorderClampEXT || textureBorderClampOES); }
     bool textureBufferAny() const { return (textureBufferEXT || textureBufferOES); }
@@ -214,6 +218,9 @@ struct Extensions
     // GL_OES_element_index_uint
     bool elementIndexUintOES = false;
 
+    // GL_ANDROID_extension_pack_es31a
+    bool extensionPackEs31aANDROID = false;
+
     // GL_EXT_external_buffer
     bool externalBufferEXT = false;
 
@@ -234,6 +241,9 @@ struct Extensions
 
     // GL_NV_framebuffer_blit
     bool framebufferBlitNV = false;
+
+    // GL_MESA_framebuffer_flip_y
+    bool framebufferFlipYMESA = false;
 
     // GL_EXT_geometry_shader
     bool geometryShaderEXT = false;
@@ -264,6 +274,9 @@ struct Extensions
 
     // GL_EXT_memory_object_fd
     bool memoryObjectFdEXT = false;
+
+    // GL_EXT_multi_draw_indirect
+    bool multiDrawIndirectEXT = false;
 
     // GL_EXT_multisample_compatibility
     bool multisampleCompatibilityEXT = false;
@@ -298,11 +311,17 @@ struct Extensions
     // GL_KHR_parallel_shader_compile
     bool parallelShaderCompileKHR = false;
 
+    // GL_AMD_performance_monitor
+    bool performanceMonitorAMD = false;
+
     // GL_NV_pixel_buffer_object
     bool pixelBufferObjectNV = false;
 
     // GL_EXT_primitive_bounding_box
     bool primitiveBoundingBoxEXT = false;
+
+    // GL_OES_primitive_bounding_box
+    bool primitiveBoundingBoxOES = false;
 
     // GL_EXT_protected_textures
     bool protectedTexturesEXT = false;
@@ -345,6 +364,9 @@ struct Extensions
 
     // GL_EXT_separate_shader_objects
     bool separateShaderObjectsEXT = false;
+
+    // GL_EXT_shader_framebuffer_fetch
+    bool shaderFramebufferFetchEXT = false;
 
     // GL_EXT_shader_framebuffer_fetch_non_coherent
     bool shaderFramebufferFetchNonCoherentEXT = false;
@@ -526,6 +548,9 @@ struct Extensions
     // GL_ANGLE_base_vertex_base_instance
     bool baseVertexBaseInstanceANGLE = false;
 
+    // GL_ANGLE_base_vertex_base_instance_shader_builtin
+    bool baseVertexBaseInstanceShaderBuiltinANGLE = false;
+
     // GL_CHROMIUM_bind_generates_resource
     bool bindGeneratesResourceCHROMIUM = false;
 
@@ -604,6 +629,9 @@ struct Extensions
     // GL_ANGLE_request_extension
     bool requestExtensionANGLE = false;
 
+    // GL_ANGLE_rgbx_internal_format
+    bool rgbxInternalFormatANGLE = false;
+
     // GL_ANGLE_robust_client_memory
     bool robustClientMemoryANGLE = false;
 
@@ -636,6 +664,9 @@ struct Extensions
 
     // GL_ANGLE_texture_rectangle
     bool textureRectangleANGLE = false;
+
+    // GL_ANGLE_vulkan_image
+    bool vulkanImageANGLE = false;
 
     // GL_ANGLE_webgl_compatibility
     bool webglCompatibilityANGLE = false;
