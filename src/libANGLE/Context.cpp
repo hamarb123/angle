@@ -645,9 +645,6 @@ void Context::initializeDefaultResources()
     mCopyImageDirtyBits.set(State::DIRTY_BIT_READ_FRAMEBUFFER_BINDING);
     mCopyImageDirtyObjects.set(State::DIRTY_OBJECT_READ_FRAMEBUFFER);
 
-    mInvalidateDirtyBits.set(State::DIRTY_BIT_READ_FRAMEBUFFER_BINDING);
-    mInvalidateDirtyBits.set(State::DIRTY_BIT_DRAW_FRAMEBUFFER_BINDING);
-
     // Initialize overlay after implementation is initialized.
     ANGLE_CONTEXT_TRY(mOverlay.init(this));
 }
@@ -4142,13 +4139,6 @@ ANGLE_INLINE angle::Result Context::prepareForDispatch()
     return syncDirtyBits(mComputeDirtyBits, Command::Dispatch);
 }
 
-angle::Result Context::prepareForInvalidate(GLenum target)
-{
-    // Only sync the FBO that's being invalidated
-    ANGLE_TRY(mState.syncDirtyObject(this, target));
-    return syncDirtyBits(mInvalidateDirtyBits, Command::Invalidate);
-}
-
 angle::Result Context::syncState(const State::DirtyBits &bitMask,
                                  const State::DirtyObjects &objectMask,
                                  Command command)
@@ -4790,12 +4780,14 @@ void Context::readBuffer(GLenum mode)
 
 void Context::discardFramebuffer(GLenum target, GLsizei numAttachments, const GLenum *attachments)
 {
+    // Only sync the FBO
+    ANGLE_CONTEXT_TRY(mState.syncDirtyObject(this, target));
+
     Framebuffer *framebuffer = mState.getTargetFramebuffer(target);
     ASSERT(framebuffer);
 
     // The specification isn't clear what should be done when the framebuffer isn't complete.
     // We leave it up to the framebuffer implementation to decide what to do.
-    ANGLE_CONTEXT_TRY(prepareForInvalidate(target));
     ANGLE_CONTEXT_TRY(framebuffer->discard(this, numAttachments, attachments));
 }
 
@@ -4812,7 +4804,8 @@ void Context::invalidateFramebuffer(GLenum target,
         return;
     }
 
-    ANGLE_CONTEXT_TRY(prepareForInvalidate(target));
+    // Only sync the FBO
+    ANGLE_CONTEXT_TRY(mState.syncDirtyObject(this, target));
     ANGLE_CONTEXT_TRY(framebuffer->invalidate(this, numAttachments, attachments));
 }
 
@@ -4833,7 +4826,8 @@ void Context::invalidateSubFramebuffer(GLenum target,
     }
 
     Rectangle area(x, y, width, height);
-    ANGLE_CONTEXT_TRY(prepareForInvalidate(target));
+    // Only sync the FBO
+    ANGLE_CONTEXT_TRY(mState.syncDirtyObject(this, target));
     ANGLE_CONTEXT_TRY(framebuffer->invalidateSub(this, numAttachments, attachments, area));
 }
 
