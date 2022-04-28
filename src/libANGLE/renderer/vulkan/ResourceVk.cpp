@@ -58,12 +58,6 @@ Resource::Resource(Resource &&other) : Resource()
     mUse = std::move(other.mUse);
 }
 
-Resource &Resource::operator=(Resource &&rhs)
-{
-    std::swap(mUse, rhs.mUse);
-    return *this;
-}
-
 Resource::~Resource()
 {
     mUse.release();
