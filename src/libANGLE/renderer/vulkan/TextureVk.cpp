@@ -295,9 +295,7 @@ TextureVk::TextureVk(const gl::TextureState &state, RendererVk *renderer)
       mStagingBufferInitialSize(vk::kStagingBufferSize),
       mImageUsageFlags(0),
       mImageCreateFlags(0),
-      mImageObserverBinding(this, kTextureImageSubjectIndex),
-      mCurrentBaseLevel(state.getBaseLevel()),
-      mCurrentMaxLevel(state.getMaxLevel())
+      mImageObserverBinding(this, kTextureImageSubjectIndex)
 {}
 
 TextureVk::~TextureVk() = default;
@@ -1945,24 +1943,21 @@ angle::Result TextureVk::setBaseLevel(const gl::Context *context, GLuint baseLev
     return angle::Result::Continue;
 }
 
-angle::Result TextureVk::maybeUpdateBaseMaxLevels(ContextVk *contextVk, bool *didRespecifyOut)
+angle::Result TextureVk::updateBaseMaxLevels(ContextVk *contextVk,
+                                             bool baseLevelChanged,
+                                             bool maxLevelChanged)
 {
     if (!mImage)
     {
         return angle::Result::Continue;
     }
 
-    bool baseLevelChanged = mCurrentBaseLevel.get() != static_cast<GLint>(mState.getBaseLevel());
-    bool maxLevelChanged  = mCurrentMaxLevel.get() != static_cast<GLint>(mState.getMaxLevel());
+    // Caller already checked this. Shouldn't reach here if none of them are changed.
+    ASSERT(baseLevelChanged || maxLevelChanged);
 
-    if (!maxLevelChanged && !baseLevelChanged)
-    {
-        return angle::Result::Continue;
-    }
-
-    gl::LevelIndex newBaseLevel = gl::LevelIndex(mState.getEffectiveBaseLevel());
-    gl::LevelIndex newMaxLevel  = gl::LevelIndex(mState.getEffectiveMaxLevel());
-    ASSERT(newBaseLevel <= newMaxLevel);
+    gl::LevelIndex baseLevel(mState.getEffectiveBaseLevel());
+    gl::LevelIndex maxLevel(mState.getEffectiveMaxLevel());
+    ASSERT(baseLevel <= maxLevel);
 
     if (!mImage->valid())
     {
@@ -1975,10 +1970,10 @@ angle::Result TextureVk::maybeUpdateBaseMaxLevels(ContextVk *contextVk, bool *di
     {
         // For immutable texture, baseLevel/maxLevel should be a subset of the texture's actual
         // number of mip levels. We don't need to respecify an image.
-        ASSERT(!baseLevelChanged || newBaseLevel >= mImage->getFirstAllocatedLevel());
-        ASSERT(!maxLevelChanged || newMaxLevel < gl::LevelIndex(mImage->getLevelCount()));
+        ASSERT(!baseLevelChanged || baseLevel >= mImage->getFirstAllocatedLevel());
+        ASSERT(!maxLevelChanged || maxLevel < gl::LevelIndex(mImage->getLevelCount()));
     }
-    else if (!baseLevelChanged && (newMaxLevel <= mImage->getLastAllocatedLevel()))
+    else if (!baseLevelChanged && (maxLevel <= mImage->getLastAllocatedLevel()))
     {
         // With a valid image, check if only changing the maxLevel to a subset of the texture's
         // actual number of mip levels
@@ -1989,13 +1984,7 @@ angle::Result TextureVk::maybeUpdateBaseMaxLevels(ContextVk *contextVk, bool *di
         respecifyImage = true;
     }
 
-    *didRespecifyOut = respecifyImage;
-
-    if (respecifyImage)
-    {
-        return respecifyImageStorage(contextVk);
-    }
-    else
+    if (!respecifyImage)
     {
         // Don't need to respecify the texture; but do need to update which vkImageView's are
         // served up by ImageViewHelper
@@ -2003,9 +1992,11 @@ angle::Result TextureVk::maybeUpdateBaseMaxLevels(ContextVk *contextVk, bool *di
         // Update the current max level in ImageViewHelper
         const gl::ImageDesc &baseLevelDesc = mState.getBaseLevelDesc();
         return initImageViews(contextVk, mImage->getActualFormat(),
-                              baseLevelDesc.format.info->sized, newMaxLevel - newBaseLevel + 1,
+                              baseLevelDesc.format.info->sized, maxLevel - baseLevel + 1,
                               getImageViewLayerCount());
     }
+
+    return respecifyImageStorage(contextVk);
 }
 
 angle::Result TextureVk::copyAndStageImageData(ContextVk *contextVk,
@@ -2285,9 +2276,6 @@ angle::Result TextureVk::getAttachmentRenderTarget(const gl::Context *context,
     ASSERT(imageIndex.getLevelIndex() >= 0);
 
     ContextVk *contextVk = vk::GetImpl(context);
-
-    bool didRespecify = false;
-    ANGLE_TRY(maybeUpdateBaseMaxLevels(contextVk, &didRespecify));
 
     ASSERT(mState.hasBeenBoundAsAttachment());
     ANGLE_TRY(ensureRenderable(contextVk));
@@ -2610,12 +2598,13 @@ angle::Result TextureVk::syncState(const gl::Context *context,
     }
 
     // Set base and max level before initializing the image
-    bool didRespecify = false;
-    ANGLE_TRY(maybeUpdateBaseMaxLevels(contextVk, &didRespecify));
-
-    // Updating levels could have respecified the storage, recapture mImageCreateFlags
-    if (didRespecify)
+    bool baseLevelChanged = dirtyBits.test(gl::Texture::DIRTY_BIT_BASE_LEVEL);
+    bool maxLevelChanged  = dirtyBits.test(gl::Texture::DIRTY_BIT_MAX_LEVEL);
+    if (maxLevelChanged || baseLevelChanged)
     {
+        ANGLE_TRY(updateBaseMaxLevels(contextVk, baseLevelChanged, maxLevelChanged));
+
+        // Updating levels could have respecified the storage, recapture mImageCreateFlags
         oldCreateFlags = mImageCreateFlags;
     }
 
@@ -2957,9 +2946,6 @@ angle::Result TextureVk::initImage(ContextVk *contextVk,
         mState.getImmutableFormat() ? getMipLevelCount(ImageMipLevels::EnabledLevels) : levelCount;
     ANGLE_TRY(initImageViews(contextVk, angle::Format::Get(actualImageFormatID), sized,
                              viewLevelCount, layerCount));
-
-    mCurrentBaseLevel = gl::LevelIndex(mState.getBaseLevel());
-    mCurrentMaxLevel  = gl::LevelIndex(mState.getMaxLevel());
 
     return angle::Result::Continue;
 }
