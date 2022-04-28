@@ -20,9 +20,12 @@ Can build all configs like so: `autoninja -C out/Debug_x86 && autoninja -C out/R
 
 # How to move from one chromium feature branch base to another
 
-To move from `4692` to `4951`
+To move from `4692` to `4951`:
+
 Run `git fetch upstream chromium/4692 chromium/4951`
+
 Run `git log upstream/chromium/4951..upstream/chromium/4692 --oneline`
+
 Output:
 ```
 a254f5c62 (upstream/chromium/4692) M97: Vulkan: Fix incorrect bit test when mipmapping
@@ -32,9 +35,12 @@ a254f5c62 (upstream/chromium/4692) M97: Vulkan: Fix incorrect bit test when mipm
 f4e66c4ba M97: Vulkan: Fix deferred flush vs UtilsVk
 ...
 ```
-Our 
+
 Run `git revert 9272f74e2 7ccfe9ae7 f4e66c4ba ...` with the commits above, in the order above, starting with the commit it is based off
+
 Run `git merge upstream/chromium/4951`
+
+To verify, run `git diff upstream/chromium/4951..hamarb123-main`
 
 This should allow conflict-less merging & keep history intact.
 
@@ -64,7 +70,7 @@ Manual: Modification to `third_party/VK-GL-CTS/src/framework/opengl/wrapper/glwT
  
 -#if (DE_OS == DE_OS_WIN32 && DE_CPU == DE_CPU_X86_64)
 +#if (DE_OS == DE_OS_WIN32 && (DE_CPU == DE_CPU_X86_64 || defined(__aarch64__)))
-	typedef signed long long int	GLintptr;
+ 	typedef signed long long int	GLintptr;
  	typedef signed long long int	GLsizeiptr;
 ```
 
