@@ -97,6 +97,17 @@ Integrated in project: Modification to `third_party\libpng\BUILD.gn` (may be unn
  }
 ```
 
+# macOS additional info
+
+To set up building:
+```
+python scripts/bootstrap.py
+gclient sync
+gn args gn args out/Debug_x64 && gn args out/Release_x64 && gn args out/Debug_arm64 && gn args out/Release_arm64
+```
+
+Can build all configs like so: `autoninja -C out/Debug_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -C out/Release_arm64`
+
 # ANGLE - Almost Native Graphics Layer Engine
 
 The goal of ANGLE is to allow users of multiple operating systems to seamlessly run WebGL and other
