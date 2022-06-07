@@ -103,10 +103,10 @@ To set up building:
 ```
 python scripts/bootstrap.py
 gclient sync
-gn args gn args out/Debug_x64 && gn args out/Release_x64 && gn args out/Debug_arm64 && gn args out/Release_arm64
+gn args out/Debug_x64 && gn args out/Release_x64 && gn args out/Debug_arm64 && gn args out/Release_arm64
 ```
 
-Can build all configs like so: `autoninja -C out/Debug_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -C out/Release_arm64`
+Can build all configs like so: `autoninja -C out/Debug_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -C out/Release_arm64 && ./make_mac_files.command`
 
 # ANGLE - Almost Native Graphics Layer Engine
 
