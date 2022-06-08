@@ -4,10 +4,24 @@ Latest stable Google Chrome chromium build branch can be found [here](https://go
 
 Download depot_tools from [here](https://commondatastorage.googleapis.com/chrome-infra-docs/flat/depot_tools/docs/html/depot_tools_tutorial.html#_setting_up)
 
+If the error `block. was unexpected at this time.` occurs, modify `update_depot_tools.bat` like so:
+```diff
+     :: !VAR! syntax is used to get delayed expansion, because %VAR% syntax would
+-    :: return a value that was set prior entering the IF () block.
++    :: return a value that was set prior entering the IF block.
+     exit /b !ERRORLEVEL!
+   )
+   :: Use call/exit to avoid leaving an orphaned window title.
+   call "%TEMP%\update_depot_tools_tmp.bat" "%~dp0" %*
+   :: !VAR! syntax is used to get delayed expansion, because %VAR% syntax would
+-  :: return a value that was set prior entering the IF () block.
++  :: return a value that was set prior entering the IF block.
+   exit /b !ERRORLEVEL!
+```
+
 To set up powershell building, do the following:
 ```ps1
-set DEPOT_TOOLS_WIN_TOOLCHAIN=0
-$Env:PATH = "<path to depot_tools>;"+$Env:PATH+";<path to python 2.7>"
+$Env:PATH = "<path to depot_tools>;"+$Env:PATH
 python scripts/bootstrap.py
 gclient sync
 cmd /c mklink /D out "<path to out directory>"

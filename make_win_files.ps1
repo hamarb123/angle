@@ -1,0 +1,129 @@
+Push-Location $PSScriptRoot
+
+if (Test-Path ".\out\upload")
+{
+	Remove-Item -Recurse -Force ".\out\upload"
+}
+
+New-Item -Path ".\out\upload" -ItemType Directory
+New-Item -Path ".\out\upload\win_x86" -ItemType Directory
+New-Item -Path ".\out\upload\win_x86_debug" -ItemType Directory
+New-Item -Path ".\out\upload\win_x64" -ItemType Directory
+New-Item -Path ".\out\upload\win_x64_debug" -ItemType Directory
+New-Item -Path ".\out\upload\win_arm64" -ItemType Directory
+New-Item -Path ".\out\upload\win_arm64_debug" -ItemType Directory
+Copy-Item ".\Windows_Archive_Notes.txt" -Destination ".\out\upload\Notes.txt"
+
+Copy-Item ".\out\Release_x86\d3dcompiler_47.dll" -Destination ".\out\upload\win_x86\d3dcompiler_47.dll"
+Copy-Item ".\out\Release_x86\libEGL.dll" -Destination ".\out\upload\win_x86\libEGL.dll"
+Copy-Item ".\out\Release_x86\libEGL.dll.pdb" -Destination ".\out\upload\win_x86\libEGL.dll.pdb"
+Copy-Item ".\out\Release_x86\libGLESv2.dll" -Destination ".\out\upload\win_x86\libGLESv2.dll"
+Copy-Item ".\out\Release_x86\libGLESv2.dll.pdb" -Destination ".\out\upload\win_x86\libGLESv2.dll.pdb"
+
+Copy-Item ".\out\Debug_x86\d3dcompiler_47.dll" -Destination ".\out\upload\win_x86_debug\d3dcompiler_47.dll"
+Copy-Item ".\out\Debug_x86\libEGL.dll" -Destination ".\out\upload\win_x86_debug\libEGL.dll"
+Copy-Item ".\out\Debug_x86\libEGL.dll.pdb" -Destination ".\out\upload\win_x86_debug\libEGL.dll.pdb"
+Copy-Item ".\out\Debug_x86\libGLESv2.dll" -Destination ".\out\upload\win_x86_debug\libGLESv2.dll"
+Copy-Item ".\out\Debug_x86\libGLESv2.dll.pdb" -Destination ".\out\upload\win_x86_debug\libGLESv2.dll.pdb"
+
+Copy-Item ".\out\Release_x64\d3dcompiler_47.dll" -Destination ".\out\upload\win_x64\d3dcompiler_47.dll"
+Copy-Item ".\out\Release_x64\libEGL.dll" -Destination ".\out\upload\win_x64\libEGL.dll"
+Copy-Item ".\out\Release_x64\libEGL.dll.pdb" -Destination ".\out\upload\win_x64\libEGL.dll.pdb"
+Copy-Item ".\out\Release_x64\libGLESv2.dll" -Destination ".\out\upload\win_x64\libGLESv2.dll"
+Copy-Item ".\out\Release_x64\libGLESv2.dll.pdb" -Destination ".\out\upload\win_x64\libGLESv2.dll.pdb"
+
+Copy-Item ".\out\Debug_x64\d3dcompiler_47.dll" -Destination ".\out\upload\win_x64_debug\d3dcompiler_47.dll"
+Copy-Item ".\out\Debug_x64\libEGL.dll" -Destination ".\out\upload\win_x64_debug\libEGL.dll"
+Copy-Item ".\out\Debug_x64\libEGL.dll.pdb" -Destination ".\out\upload\win_x64_debug\libEGL.dll.pdb"
+Copy-Item ".\out\Debug_x64\libGLESv2.dll" -Destination ".\out\upload\win_x64_debug\libGLESv2.dll"
+Copy-Item ".\out\Debug_x64\libGLESv2.dll.pdb" -Destination ".\out\upload\win_x64_debug\libGLESv2.dll.pdb"
+
+Copy-Item ".\out\Release_arm64\libEGL.dll" -Destination ".\out\upload\win_arm64\libEGL.dll"
+Copy-Item ".\out\Release_arm64\libEGL.dll.pdb" -Destination ".\out\upload\win_arm64\libEGL.dll.pdb"
+Copy-Item ".\out\Release_arm64\libGLESv2.dll" -Destination ".\out\upload\win_arm64\libGLESv2.dll"
+Copy-Item ".\out\Release_arm64\libGLESv2.dll.pdb" -Destination ".\out\upload\win_arm64\libGLESv2.dll.pdb"
+
+Copy-Item ".\out\Debug_arm64\libEGL.dll" -Destination ".\out\upload\win_arm64_debug\libEGL.dll"
+Copy-Item ".\out\Debug_arm64\libEGL.dll.pdb" -Destination ".\out\upload\win_arm64_debug\libEGL.dll.pdb"
+Copy-Item ".\out\Debug_arm64\libGLESv2.dll" -Destination ".\out\upload\win_arm64_debug\libGLESv2.dll"
+Copy-Item ".\out\Debug_arm64\libGLESv2.dll.pdb" -Destination ".\out\upload\win_arm64_debug\libGLESv2.dll.pdb"
+
+
+$compress = @{
+  Path = ".\out\upload\win_x86\libEGL.dll", ".\out\upload\win_x86\libGLESv2.dll"
+  CompressionLevel = "Optimal"
+  DestinationPath = ".\out\win_x86.zip"
+}
+Compress-Archive @compress
+
+$compress = @{
+  Path = ".\out\upload\win_x86\d3dcompiler_47.dll", ".\out\upload\win_x86\libEGL.dll", ".\out\upload\win_x86\libGLESv2.dll"
+  CompressionLevel = "Optimal"
+  DestinationPath = ".\out\win_x86_win7.zip"
+}
+Compress-Archive @compress
+
+$compress = @{
+  Path = ".\out\upload\win_x86\d3dcompiler_47.dll", ".\out\upload\win_x86\libEGL.dll", ".\out\upload\win_x86\libEGL.dll.pdb", ".\out\upload\win_x86\libGLESv2.dll", ".\out\upload\win_x86\libGLESv2.dll.pdb", ".\out\upload\Notes.txt"
+  CompressionLevel = "Optimal"
+  DestinationPath = ".\out\win_x86_full.zip"
+}
+Compress-Archive @compress
+
+$compress = @{
+  Path = ".\out\upload\win_x86_debug\d3dcompiler_47.dll", ".\out\upload\win_x86_debug\libEGL.dll", ".\out\upload\win_x86_debug\libEGL.dll.pdb", ".\out\upload\win_x86_debug\libGLESv2.dll", ".\out\upload\win_x86_debug\libGLESv2.dll.pdb"
+  CompressionLevel = "Optimal"
+  DestinationPath = ".\out\win_x86_debug.zip"
+}
+Compress-Archive @compress
+
+
+$compress = @{
+  Path = ".\out\upload\win_x64\libEGL.dll", ".\out\upload\win_x64\libGLESv2.dll"
+  CompressionLevel = "Optimal"
+  DestinationPath = ".\out\win_x64.zip"
+}
+Compress-Archive @compress
+
+$compress = @{
+  Path = ".\out\upload\win_x64\d3dcompiler_47.dll", ".\out\upload\win_x64\libEGL.dll", ".\out\upload\win_x64\libGLESv2.dll"
+  CompressionLevel = "Optimal"
+  DestinationPath = ".\out\win_x64_win7.zip"
+}
+Compress-Archive @compress
+
+$compress = @{
+  Path = ".\out\upload\win_x64\d3dcompiler_47.dll", ".\out\upload\win_x64\libEGL.dll", ".\out\upload\win_x64\libEGL.dll.pdb", ".\out\upload\win_x64\libGLESv2.dll", ".\out\upload\win_x64\libGLESv2.dll.pdb", ".\out\upload\Notes.txt"
+  CompressionLevel = "Optimal"
+  DestinationPath = ".\out\win_x64_full.zip"
+}
+Compress-Archive @compress
+
+$compress = @{
+  Path = ".\out\upload\win_x64_debug\d3dcompiler_47.dll", ".\out\upload\win_x64_debug\libEGL.dll", ".\out\upload\win_x64_debug\libEGL.dll.pdb", ".\out\upload\win_x64_debug\libGLESv2.dll", ".\out\upload\win_x64_debug\libGLESv2.dll.pdb"
+  CompressionLevel = "Optimal"
+  DestinationPath = ".\out\win_x64_debug.zip"
+}
+Compress-Archive @compress
+
+
+$compress = @{
+  Path = ".\out\upload\win_arm64\libEGL.dll", ".\out\upload\win_arm64\libGLESv2.dll"
+  CompressionLevel = "Optimal"
+  DestinationPath = ".\out\win_arm64.zip"
+}
+Compress-Archive @compress
+
+$compress = @{
+  Path = ".\out\upload\win_arm64\libEGL.dll", ".\out\upload\win_arm64\libEGL.dll.pdb", ".\out\upload\win_arm64\libGLESv2.dll", ".\out\upload\win_arm64\libGLESv2.dll.pdb"
+  CompressionLevel = "Optimal"
+  DestinationPath = ".\out\win_arm64_full.zip"
+}
+Compress-Archive @compress
+
+$compress = @{
+  Path = ".\out\upload\win_arm64_debug\libEGL.dll", ".\out\upload\win_arm64_debug\libEGL.dll.pdb", ".\out\upload\win_arm64_debug\libGLESv2.dll", ".\out\upload\win_arm64_debug\libGLESv2.dll.pdb"
+  CompressionLevel = "Optimal"
+  DestinationPath = ".\out\win_arm64_debug.zip"
+}
+Compress-Archive @compress
