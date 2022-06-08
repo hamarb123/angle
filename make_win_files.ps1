@@ -127,3 +127,6 @@ $compress = @{
   DestinationPath = ".\out\upload\win_arm64_debug.zip"
 }
 Compress-Archive @compress
+
+
+Remove-Item -Force ".\out\upload\Notes.txt"
