@@ -82,5 +82,3 @@ popd
 pushd ./out/upload/mac_combined_debug
 zip ../mac_combined_debug.zip libEGL.dylib libGLESv2.dylib
 popd
-
-#this file is not uploaded: mac_combined_debug.zip
