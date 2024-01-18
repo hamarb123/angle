@@ -2176,7 +2176,10 @@ angle::Result State::detachBuffer(Context *context, const Buffer *buffer)
     if (curTransformFeedback)
     {
         ANGLE_TRY(curTransformFeedback->detachBuffer(context, bufferID));
-        context->getStateCache().onActiveTransformFeedbackChange(context);
+        if (isTransformFeedbackActiveUnpaused())
+        {
+            context->getStateCache().onActiveTransformFeedbackChange(context);
+        }
     }
 
     if (getVertexArray()->detachBuffer(context, bufferID))
