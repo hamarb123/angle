@@ -1684,6 +1684,12 @@ class ProgramD3D::GetVertexExecutableTask : public ProgramD3D::GetExecutableTask
     angle::Result run() override
     {
         ANGLE_TRACE_EVENT0("gpu.angle", "ProgramD3D::GetVertexExecutableTask::run");
+        if (!mProgram->mState.getAttachedShader(gl::ShaderType::Vertex))
+        {
+            return angle::Result::Continue;
+        }
+
+        mProgram->updateCachedInputLayoutFromShader();
 
         ANGLE_TRY(mProgram->getVertexExecutableForCachedInputLayout(this, &mExecutable, &mInfoLog));
 
@@ -2159,11 +2165,6 @@ std::unique_ptr<LinkEvent> ProgramD3D::link(const gl::Context *context,
         gatherTransformFeedbackVaryings(varyingPacking, builtins[gl::ShaderType::Vertex]);
 
         linkResources(resources);
-
-        if (mState.getAttachedShader(gl::ShaderType::Vertex))
-        {
-            updateCachedInputLayoutFromShader();
-        }
 
         return compileProgramExecutables(context, infoLog);
     }
