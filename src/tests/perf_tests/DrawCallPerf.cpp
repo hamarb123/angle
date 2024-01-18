@@ -13,6 +13,8 @@
 #include "test_utils/draw_call_perf_utils.h"
 #include "util/shader_utils.h"
 
+using namespace angle;
+
 namespace
 {
 enum class StateChange
@@ -26,6 +28,7 @@ enum class StateChange
     VertexBufferCycle,
     Scissor,
     ManyTextureDraw,
+    Uniform,
     InvalidEnum,
     EnumCount = InvalidEnum,
 };
@@ -74,6 +77,9 @@ std::string DrawArraysPerfParams::story() const
             break;
         case StateChange::ManyTextureDraw:
             strstr << "_many_tex_draw";
+            break;
+        case StateChange::Uniform:
+            strstr << "_uniform";
             break;
         default:
             break;
@@ -142,7 +148,17 @@ class DrawCallPerfBenchmark : public ANGLERenderTest,
     size_t mCurrentVBO = 0;
 };
 
-DrawCallPerfBenchmark::DrawCallPerfBenchmark() : ANGLERenderTest("DrawCallPerf", GetParam()) {}
+DrawCallPerfBenchmark::DrawCallPerfBenchmark() : ANGLERenderTest("DrawCallPerf", GetParam())
+{
+    const auto &params = GetParam();
+    if (IsPixel6() && params.eglParameters.renderer == EGL_PLATFORM_ANGLE_TYPE_OPENGLES_ANGLE &&
+        params.surfaceType == SurfaceType::Offscreen &&
+        (params.stateChange == StateChange::VertexAttrib ||
+         params.stateChange == StateChange::Program))
+    {
+        skipTest("https://issuetracker.google.com/issues/298407224 Fails on Pixel 6 GLES");
+    }
+}
 
 void DrawCallPerfBenchmark::initializeBenchmark()
 {
@@ -211,6 +227,24 @@ void main()
             GLuint buffer = Create2DTriangleBuffer(mNumTris, GL_STATIC_DRAW);
             mVBOPool.push_back(buffer);
         }
+    }
+    else if (params.stateChange == StateChange::Uniform)
+    {
+        constexpr char kVS[] = R"(attribute vec2 vPosition;
+void main()
+{
+    gl_Position = vec4(vPosition, 0, 1);
+})";
+
+        constexpr char kFS[] = R"(precision mediump float;
+uniform vec4 uni;
+void main()
+{
+    gl_FragColor = uni;
+})";
+
+        mProgram1 = CompileProgram(kVS, kFS);
+        ASSERT_NE(0u, mProgram1);
     }
     else
     {
@@ -525,6 +559,16 @@ void DrawWithEightTextures(unsigned int iterations,
     }
 }
 
+void UpdateUniformThenDraw(unsigned int iterations, GLsizei numElements)
+{
+    for (unsigned int it = 0; it < iterations; it++)
+    {
+        float f = static_cast<float>(it) / static_cast<float>(iterations);
+        glUniform4f(0, f, f + 0.1f, f + 0.2f, f + 0.3f);
+        glDrawArrays(GL_TRIANGLES, 0, numElements);
+    }
+}
+
 void DrawCallPerfBenchmark::drawBenchmark()
 {
     // This workaround fixes a huge queue of graphics commands accumulating on the GL
@@ -578,6 +622,9 @@ void DrawCallPerfBenchmark::drawBenchmark()
             glUseProgram(mProgram3);
             DrawWithEightTextures(params.iterationsPerStep, numElements, mTextures);
             break;
+        case StateChange::Uniform:
+            UpdateUniformThenDraw(params.iterationsPerStep, numElements);
+            break;
         case StateChange::InvalidEnum:
             ADD_FAILURE() << "Invalid state change.";
             break;
@@ -612,7 +659,7 @@ using P = DrawArraysPerfParams;
 std::vector<P> gTestsWithStateChange =
     CombineWithValues({P()}, angle::AllEnums<StateChange>(), CombineStateChange);
 std::vector<P> gTestsWithRenderer =
-    CombineWithFuncs(gTestsWithStateChange, {D3D11<P>, GL<P>, Vulkan<P>, WGL<P>});
+    CombineWithFuncs(gTestsWithStateChange, {D3D11<P>, GL<P>, Metal<P>, Vulkan<P>, WGL<P>});
 std::vector<P> gTestsWithDevice =
     CombineWithFuncs(gTestsWithRenderer, {Passthrough<P>, Offscreen<P>, NullDevice<P>});
 

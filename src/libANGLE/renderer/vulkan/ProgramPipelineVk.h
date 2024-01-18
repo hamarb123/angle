@@ -28,23 +28,17 @@ class ProgramPipelineVk : public ProgramPipelineImpl
     void destroy(const gl::Context *context) override;
     void reset(ContextVk *contextVk);
 
-    const ProgramExecutableVk &getExecutable() const { return mExecutable; }
-    ProgramExecutableVk &getExecutable() { return mExecutable; }
-
-    ProgramVk *getShaderProgram(gl::ShaderType shaderType) const
+    const ProgramExecutableVk *getExecutable() const
     {
-        const gl::Program *program = mState.getShaderProgram(shaderType);
-        return SafeGetImplAs<ProgramVk>(program);
+        return vk::GetImpl(&mState.getExecutable());
     }
+    ProgramExecutableVk *getExecutable() { return vk::GetImpl(&mState.getExecutable()); }
 
     angle::Result link(const gl::Context *glContext,
                        const gl::ProgramMergedVaryings &mergedVaryings,
                        const gl::ProgramVaryingPacking &varyingPacking) override;
 
     void onProgramUniformUpdate(gl::ShaderType shaderType) override;
-
-  private:
-    ProgramExecutableVk mExecutable;
 };
 
 }  // namespace rx

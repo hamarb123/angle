@@ -8,6 +8,7 @@
 
 #include "libANGLE/renderer/vulkan/vk_format_utils.h"
 
+#include "image_util/loadimage.h"
 #include "libANGLE/Texture.h"
 #include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/load_functions_table.h"
@@ -157,11 +158,10 @@ void Format::initImageFallback(RendererVk *renderer, const ImageFormatInitInfo *
     mImageInitializerFunction      = info[i].initializer;
 
     // Set renderable format.
-    if (testFunction != HasNonFilterableTextureFormatSupport && !format.isSnorm() &&
-        !format.isBlock)
+    if (testFunction != HasNonFilterableTextureFormatSupport &&
+        !(format.isSnorm() && format.channelCount == 3) && !format.isBlock)
     {
-        // Rendering to SNORM textures is not supported on Android, and it's
-        // enabled by the extension EXT_render_snorm.
+        // Rendering to RGB SNORM textures is not supported on Android.
         // Compressed textures also need to perform this check.
         testFunction = HasFullTextureFormatSupport;
         i = FindSupportedFormat(renderer, info, skip, static_cast<uint32_t>(numInfo), testFunction);
@@ -177,7 +177,7 @@ void Format::initBufferFallback(RendererVk *renderer,
     {
         size_t skip = renderer->getFeatures().forceFallbackFormat.enabled ? 1 : 0;
         int i       = FindSupportedFormat(renderer, info, skip, compressedStartIndex,
-                                    HasFullBufferFormatSupport);
+                                          HasFullBufferFormatSupport);
 
         mActualBufferFormatID         = info[i].format;
         mVkBufferFormatIsPacked       = info[i].vkFormatIsPacked;
@@ -234,9 +234,7 @@ FormatTable::FormatTable() {}
 
 FormatTable::~FormatTable() {}
 
-void FormatTable::initialize(RendererVk *renderer,
-                             gl::TextureCapsMap *outTextureCapsMap,
-                             std::vector<GLenum> *outCompressedTextureFormats)
+void FormatTable::initialize(RendererVk *renderer, gl::TextureCapsMap *outTextureCapsMap)
 {
     for (size_t formatIndex = 0; formatIndex < angle::kNumANGLEFormats; ++formatIndex)
     {
@@ -259,9 +257,18 @@ void FormatTable::initialize(RendererVk *renderer,
             continue;
         }
 
-        if (intendedAngleFormat.isBlock)
+        bool transcodeEtcToBc = false;
+        if (renderer->getFeatures().supportsComputeTranscodeEtcToBc.enabled &&
+            IsETCFormat(intendedFormatID) &&
+            !angle::Format::Get(format.mActualSampleOnlyImageFormatID).isBlock)
         {
-            outCompressedTextureFormats->push_back(format.mIntendedGLFormat);
+            // Check BC format support
+            angle::FormatID bcFormat = GetTranscodeBCFormatID(intendedFormatID);
+            if (HasNonRenderableTextureFormatSupport(renderer, bcFormat))
+            {
+                format.mActualSampleOnlyImageFormatID = bcFormat;
+                transcodeEtcToBc                      = true;
+            }
         }
 
         if (format.mActualRenderableImageFormatID == angle::FormatID::NONE)
@@ -278,7 +285,8 @@ void FormatTable::initialize(RendererVk *renderer,
         if (textureCaps.texturable)
         {
             format.mTextureLoadFunctions = GetLoadFunctionsMap(
-                format.mIntendedGLFormat, format.mActualSampleOnlyImageFormatID);
+                format.mIntendedGLFormat,
+                transcodeEtcToBc ? intendedFormatID : format.mActualSampleOnlyImageFormatID);
         }
 
         if (format.mActualRenderableImageFormatID == format.mActualSampleOnlyImageFormatID)
@@ -297,6 +305,46 @@ void FormatTable::initialize(RendererVk *renderer,
             }
         }
     }
+}
+
+angle::FormatID ExternalFormatTable::getOrAllocExternalFormatID(uint64_t externalFormat,
+                                                                VkFormat colorAttachmentFormat,
+                                                                VkFormatFeatureFlags formatFeatures)
+{
+    std::unique_lock<std::mutex> lock(mExternalYuvFormatMutex);
+    for (size_t index = 0; index < mExternalYuvFormats.size(); index++)
+    {
+        if (mExternalYuvFormats[index].externalFormat == externalFormat)
+        {
+            // Found a match. Just return existing formatID
+            return angle::FormatID(ToUnderlying(angle::FormatID::EXTERNAL0) + index);
+        }
+    }
+
+    if (mExternalYuvFormats.size() >= kMaxExternalFormatCountSupported)
+    {
+        ERR() << "ANGLE only suports maximum " << kMaxExternalFormatCountSupported
+              << " external renderable formats";
+        return angle::FormatID::NONE;
+    }
+
+    mExternalYuvFormats.push_back({externalFormat, colorAttachmentFormat, formatFeatures});
+    return angle::FormatID(ToUnderlying(angle::FormatID::EXTERNAL0) + mExternalYuvFormats.size() -
+                           1);
+}
+
+const ExternalYuvFormatInfo &ExternalFormatTable::getExternalFormatInfo(
+    angle::FormatID formatID) const
+{
+    ASSERT(formatID >= angle::FormatID::EXTERNAL0);
+    size_t index = ToUnderlying(formatID) - ToUnderlying(angle::FormatID::EXTERNAL0);
+    ASSERT(index < mExternalYuvFormats.size());
+    return mExternalYuvFormats[index];
+}
+
+bool IsYUVExternalFormat(angle::FormatID formatID)
+{
+    return formatID >= angle::FormatID::EXTERNAL0 && formatID <= angle::FormatID::EXTERNAL7;
 }
 
 size_t GetImageCopyBufferAlignment(angle::FormatID actualFormatID)
@@ -401,6 +449,91 @@ bool HasNonRenderableTextureFormatSupport(RendererVk *renderer, angle::FormatID 
            renderer->hasImageFormatFeatureBits(formatID, kBitsDepth);
 }
 
+// Checks if it is a ETC texture format
+bool IsETCFormat(angle::FormatID formatID)
+{
+    return formatID >= angle::FormatID::EAC_R11G11_SNORM_BLOCK &&
+           formatID <= angle::FormatID::ETC2_R8G8B8_UNORM_BLOCK;
+}
+// Checks if it is a BC texture format
+bool IsBCFormat(angle::FormatID formatID)
+{
+    return formatID >= angle::FormatID::BC1_RGBA_UNORM_BLOCK &&
+           formatID <= angle::FormatID::BC7_RGBA_UNORM_SRGB_BLOCK;
+}
+
+static constexpr int kNumETCFormats = 12;
+
+static_assert((int)angle::FormatID::ETC2_R8G8B8_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + kNumETCFormats - 1);
+
+static_assert((int)angle::FormatID::EAC_R11G11_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 1);
+static_assert((int)angle::FormatID::EAC_R11_SNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 2);
+static_assert((int)angle::FormatID::EAC_R11_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 3);
+static_assert((int)angle::FormatID::ETC1_LOSSY_DECODE_R8G8B8_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 4);
+static_assert((int)angle::FormatID::ETC1_R8G8B8_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 5);
+static_assert((int)angle::FormatID::ETC2_R8G8B8A1_SRGB_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 6);
+static_assert((int)angle::FormatID::ETC2_R8G8B8A1_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 7);
+static_assert((int)angle::FormatID::ETC2_R8G8B8A8_SRGB_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 8);
+static_assert((int)angle::FormatID::ETC2_R8G8B8A8_UNORM_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 9);
+static_assert((int)angle::FormatID::ETC2_R8G8B8_SRGB_BLOCK ==
+              (int)angle::FormatID::EAC_R11G11_SNORM_BLOCK + 10);
+
+static const std::array<LoadImageFunction, kNumETCFormats> kEtcToBcLoadingFunc = {
+    angle::LoadEACRG11SToBC5,     // EAC_R11G11_SNORM
+    angle::LoadEACRG11ToBC5,      // EAC_R11G11_UNORM
+    angle::LoadEACR11SToBC4,      // EAC_R11_SNORM
+    angle::LoadEACR11ToBC4,       // EAC_R11_UNORM_BLOCK
+    angle::LoadETC1RGB8ToBC1,     // ETC1_LOSSY_DECODE_R8G8B8_UNORM
+    angle::LoadETC2RGB8ToBC1,     // ETC1_R8G8B8_UNORM
+    angle::LoadETC2SRGB8A1ToBC1,  // ETC2_R8G8B8A1_SRGB
+    angle::LoadETC2RGB8A1ToBC1,   // ETC2_R8G8B8A1_UNORM
+    angle::LoadETC2SRGBA8ToBC3,   // ETC2_R8G8B8A8_SRGB
+    angle::LoadETC2RGBA8ToBC3,    // ETC2_R8G8B8A8_UNORM
+    angle::LoadETC2SRGB8ToBC1,    // ETC2_R8G8B8_SRGB
+    angle::LoadETC2RGB8ToBC1,     // ETC2_R8G8B8_UNORM
+};
+
+LoadImageFunctionInfo GetEtcToBcTransCodingFunc(angle::FormatID formatID)
+{
+    ASSERT(IsETCFormat(formatID));
+    return LoadImageFunctionInfo(
+        kEtcToBcLoadingFunc[static_cast<uint32_t>(formatID) -
+                            static_cast<uint32_t>(angle::FormatID::EAC_R11G11_SNORM_BLOCK)],
+        true);
+}
+
+static constexpr angle::FormatID kEtcToBcFormatMapping[] = {
+    angle::FormatID::BC5_RG_SNORM_BLOCK,         // EAC_R11G11_SNORM
+    angle::FormatID::BC5_RG_UNORM_BLOCK,         // EAC_R11G11_UNORM
+    angle::FormatID::BC4_RED_SNORM_BLOCK,        // EAC_R11_SNORM
+    angle::FormatID::BC4_RED_UNORM_BLOCK,        // EAC_R11_UNORM_BLOCK
+    angle::FormatID::BC1_RGB_UNORM_BLOCK,        // ETC1_LOSSY_DECODE_R8G8B8_UNORM
+    angle::FormatID::BC1_RGB_UNORM_BLOCK,        // ETC1_R8G8B8_UNORM
+    angle::FormatID::BC1_RGBA_UNORM_SRGB_BLOCK,  // ETC2_R8G8B8A1_SRGB
+    angle::FormatID::BC1_RGBA_UNORM_BLOCK,       // ETC2_R8G8B8A1_UNORM
+    angle::FormatID::BC3_RGBA_UNORM_SRGB_BLOCK,  // ETC2_R8G8B8A8_SRGB
+    angle::FormatID::BC3_RGBA_UNORM_BLOCK,       // ETC2_R8G8B8A8_UNORM
+    angle::FormatID::BC1_RGB_UNORM_SRGB_BLOCK,   // ETC2_R8G8B8_SRGB
+    angle::FormatID::BC1_RGB_UNORM_BLOCK,        // ETC2_R8G8B8_UNORM
+};
+
+angle::FormatID GetTranscodeBCFormatID(angle::FormatID formatID)
+{
+    ASSERT(IsETCFormat(formatID));
+    return kEtcToBcFormatMapping[static_cast<uint32_t>(formatID) -
+                                 static_cast<uint32_t>(angle::FormatID::EAC_R11G11_SNORM_BLOCK)];
+}
+
 GLenum GetSwizzleStateComponent(const gl::SwizzleState &swizzleState, GLenum component)
 {
     switch (component)
@@ -431,9 +564,7 @@ gl::SwizzleState ApplySwizzle(const gl::SwizzleState &formatSwizzle,
     return result;
 }
 
-gl::SwizzleState GetFormatSwizzle(const ContextVk *contextVk,
-                                  const angle::Format &angleFormat,
-                                  const bool sized)
+gl::SwizzleState GetFormatSwizzle(const angle::Format &angleFormat, const bool sized)
 {
     gl::SwizzleState internalSwizzle;
 
@@ -462,7 +593,7 @@ gl::SwizzleState GetFormatSwizzle(const ContextVk *contextVk,
             // In OES_depth_texture/ARB_depth_texture, depth
             // textures are treated as luminance.
             // If the internalformat was not sized, use OES_depth_texture behavior
-            bool hasGB = (angleFormat.depthBits > 0) && !sized;
+            bool hasGB = angleFormat.depthBits > 0 && !sized;
 
             internalSwizzle.swizzleRed   = GL_RED;
             internalSwizzle.swizzleGreen = hasGB ? GL_RED : GL_ZERO;

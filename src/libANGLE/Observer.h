@@ -51,19 +51,22 @@ enum class SubjectMessage
     // gl::VertexArray, into gl::Context. Used to track validation.
     SubjectMapped,
     SubjectUnmapped,
-    // Indicates a bound buffer was reallocated when it was mapped, to prevent having to flush
-    // pending commands and waiting for the GPU to become idle.
+    // Indicates a bound buffer's storage was reallocated due to glBufferData call or optimizations
+    // to prevent having to flush pending commands and waiting for the GPU to become idle.
     InternalMemoryAllocationChanged,
-
-    // Indicates that a buffer's storage has changed. Used to prevent use-after-free error. (Vulkan)
-    BufferVkStorageChanged,
 
     // Indicates an external change to the default framebuffer.
     SurfaceChanged,
+    // Indicates the system framebuffer's swapchain changed, i.e. color buffer changed but no
+    // depth/stencil buffer change.
+    SwapchainImageChanged,
 
     // Indicates a separable program's textures or images changed in the ProgramExecutable.
     ProgramTextureOrImageBindingChanged,
-    // Indicates a separable program was successfully re-linked.
+    // Indicates a program or pipeline is being re-linked.  This is used to make sure the Context or
+    // ProgramPipeline that reference the program/pipeline wait for it to finish linking.
+    ProgramUnlinked,
+    // Indicates a program or pipeline was successfully re-linked.
     ProgramRelinked,
     // Indicates a separable program's sampler uniforms were updated.
     SamplerUniformsUpdated,
@@ -72,6 +75,11 @@ enum class SubjectMessage
 
     // Indicates a Storage of back-end in gl::Texture has been released.
     StorageReleased,
+
+    // Sent when the GLuint ID for a gl::Texture is being deleted via glDeleteTextures. The
+    // texture may stay alive due to orphaning, but will no longer be directly accessible by the GL
+    // API.
+    TextureIDDeleted,
 
     // Indicates that all pending updates are complete in the subject.
     InitializationComplete,
@@ -92,6 +100,9 @@ class ObserverBindingBase
         : mObserver(observer), mIndex(subjectIndex)
     {}
     virtual ~ObserverBindingBase() {}
+
+    ObserverBindingBase(const ObserverBindingBase &other)            = default;
+    ObserverBindingBase &operator=(const ObserverBindingBase &other) = default;
 
     ObserverInterface *getObserver() const { return mObserver; }
     SubjectIndex getSubjectIndex() const { return mIndex; }
@@ -115,13 +126,13 @@ class Subject : NonCopyable
     void onStateChange(SubjectMessage message) const;
     bool hasObservers() const;
     void resetObservers();
+    ANGLE_INLINE size_t getObserversCount() const { return mObservers.size(); }
 
     ANGLE_INLINE void addObserver(ObserverBindingBase *observer)
     {
         ASSERT(!IsInContainer(mObservers, observer));
         mObservers.push_back(observer);
     }
-
     ANGLE_INLINE void removeObserver(ObserverBindingBase *observer)
     {
         ASSERT(IsInContainer(mObservers, observer));
@@ -138,6 +149,7 @@ class Subject : NonCopyable
 class ObserverBinding final : public ObserverBindingBase
 {
   public:
+    ObserverBinding();
     ObserverBinding(ObserverInterface *observer, SubjectIndex index);
     ~ObserverBinding() override;
     ObserverBinding(const ObserverBinding &other);

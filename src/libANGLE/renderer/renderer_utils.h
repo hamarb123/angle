@@ -24,6 +24,7 @@ namespace angle
 {
 struct FeatureSetBase;
 struct Format;
+struct ImageLoadContext;
 enum class FormatID;
 }  // namespace angle
 
@@ -31,6 +32,7 @@ namespace gl
 {
 struct FormatType;
 struct InternalFormat;
+class ProgramExecutable;
 class State;
 }  // namespace gl
 
@@ -60,6 +62,8 @@ enum class SurfaceRotation
     InvalidEnum,
     EnumCount = InvalidEnum,
 };
+
+bool IsRotatedAspectRatio(SurfaceRotation rotation);
 
 using SpecConstUsageBits = angle::PackedEnumBitSet<sh::vk::SpecConstUsage, uint32_t>;
 
@@ -144,7 +148,8 @@ using InitializeTextureDataFunction = void (*)(size_t width,
                                                size_t outputRowPitch,
                                                size_t outputDepthPitch);
 
-using LoadImageFunction = void (*)(size_t width,
+using LoadImageFunction = void (*)(const angle::ImageLoadContext &context,
+                                   size_t width,
                                    size_t height,
                                    size_t depth,
                                    const uint8_t *input,
@@ -427,14 +432,14 @@ angle::Result MultiDrawElementsInstancedBaseVertexBaseInstanceGeneral(ContextImp
 class ResetBaseVertexBaseInstance : angle::NonCopyable
 {
   public:
-    ResetBaseVertexBaseInstance(gl::Program *programObject,
+    ResetBaseVertexBaseInstance(gl::ProgramExecutable *executable,
                                 bool resetBaseVertex,
                                 bool resetBaseInstance);
 
     ~ResetBaseVertexBaseInstance();
 
   private:
-    gl::Program *mProgramObject;
+    gl::ProgramExecutable *mExecutable;
     bool mResetBaseVertex;
     bool mResetBaseInstance;
 };
@@ -442,6 +447,11 @@ class ResetBaseVertexBaseInstance : angle::NonCopyable
 angle::FormatID ConvertToSRGB(angle::FormatID formatID);
 angle::FormatID ConvertToLinear(angle::FormatID formatID);
 bool IsOverridableLinearFormat(angle::FormatID formatID);
+
+template <bool swizzledLuma = true>
+const gl::ColorGeneric AdjustBorderColor(const angle::ColorGeneric &borderColorGeneric,
+                                         const angle::Format &format,
+                                         bool stencilMode);
 
 enum class PipelineType
 {
@@ -459,18 +469,18 @@ enum class PipelineType
 // in the header as we want to share with specialized context impl on some platforms for multidraw
 #define ANGLE_SET_DRAW_ID_UNIFORM_0(drawID) \
     {}
-#define ANGLE_SET_DRAW_ID_UNIFORM_1(drawID) programObject->setDrawIDUniform(drawID)
+#define ANGLE_SET_DRAW_ID_UNIFORM_1(drawID) executable->setDrawIDUniform(drawID)
 #define ANGLE_SET_DRAW_ID_UNIFORM(cond) ANGLE_SET_DRAW_ID_UNIFORM_##cond
 
 #define ANGLE_SET_BASE_VERTEX_UNIFORM_0(baseVertex) \
     {}
-#define ANGLE_SET_BASE_VERTEX_UNIFORM_1(baseVertex) programObject->setBaseVertexUniform(baseVertex);
+#define ANGLE_SET_BASE_VERTEX_UNIFORM_1(baseVertex) executable->setBaseVertexUniform(baseVertex);
 #define ANGLE_SET_BASE_VERTEX_UNIFORM(cond) ANGLE_SET_BASE_VERTEX_UNIFORM_##cond
 
 #define ANGLE_SET_BASE_INSTANCE_UNIFORM_0(baseInstance) \
     {}
 #define ANGLE_SET_BASE_INSTANCE_UNIFORM_1(baseInstance) \
-    programObject->setBaseInstanceUniform(baseInstance)
+    executable->setBaseInstanceUniform(baseInstance)
 #define ANGLE_SET_BASE_INSTANCE_UNIFORM(cond) ANGLE_SET_BASE_INSTANCE_UNIFORM_##cond
 
 #define ANGLE_NOOP_DRAW_ context->noopDraw(mode, counts[drawID])

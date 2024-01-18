@@ -108,6 +108,7 @@ class BlitGL : angle::NonCopyable
                                  bool unpackFlipY,
                                  bool unpackPremultiplyAlpha,
                                  bool unpackUnmultiplyAlpha,
+                                 bool transformLinearToSrgb,
                                  bool *copySucceededOut);
 
     angle::Result copySubTextureCPUReadback(const gl::Context *context,
@@ -149,7 +150,11 @@ class BlitGL : angle::NonCopyable
                                     RenderbufferGL *source,
                                     GLenum sizedInternalFormat);
 
-    angle::Result clearFramebuffer(const gl::Context *context, FramebufferGL *source);
+    angle::Result clearFramebuffer(const gl::Context *context,
+                                   bool colorClear,
+                                   bool depthClear,
+                                   bool stencilClear,
+                                   FramebufferGL *source);
 
     angle::Result clearRenderableTextureAlphaToOne(const gl::Context *context,
                                                    GLuint texture,
@@ -178,12 +183,13 @@ class BlitGL : angle::NonCopyable
 
     struct BlitProgram
     {
-        GLuint program                = 0;
-        GLint sourceTextureLocation   = -1;
-        GLint scaleLocation           = -1;
-        GLint offsetLocation          = -1;
-        GLint multiplyAlphaLocation   = -1;
-        GLint unMultiplyAlphaLocation = -1;
+        GLuint program                      = 0;
+        GLint sourceTextureLocation         = -1;
+        GLint scaleLocation                 = -1;
+        GLint offsetLocation                = -1;
+        GLint multiplyAlphaLocation         = -1;
+        GLint unMultiplyAlphaLocation       = -1;
+        GLint transformLinearToSrgbLocation = -1;
     };
 
     angle::Result getBlitProgram(const gl::Context *context,

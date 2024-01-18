@@ -81,8 +81,10 @@ angle::Result SemaphoreVk::wait(gl::Context *context,
             BufferVk *bufferVk             = vk::GetImpl(buffer);
             vk::BufferHelper &bufferHelper = bufferVk->getBuffer();
 
+            vk::CommandBufferAccess access;
             vk::OutsideRenderPassCommandBuffer *commandBuffer;
-            ANGLE_TRY(contextVk->getOutsideRenderPassCommandBuffer({}, &commandBuffer));
+            access.onBufferExternalAcquireRelease(&bufferHelper);
+            ANGLE_TRY(contextVk->getOutsideRenderPassCommandBuffer(access, &commandBuffer));
 
             // Queue ownership transfer.
             bufferHelper.acquireFromExternal(contextVk, VK_QUEUE_FAMILY_EXTERNAL,
@@ -99,10 +101,13 @@ angle::Result SemaphoreVk::wait(gl::Context *context,
         {
             TextureVk *textureVk   = vk::GetImpl(textureBarrier.texture);
             vk::ImageHelper &image = textureVk->getImage();
-            vk::ImageLayout layout = vk::GetImageLayoutFromGLImageLayout(textureBarrier.layout);
+            vk::ImageLayout layout =
+                vk::GetImageLayoutFromGLImageLayout(contextVk, textureBarrier.layout);
 
+            vk::CommandBufferAccess access;
             vk::OutsideRenderPassCommandBuffer *commandBuffer;
-            ANGLE_TRY(contextVk->getOutsideRenderPassCommandBuffer({}, &commandBuffer));
+            access.onExternalAcquireRelease(&image);
+            ANGLE_TRY(contextVk->getOutsideRenderPassCommandBuffer(access, &commandBuffer));
 
             // Image should not be accessed while unowned. Emulated formats may have staged updates
             // to clear the image after initialization.
@@ -136,8 +141,10 @@ angle::Result SemaphoreVk::signal(gl::Context *context,
             vk::BufferHelper &bufferHelper = bufferVk->getBuffer();
 
             ANGLE_TRY(contextVk->onBufferReleaseToExternal(bufferHelper));
+            vk::CommandBufferAccess access;
             vk::OutsideRenderPassCommandBuffer *commandBuffer;
-            ANGLE_TRY(contextVk->getOutsideRenderPassCommandBuffer({}, &commandBuffer));
+            access.onBufferExternalAcquireRelease(&bufferHelper);
+            ANGLE_TRY(contextVk->getOutsideRenderPassCommandBuffer(access, &commandBuffer));
 
             // Queue ownership transfer.
             bufferHelper.releaseToExternal(contextVk, rendererQueueFamilyIndex,
@@ -153,7 +160,8 @@ angle::Result SemaphoreVk::signal(gl::Context *context,
         {
             TextureVk *textureVk   = vk::GetImpl(textureBarrier.texture);
             vk::ImageHelper &image = textureVk->getImage();
-            vk::ImageLayout layout = vk::GetImageLayoutFromGLImageLayout(textureBarrier.layout);
+            vk::ImageLayout layout =
+                vk::GetImageLayoutFromGLImageLayout(contextVk, textureBarrier.layout);
 
             // Don't transition to Undefined layout.  If external wants to transition the image away
             // from Undefined after this operation, it's perfectly fine to keep the layout as is in
@@ -166,8 +174,10 @@ angle::Result SemaphoreVk::signal(gl::Context *context,
             ANGLE_TRY(textureVk->ensureImageInitialized(contextVk, ImageMipLevels::EnabledLevels));
 
             ANGLE_TRY(contextVk->onImageReleaseToExternal(image));
+            vk::CommandBufferAccess access;
             vk::OutsideRenderPassCommandBuffer *commandBuffer;
-            ANGLE_TRY(contextVk->getOutsideRenderPassCommandBuffer({}, &commandBuffer));
+            access.onExternalAcquireRelease(&image);
+            ANGLE_TRY(contextVk->getOutsideRenderPassCommandBuffer(access, &commandBuffer));
 
             // Queue ownership transfer and layout transition.
             image.releaseToExternal(contextVk, rendererQueueFamilyIndex, VK_QUEUE_FAMILY_EXTERNAL,
@@ -181,7 +191,8 @@ angle::Result SemaphoreVk::signal(gl::Context *context,
         ANGLE_TRY(contextVk->syncExternalMemory());
     }
 
-    ANGLE_TRY(contextVk->flushImpl(&mSemaphore, RenderPassClosureReason::ExternalSemaphoreSignal));
+    ANGLE_TRY(contextVk->flushImpl(&mSemaphore, nullptr,
+                                   RenderPassClosureReason::ExternalSemaphoreSignal));
 
     // The external has asked for the semaphore to be signaled.  It will wait on this semaphore and
     // so we must ensure that the above flush (resulting in vkQueueSubmit) has actually been
@@ -193,7 +204,8 @@ angle::Result SemaphoreVk::signal(gl::Context *context,
     // > - A binary semaphore must be signaled, or have an associated semaphore signal operation
     // >   that is pending execution.
     //
-    return renderer->ensureNoPendingWork(contextVk);
+    return renderer->waitForQueueSerialToBeSubmittedToDevice(
+        contextVk, contextVk->getLastSubmittedQueueSerial());
 }
 
 angle::Result SemaphoreVk::importOpaqueFd(ContextVk *contextVk, GLint fd)

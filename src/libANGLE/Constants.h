@@ -11,7 +11,7 @@
 
 #include "common/platform.h"
 
-#include <stdint.h>
+#include <stddef.h>
 
 namespace gl
 {
@@ -22,12 +22,14 @@ const size_t kDefaultMaxProgramCacheMemoryBytes = 0;
 enum
 {
     // Implementation upper limits, real maximums depend on the hardware
-    MAX_SAMPLE_MASK_WORDS = 2,
+
+    // Only up to 32x MSAA supported.
+    IMPLEMENTATION_MAX_SAMPLE_MASK_WORDS = 1,
+    IMPLEMENTATION_MAX_SAMPLES           = 32,
 
     MAX_VERTEX_ATTRIBS         = 16,
     MAX_VERTEX_ATTRIB_BINDINGS = 16,
 
-    // Implementation upper limits, real maximums depend on the hardware
     IMPLEMENTATION_MAX_VARYING_VECTORS = 32,
     IMPLEMENTATION_MAX_DRAW_BUFFERS    = 8,
     IMPLEMENTATION_MAX_FRAMEBUFFER_ATTACHMENTS =
@@ -55,7 +57,7 @@ enum
     IMPLEMENTATION_MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS    = 4,
     IMPLEMENTATION_MAX_TRANSFORM_FEEDBACK_BUFFERS                = 4,
 
-    // Maximum number of views which are supported by the implementation of ANGLE_multiview.
+    // Maximum number of views which are supported by the multiview implementation.
     IMPLEMENTATION_ANGLE_MULTIVIEW_MAX_VIEWS = 4,
 
     // These are the maximums the implementation can support
@@ -78,17 +80,25 @@ enum
     IMPLEMENTATION_MAX_ACTIVE_TEXTURES = 96,
     IMPLEMENTATION_MAX_IMAGE_UNITS     = IMPLEMENTATION_MAX_ACTIVE_TEXTURES,
 
+    // Maximum framebuffer and renderbuffer size supported.
+    IMPLEMENTATION_MAX_FRAMEBUFFER_SIZE  = 32768,
+    IMPLEMENTATION_MAX_RENDERBUFFER_SIZE = 32768,
+
     // Maximum number of slots allocated for atomic counter buffers.
     IMPLEMENTATION_MAX_ATOMIC_COUNTER_BUFFER_BINDINGS = 8,
 
     // Implementation upper limits, real maximums depend on the hardware.
     IMPLEMENTATION_MAX_SHADER_STORAGE_BUFFER_BINDINGS = 64,
 
-    // Implementation upper limits of max number of clip distances
-    IMPLEMENTATION_MAX_CLIP_DISTANCES = 32,
+    // Implementation upper limits of max number of clip distances (minimum required per spec)
+    IMPLEMENTATION_MAX_CLIP_DISTANCES = 8,
 
     // Implementation upper limit for layered framebuffer layer count
     IMPLEMENTATION_MAX_FRAMEBUFFER_LAYERS = 256,
+
+    // ANGLE_shader_pixel_local_storage: keep the maximum number of supported planes reasonably
+    // similar on all platforms.
+    IMPLEMENTATION_MAX_PIXEL_LOCAL_STORAGE_PLANES = 8,
 };
 
 namespace limits

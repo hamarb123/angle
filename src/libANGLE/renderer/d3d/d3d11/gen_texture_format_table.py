@@ -158,6 +158,9 @@ format_entry_template = """{space}{{
 {space}                                 {rtvFormat},
 {space}                                 {dsvFormat},
 {space}                                 {blitSRVFormat},
+{space}                                 {stencilSRVFormat},
+{space}                                 {linearSRVFormat},
+{space}                                 {typelessFormat},
 {space}                                 {swizzleFormat},
 {space}                                 {initializer});
 {space}    return info;
@@ -174,6 +177,9 @@ split_format_entry_template = """{space}    {condition}
 {space}                                     {rtvFormat},
 {space}                                     {dsvFormat},
 {space}                                     {blitSRVFormat},
+{space}                                     {stencilSRVFormat},
+{space}                                     {linearSRVFormat},
+{space}                                     {typelessFormat},
 {space}                                     {swizzleFormat},
 {space}                                     {initializer});
 {space}        return info;
@@ -191,9 +197,12 @@ def json_to_table_data(internal_format, format_name, prefix, json):
         "formatName": format_name,
         "texFormat": "DXGI_FORMAT_UNKNOWN",
         "srvFormat": "DXGI_FORMAT_UNKNOWN",
+        "stencilSRVFormat": "DXGI_FORMAT_UNKNOWN",
+        "linearSRVFormat": "DXGI_FORMAT_UNKNOWN",
         "uavFormat": "DXGI_FORMAT_UNKNOWN",
         "rtvFormat": "DXGI_FORMAT_UNKNOWN",
         "dsvFormat": "DXGI_FORMAT_UNKNOWN",
+        "typelessFormat": "DXGI_FORMAT_UNKNOWN",
         "condition": prefix,
     }
 
@@ -306,7 +315,7 @@ def main():
 
     angle_format_cases = parse_json_into_switch_angle_format_string(json_map, json_data)
     output_cpp = template_texture_format_table_autogen_cpp.format(
-        script_name=sys.argv[0],
+        script_name=os.path.basename(sys.argv[0]),
         angle_format_info_cases=angle_format_cases,
         data_source_name=data_source_name)
     with open('texture_format_table_autogen.cpp', 'wt') as out_file:

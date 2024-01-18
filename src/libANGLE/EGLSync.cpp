@@ -18,37 +18,23 @@
 namespace egl
 {
 
-Sync::Sync(rx::EGLImplFactory *factory, EGLenum type, const AttributeMap &attribs)
-    : mLabel(nullptr),
-      mType(type),
-      mCondition(EGL_SYNC_PRIOR_COMMANDS_COMPLETE_KHR),
-      mNativeFenceFD(
-          attribs.getAsInt(EGL_SYNC_NATIVE_FENCE_FD_ANDROID, EGL_NO_NATIVE_FENCE_FD_ANDROID))
+Sync::Sync(rx::EGLImplFactory *factory, const egl::SyncID &id, EGLenum type)
+    : mLabel(nullptr), mId(id), mType(type), mCondition(0), mNativeFenceFD(0)
 {
-    switch (type)
+    switch (mType)
     {
         case EGL_SYNC_FENCE:
         case EGL_SYNC_NATIVE_FENCE_ANDROID:
-            mFence = std::unique_ptr<rx::EGLSyncImpl>(factory->createSync(attribs));
+        case EGL_SYNC_METAL_SHARED_EVENT_ANGLE:
+            mFence = std::unique_ptr<rx::EGLSyncImpl>(factory->createSync());
             break;
 
         case EGL_SYNC_REUSABLE_KHR:
-            mFence = std::unique_ptr<rx::EGLSyncImpl>(new rx::ReusableSync(attribs));
+            mFence = std::unique_ptr<rx::EGLSyncImpl>(new rx::ReusableSync());
             break;
 
         default:
             UNREACHABLE();
-    }
-
-    // Per extension spec: Signaling Condition.
-    // "If the EGL_SYNC_NATIVE_FENCE_FD_ANDROID attribute is not
-    // EGL_NO_NATIVE_FENCE_FD_ANDROID then the EGL_SYNC_CONDITION_KHR attribute
-    // is set to EGL_SYNC_NATIVE_FENCE_SIGNALED_ANDROID and the EGL_SYNC_STATUS_KHR
-    // attribute is set to reflect the signal status of the native fence object.
-    if ((mType == EGL_SYNC_NATIVE_FENCE_ANDROID) &&
-        (mNativeFenceFD != EGL_NO_NATIVE_FENCE_FD_ANDROID))
-    {
-        mCondition = EGL_SYNC_NATIVE_FENCE_SIGNALED_ANDROID;
     }
 }
 
@@ -61,9 +47,34 @@ void Sync::onDestroy(const Display *display)
 
 Sync::~Sync() {}
 
-Error Sync::initialize(const Display *display, const gl::Context *context)
+Error Sync::initialize(const Display *display,
+                       const gl::Context *context,
+                       const AttributeMap &attribs)
 {
-    return mFence->initialize(display, context, mType);
+    mAttributeMap = attribs;
+
+    mNativeFenceFD =
+        attribs.getAsInt(EGL_SYNC_NATIVE_FENCE_FD_ANDROID, EGL_NO_NATIVE_FENCE_FD_ANDROID);
+    mCondition = EGL_SYNC_PRIOR_COMMANDS_COMPLETE_KHR;
+
+    // Per extension spec: Signaling Condition.
+    // "If the EGL_SYNC_NATIVE_FENCE_FD_ANDROID attribute is not
+    // EGL_NO_NATIVE_FENCE_FD_ANDROID then the EGL_SYNC_CONDITION_KHR attribute
+    // is set to EGL_SYNC_NATIVE_FENCE_SIGNALED_ANDROID and the EGL_SYNC_STATUS_KHR
+    // attribute is set to reflect the signal status of the native fence object.
+    if ((mType == EGL_SYNC_NATIVE_FENCE_ANDROID) &&
+        (mNativeFenceFD != EGL_NO_NATIVE_FENCE_FD_ANDROID))
+    {
+        mCondition = EGL_SYNC_NATIVE_FENCE_SIGNALED_ANDROID;
+    }
+
+    // Per extension spec: Signaling Condition.
+    if (mType == EGL_SYNC_METAL_SHARED_EVENT_ANGLE)
+    {
+        mCondition = attribs.getAsInt(EGL_SYNC_CONDITION, EGL_SYNC_PRIOR_COMMANDS_COMPLETE_KHR);
+    }
+
+    return mFence->initialize(display, context, mType, mAttributeMap);
 }
 
 void Sync::setLabel(EGLLabelKHR label)
@@ -98,6 +109,11 @@ Error Sync::signal(const Display *display, const gl::Context *context, EGLint mo
 Error Sync::getStatus(const Display *display, EGLint *outStatus) const
 {
     return mFence->getStatus(display, outStatus);
+}
+
+Error Sync::copyMetalSharedEventANGLE(const Display *display, void **result) const
+{
+    return mFence->copyMetalSharedEventANGLE(display, result);
 }
 
 Error Sync::dupNativeFenceFD(const Display *display, EGLint *result) const
