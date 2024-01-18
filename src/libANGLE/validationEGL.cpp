@@ -4874,7 +4874,7 @@ bool ValidateBindTexImage(const ValidationContext *val,
     }
 
     gl::Context *context = val->eglThread->getContext();
-    if (context && !context->isContextLost())
+    if (context)
     {
         gl::TextureType type = egl_gl::EGLTextureTargetToTextureType(surface->getTextureTarget());
         gl::Texture *textureObject = context->getTextureByType(type);
