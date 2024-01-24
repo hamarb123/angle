@@ -1,23 +1,8 @@
 # Additional info for hamarb123:
 
-Latest stable Google Chrome chromium build branch can be found [here](https://googlechromelabs.github.io/current-versions/)
+Latest stable Google Chrome chromium build branch can be found [here](https://chromiumdash.appspot.com/branches)
 
 Download depot_tools from [here](https://commondatastorage.googleapis.com/chrome-infra-docs/flat/depot_tools/docs/html/depot_tools_tutorial.html#_setting_up)
-
-If the error `block. was unexpected at this time.` occurs, modify `update_depot_tools.bat` like so:
-```diff
-     :: !VAR! syntax is used to get delayed expansion, because %VAR% syntax would
--    :: return a value that was set prior entering the IF () block.
-+    :: return a value that was set prior entering the IF block.
-     exit /b !ERRORLEVEL!
-   )
-   :: Use call/exit to avoid leaving an orphaned window title.
-   call "%TEMP%\update_depot_tools_tmp.bat" "%~dp0" %*
-   :: !VAR! syntax is used to get delayed expansion, because %VAR% syntax would
--  :: return a value that was set prior entering the IF () block.
-+  :: return a value that was set prior entering the IF block.
-   exit /b !ERRORLEVEL!
-```
 
 To set up powershell building, do the following:
 ```ps1
@@ -25,12 +10,12 @@ $Env:PATH = "<path to depot_tools>;"+$Env:PATH
 python scripts/bootstrap.py
 gclient sync
 cmd /c mklink /D out "<path to out directory>"
-gn args out/Debug_x86 && gn args out/Release_x86 && gn args out/Debug_x64 && gn args out/Release_x64 && gn args out/Debug_arm64 && gn args out/Release_arm64
+gn args out/Debug_x86 && gn args out/Checked_x86 && gn args out/Release_x86 && gn args out/Debug_x64 && gn args out/Checked_x64 && gn args out/Release_x64 && gn args out/Debug_arm64 && gn args out/Checked_arm64 && gn args out/Release_arm64
 ```
 
-Can set up VS solutions with: `gn gen out/Debug_x86 --sln=angle --ide=vs2022 && gn gen out/Release_x86 --sln=angle --ide=vs2022 && gn gen out/Debug_x64 --sln=angle --ide=vs2022 && gn gen out/Release_x64 --sln=angle --ide=vs2022 && gn gen out/Debug_arm64 --sln=angle --ide=vs2022 && gn gen out/Release_arm64 --sln=angle --ide=vs2022`
+Can set up VS solutions with: `gn gen out/Debug_x86 --sln=angle --ide=vs2022 && gn gen out/Checked_x86 --sln=angle --ide=vs2022 && gn gen out/Release_x86 --sln=angle --ide=vs2022 && gn gen out/Debug_x64 --sln=angle --ide=vs2022 && gn gen out/Checked_x64 --sln=angle --ide=vs2022 && gn gen out/Release_x64 --sln=angle --ide=vs2022 && gn gen out/Debug_arm64 --sln=angle --ide=vs2022 && gn gen out/Checked_arm64 --sln=angle --ide=vs2022 && gn gen out/Release_arm64 --sln=angle --ide=vs2022`
 
-Can build all configs like so: `autoninja -C out/Debug_x86 && autoninja -C out/Release_x86 && autoninja -C out/Debug_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -C out/Release_arm64 && .\make_win_files.ps1`
+Can build all configs like so: `autoninja -C out/Debug_x86 && autoninja -C out/Checked_x86 && autoninja -C out/Release_x86 && autoninja -C out/Debug_x64 && autoninja -C out/Checked_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -c out/Checked_arm64 && autoninja -C out/Release_arm64 && .\make_win_files.ps1`
 
 # How to move from one chromium feature branch base to another
 
@@ -61,54 +46,81 @@ This should allow conflict-less merging & keep history intact.
 # Recommended build settings:
 
 ```
-# Set build arguments here. See `gn help buildargs`.
+# Build arguments go here.
+# See "gn args <out_dir> --list" for available build arguments.
 is_component_build = false
 target_cpu = "x86"
 is_clang = true
 is_debug = true
+is_official_build = false
+angle_enable_null = true
 ```
 
 or `target_cpu = "x64"` / `target_cpu = "arm64"` for those processors
 
-or `is_debug = false` for Release mode
+or `is_debug = false` for Checked/Release mode
+
+or `is_official_build = true` for Release mode
 
 `is_component_build = false` allows only needing to distribute `libEGL.dll`, `libGLESv2.dll`, and (for &lt; Win 8.1) `d3dcompiler_47.dll`
 
-# Note - To build arm64 on Windows:
+Windows fixes, modification to `build/compute_build_timestamp.py`:
+```diff
+-    if os.name == 'nt':
++    if os.name == 'nt_NEVER':
+```
 
-Must have `is_clang = true` in the ninja args.
+Windows and macOS fixes, modification to `build/config/compiler/pgo/pgo.gni`:
+```diff
+-    chrome_pgo_phase = 2
++    chrome_pgo_phase = 0
+```
 
-Manual: Modification to `third_party/VK-GL-CTS/src/framework/opengl/wrapper/glwTypes.inl`:
+Windows fixes, modification to `third_party/VK-GL-CTS/src/framework/opengl/wrapper/glwTypes.inl`:
 ```diff
  typedef void				GLvoid;
  
 -#if (DE_OS == DE_OS_WIN32 && DE_CPU == DE_CPU_X86_64)
-+#if (DE_OS == DE_OS_WIN32 && (DE_CPU == DE_CPU_X86_64 || defined(__aarch64__)))
++#if (DE_OS == DE_OS_WIN32 && (DE_CPU == DE_CPU_X86_64 || defined(_M_ARM64) || defined(__aarch64__)))
  	typedef signed long long int	GLintptr;
  	typedef signed long long int	GLsizeiptr;
 ```
 
-Integrated in project: Modification to `third_party\libpng\BUILD.gn` (may be unnecessary in future, but is for now):
+Windows fixes, modification to `third_party\libpng\BUILD.gn`:
 ```diff
-     "src/pngwtran.c",
-     "src/pngwutil.c",
-   ]
--  if (target_cpu == "arm" || target_cpu == "arm64") {
+     ]
+     defines = [ "PNG_INTEL_SSE_OPT=1" ]
+   } else if (target_cpu == "arm" || target_cpu == "arm64") {
 -    sources += [
 -      "src/arm/arm_init.c",
--      "src/arm/filter_neon.S",
 -      "src/arm/filter_neon_intrinsics.c",
 -      "src/arm/palette_neon_intrinsics.c",
 -    ]
--  }
-   if (is_win) {
-     cflags = [ "/wd4028" ]
+     defines = [
+-      "PNG_ARM_NEON_OPT=2",
+-      "PNG_ARM_NEON_IMPLEMENTATION=1",
++      "PNG_ARM_NEON_OPT=0",
++      "PNG_ARM_NEON_IMPLEMENTATION=0",
+     ]
    }
-   configs -= [ "//build/config/compiler:chromium_code" ]
-   public_configs = [ ":libpng_config" ]
-   deps = [ "//third_party/zlib:zlib" ]
-+  defines = [ "PNG_ARM_NEON_OPT=0" ]
- }
+```
+
+UWP fixes, modification to `src/common/platform.h`:
+```diff
++#    include "winapifamily.h"
+ #    include <intrin.h>
+
+ #    if defined(WINAPI_FAMILY) && (WINAPI_FAMILY != WINAPI_FAMILY_DESKTOP_APP)
+ #        define ANGLE_ENABLE_WINDOWS_UWP 1
+ #    endif
+```
+
+# Note - To build UWP on Windows:
+
+Change:
+```
+target_os = "winuwp"
+is_clang = false
 ```
 
 # macOS additional info
@@ -117,10 +129,10 @@ To set up building:
 ```
 python scripts/bootstrap.py
 gclient sync
-gn args out/Debug_x64 && gn args out/Release_x64 && gn args out/Debug_arm64 && gn args out/Release_arm64
+gn args out/Debug_x64 && gn args out/Checked_x64 && gn args out/Release_x64 && gn args out/Debug_arm64 && gn args out/Checked_arm64 && gn args out/Release_arm64
 ```
 
-Can build all configs like so: `autoninja -C out/Debug_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -C out/Release_arm64 && ./make_mac_files.command`
+Can build all configs like so: `autoninja -C out/Debug_x64 && autoninja -C out/Checked_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -C out/Checked_arm64 && autoninja -C out/Release_arm64 && ./make_mac_files.command`
 
 # ANGLE - Almost Native Graphics Layer Engine
 

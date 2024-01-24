@@ -1,1 +1,0 @@
-d3dcompiler_47.dll is only required for Windows 7 & 8, 8.1+ includes it in the OS.
