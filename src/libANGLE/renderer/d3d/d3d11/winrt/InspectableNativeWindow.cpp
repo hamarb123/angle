@@ -149,9 +149,15 @@ HRESULT GetOptionalPropertyValue(
         return S_OK;
     }
 
+    ComPtr<IInspectable> propertyValueInspectable;
     if (SUCCEEDED(result))
     {
-        result = propertyMap->Lookup(HStringReference(propertyName).Get(), &propertyValue);
+        result = propertyMap->Lookup(HStringReference(propertyName).Get(), &propertyValueInspectable);
+    }
+
+    if (SUCCEEDED(result))
+    {
+        result = propertyValueInspectable.As(&propertyValue);
     }
 
     return result;
