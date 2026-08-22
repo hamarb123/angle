@@ -134,6 +134,19 @@ gn args out/Debug_x64 && gn args out/Checked_x64 && gn args out/Release_x64 && g
 
 Can build all configs like so: `autoninja -C out/Debug_x64 && autoninja -C out/Checked_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -C out/Checked_arm64 && autoninja -C out/Release_arm64 && ./make_mac_files.command`
 
+NOTE FOR FUTURE: want to try one of these in the args:
+```
+extra_ldflags = [
+  "-Wl,-headerpad_max_install_names",
+]
+```
+or
+```
+extra_ldflags += [
+  "-Wl,-headerpad_max_install_names",
+]
+```
+
 # ANGLE - Almost Native Graphics Layer Engine
 
 The goal of ANGLE is to allow users of multiple operating systems to seamlessly run WebGL and other
