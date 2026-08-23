@@ -70,7 +70,6 @@ constexpr PackedEnumMap<Feature, const char *> kFeatureNames = {{
     {Feature::CompressVertexData, "compressVertexData"},
     {Feature::CopyIOSurfaceToNonIOSurfaceForReadOptimization, "copyIOSurfaceToNonIOSurfaceForReadOptimization"},
     {Feature::CopyTextureToBufferForReadOptimization, "copyTextureToBufferForReadOptimization"},
-    {Feature::CorruptProgramBinaryForTesting, "corruptProgramBinaryForTesting"},
     {Feature::DecodeEncodeSRGBForGenerateMipmap, "decodeEncodeSRGBForGenerateMipmap"},
     {Feature::DeferFlushUntilEndRenderPass, "deferFlushUntilEndRenderPass"},
     {Feature::DepthStencilBlitExtraCopy, "depthStencilBlitExtraCopy"},

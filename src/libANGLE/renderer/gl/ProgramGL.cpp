@@ -189,7 +189,7 @@ void ProgramGL::destroy(const gl::Context *context)
 angle::Result ProgramGL::load(const gl::Context *context,
                               gl::BinaryInputStream *stream,
                               std::shared_ptr<LinkTask> *loadTaskOut,
-                              egl::CacheGetResult *resultOut)
+                              bool *successOut)
 {
     ANGLE_TRACE_EVENT0("gpu.angle", "ProgramGL::load");
     ProgramExecutableGL *executableGL = getExecutable();
@@ -203,10 +203,8 @@ angle::Result ProgramGL::load(const gl::Context *context,
     // Load the binary
     mFunctions->programBinary(mProgramID, binaryFormat, binary, binaryLength);
 
-    // Verify that the program linked.  Ensure failure if program binary is intentionally corrupted,
-    // even if the corruption didn't really cause a failure.
-    if (!checkLinkStatus() ||
-        GetImplAs<ContextGL>(context)->getFeaturesGL().corruptProgramBinaryForTesting.enabled)
+    // Verify that the program linked
+    if (!checkLinkStatus())
     {
         return angle::Result::Continue;
     }
@@ -215,7 +213,7 @@ angle::Result ProgramGL::load(const gl::Context *context,
     reapplyUBOBindingsIfNeeded(context);
 
     *loadTaskOut = {};
-    *resultOut   = egl::CacheGetResult::GetSuccess;
+    *successOut  = true;
 
     return angle::Result::Continue;
 }
@@ -232,14 +230,6 @@ void ProgramGL::save(const gl::Context *context, gl::BinaryOutputStream *stream)
 
     stream->writeInt(binaryFormat);
     stream->writeInt(binaryLength);
-
-    if (GetImplAs<ContextGL>(context)->getFeaturesGL().corruptProgramBinaryForTesting.enabled)
-    {
-        // Random corruption of the binary data.  Corrupting the first byte has proven to be enough
-        // to later cause the binary load to fail on most platforms.
-        ++binary[0];
-    }
-
     stream->writeBytes(binary.data(), binaryLength);
 
     reapplyUBOBindingsIfNeeded(context);

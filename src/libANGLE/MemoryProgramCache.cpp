@@ -111,10 +111,8 @@ void MemoryProgramCache::ComputeHash(const Context *context,
 angle::Result MemoryProgramCache::getProgram(const Context *context,
                                              Program *program,
                                              egl::BlobCache::Key *hashOut,
-                                             egl::CacheGetResult *resultOut)
+                                             bool *successOut)
 {
-    *resultOut = egl::CacheGetResult::NotFound;
-
     // If caching is effectively disabled, don't bother calculating the hash.
     if (!mBlobCache.isCachingEnabled())
     {
@@ -133,20 +131,14 @@ angle::Result MemoryProgramCache::getProgram(const Context *context,
         case egl::BlobCache::GetAndDecompressResult::DecompressFailure:
             ANGLE_PERF_WARNING(context->getState().getDebug(), GL_DEBUG_SEVERITY_LOW,
                                "Error decompressing program binary data fetched from cache.");
-            remove(*hashOut);
-            // Consider this blob "not found".  As far as the rest of the code is considered,
-            // corrupted cache might as well not have existed.
             return angle::Result::Continue;
 
         case egl::BlobCache::GetAndDecompressResult::GetSuccess:
             ANGLE_TRY(program->loadBinary(context, uncompressedData.data(),
-                                          static_cast<int>(uncompressedData.size()), resultOut));
-
-            // Result is either Success or Rejected
-            ASSERT(*resultOut != egl::CacheGetResult::NotFound);
+                                          static_cast<int>(uncompressedData.size()), successOut));
 
             // If cache load failed, evict the entry
-            if (*resultOut == egl::CacheGetResult::Rejected)
+            if (!*successOut)
             {
                 ANGLE_PERF_WARNING(context->getState().getDebug(), GL_DEBUG_SEVERITY_LOW,
                                    "Failed to load program binary from cache.");

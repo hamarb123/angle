@@ -83,7 +83,7 @@ bool DecompressBlobCacheData(const uint8_t *compressedData,
 
     if (zResult != Z_OK)
     {
-        WARN() << "Failed to decompress data: " << zResult << "\n";
+        ERR() << "Failed to decompress data: " << zResult << "\n";
         return false;
     }
 
