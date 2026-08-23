@@ -5,16 +5,32 @@
 //
 
 #include "compiler/translator/glsl/OutputGLSL.h"
+#include "common/unsafe_buffers.h"
 
 #include "compiler/translator/Compiler.h"
 
 namespace sh
 {
+bool RemoveInvariant(sh::GLenum shaderType,
+                     int shaderVersion,
+                     ShShaderOutput outputType,
+                     const ShCompileOptions &compileOptions)
+{
+    return (shaderType == GL_FRAGMENT_SHADER && IsGLSL420OrNewer(outputType)) ||
+           (shaderType == GL_VERTEX_SHADER && compileOptions.removeInvariantAndCentroidForESSL3 &&
+            shaderVersion >= 300);
+}
 
 TOutputGLSL::TOutputGLSL(TCompiler *compiler,
                          TInfoSinkBase &objSink,
                          const ShCompileOptions &compileOptions)
-    : TOutputGLSLBase(compiler, objSink, compileOptions)
+    : TOutputGLSLBase(compiler,
+                      objSink,
+                      compileOptions,
+                      RemoveInvariant(compiler->getShaderType(),
+                                      compiler->getShaderVersion(),
+                                      compiler->getOutputType(),
+                                      compileOptions))
 {}
 
 bool TOutputGLSL::writeVariablePrecision(TPrecision)
@@ -33,17 +49,19 @@ void TOutputGLSL::visitSymbol(TIntermSymbol *node)
         return;
     }
 
+    ASSERT(sh::IsGLSL150OrNewer(getShaderOutput()));
+
     // Some built-ins get a special translation.
     const ImmutableString &name = node->getName();
     if (name == "gl_FragDepthEXT")
     {
         out << "gl_FragDepth";
     }
-    else if (name == "gl_FragColor" && sh::IsGLSL130OrNewer(getShaderOutput()))
+    else if (name == "gl_FragColor")
     {
         out << "webgl_FragColor";
     }
-    else if (name == "gl_FragData" && sh::IsGLSL130OrNewer(getShaderOutput()))
+    else if (name == "gl_FragData")
     {
         out << "webgl_FragData";
     }
@@ -64,36 +82,7 @@ void TOutputGLSL::visitSymbol(TIntermSymbol *node)
 ImmutableString TOutputGLSL::translateTextureFunction(const ImmutableString &name,
                                                       const ShCompileOptions &option)
 {
-    // Check WEBGL_video_texture invocation first.
-    if (name == "textureVideoWEBGL")
-    {
-        if (option.takeVideoTextureAsExternalOES)
-        {
-            // TODO(http://anglebug.com/3889): Implement external image situation.
-            UNIMPLEMENTED();
-            return ImmutableString("");
-        }
-        else
-        {
-            // Default translating textureVideoWEBGL to texture2D.
-            return ImmutableString("texture2D");
-        }
-    }
-
-    static const char *simpleRename[]       = {"texture2DLodEXT",
-                                               "texture2DLod",
-                                               "texture2DProjLodEXT",
-                                               "texture2DProjLod",
-                                               "textureCubeLodEXT",
-                                               "textureCubeLod",
-                                               "texture2DGradEXT",
-                                               "texture2DGradARB",
-                                               "texture2DProjGradEXT",
-                                               "texture2DProjGradARB",
-                                               "textureCubeGradEXT",
-                                               "textureCubeGradARB",
-                                               nullptr,
-                                               nullptr};
+    ASSERT(sh::IsGLSL150OrNewer(getShaderOutput()));
     static const char *legacyToCoreRename[] = {
         "texture2D", "texture", "texture2DProj", "textureProj", "texture2DLod", "textureLod",
         "texture2DProjLod", "textureProjLod", "texture2DRect", "texture", "texture2DRectProj",
@@ -105,14 +94,12 @@ ImmutableString TOutputGLSL::translateTextureFunction(const ImmutableString &nam
         "texture", "texture3DProj", "textureProj", "texture3DLod", "textureLod", "texture3DProjLod",
         "textureProjLod", "shadow2DEXT", "texture", "shadow2DProjEXT", "textureProj", nullptr,
         nullptr};
-    const char **mapping =
-        (sh::IsGLSL130OrNewer(getShaderOutput())) ? legacyToCoreRename : simpleRename;
 
-    for (int i = 0; mapping[i] != nullptr; i += 2)
+    for (int i = 0; ANGLE_UNSAFE_TODO(legacyToCoreRename[i]) != nullptr; i += 2)
     {
-        if (name == mapping[i])
+        if (name == ANGLE_UNSAFE_TODO(legacyToCoreRename[i]))
         {
-            return ImmutableString(mapping[i + 1]);
+            return ImmutableString(ANGLE_UNSAFE_TODO(legacyToCoreRename[i + 1]));
         }
     }
 

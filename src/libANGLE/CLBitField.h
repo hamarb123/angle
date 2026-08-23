@@ -10,6 +10,8 @@
 
 #include <angle_cl.h>
 
+#include <ostream>
+
 namespace cl
 {
 
@@ -32,22 +34,24 @@ class BitField
 
     cl_bitfield get() const { return mBits; }
 
-    bool isSet(cl_bitfield bits) const { return (mBits & bits) != 0u; }
-    bool isSet(const BitField &other) const { return (mBits & other.mBits) != 0u; }
-    bool isNotSet(cl_bitfield bits) const { return (mBits & bits) == 0u; }
-    bool isNotSet(const BitField &other) const { return (mBits & other.mBits) == 0u; }
+    bool intersects(cl_bitfield bits) const { return (mBits & bits) != 0u; }
+    bool intersects(const BitField &other) const { return (mBits & other.mBits) != 0u; }
+    bool excludes(cl_bitfield bits) const { return !intersects(bits); }
+    bool excludes(const BitField &other) const { return !intersects(other); }
 
     bool hasOtherBitsThan(cl_bitfield bits) const { return (mBits & ~bits) != 0u; }
     bool hasOtherBitsThan(const BitField &other) const { return (mBits & ~other.mBits) != 0u; }
 
     bool areMutuallyExclusive(cl_bitfield bits1, cl_bitfield bits2) const
     {
-        return (isSet(bits1) ? 1 : 0) + (isSet(bits2) ? 1 : 0) <= 1;
+        return (intersects(bits1) ? 1 : 0) + (intersects(bits2) ? 1 : 0) <= 1;
     }
 
     bool areMutuallyExclusive(cl_bitfield bits1, cl_bitfield bits2, cl_bitfield bits3) const
     {
-        return (isSet(bits1) ? 1 : 0) + (isSet(bits2) ? 1 : 0) + (isSet(bits3) ? 1 : 0) <= 1;
+        return (intersects(bits1) ? 1 : 0) + (intersects(bits2) ? 1 : 0) +
+                   (intersects(bits3) ? 1 : 0) <=
+               1;
     }
 
     BitField mask(cl_bitfield bits) const { return BitField(mBits & bits); }
@@ -64,19 +68,20 @@ class BitField
 
 static_assert(sizeof(BitField) == sizeof(cl_bitfield), "Type size mismatch");
 
-using DeviceType                = BitField;
-using DeviceFpConfig            = BitField;
-using DeviceExecCapabilities    = BitField;
-using DeviceSvmCapabilities     = BitField;
-using CommandQueueProperties    = BitField;
-using DeviceAffinityDomain      = BitField;
-using MemFlags                  = BitField;
-using SVM_MemFlags              = BitField;
-using MemMigrationFlags         = BitField;
-using MapFlags                  = BitField;
-using KernelArgTypeQualifier    = BitField;
-using DeviceAtomicCapabilities  = BitField;
-using DeviceEnqueueCapabilities = BitField;
+using DeviceType                 = BitField;
+using DeviceFpConfig             = BitField;
+using DeviceExecCapabilities     = BitField;
+using DeviceSvmCapabilities      = BitField;
+using CommandQueueProperties     = BitField;
+using CommandBufferKHRProperties = BitField;
+using DeviceAffinityDomain       = BitField;
+using MemFlags                   = BitField;
+using SVM_MemFlags               = BitField;
+using MemMigrationFlags          = BitField;
+using MapFlags                   = BitField;
+using KernelArgTypeQualifier     = BitField;
+using DeviceAtomicCapabilities   = BitField;
+using DeviceEnqueueCapabilities  = BitField;
 
 }  // namespace cl
 

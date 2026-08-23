@@ -7,6 +7,7 @@
 //   Various tests related for atomic counter buffers.
 //
 
+#include "common/unsafe_buffers.h"
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
 
@@ -34,7 +35,7 @@ TEST_P(AtomicCounterBufferTest, AtomicCounterBufferBindings)
 {
     ASSERT_EQ(3, getClientMajorVersion());
     GLBuffer atomicCounterBuffer;
-    glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, atomicCounterBuffer.get());
+    glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, atomicCounterBuffer);
     if (getClientMinorVersion() < 1)
     {
         EXPECT_GL_ERROR(GL_INVALID_ENUM);
@@ -167,7 +168,8 @@ TEST_P(AtomicCounterBufferTest31, TessellationControlShaderMaxAtomicCounterTests
     GLuint atomicBufferID;
     glGenBuffers(1, &atomicBufferID);
     GLuint *atomicBufferData = new GLuint[maxTessellationControlAtomicCounters];
-    memset(atomicBufferData, 0, sizeof(GLuint) * maxTessellationControlAtomicCounters);
+    ANGLE_UNSAFE_TODO(
+        memset(atomicBufferData, 0, sizeof(GLuint) * maxTessellationControlAtomicCounters));
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, atomicBufferID);
     glBufferData(GL_ATOMIC_COUNTER_BUFFER, sizeof(GLuint) * maxTessellationControlAtomicCounters,
                  NULL, GL_DYNAMIC_COPY);
@@ -206,7 +208,7 @@ TEST_P(AtomicCounterBufferTest31, TessellationControlShaderMaxAtomicCounterTests
                 expected_value++;
             }
         }
-        EXPECT_EQ(atomicBufferResult[n_ac - 1], expected_value);
+        ANGLE_UNSAFE_TODO(EXPECT_EQ(atomicBufferResult[n_ac - 1], expected_value));
     }
 
     glUnmapBuffer(GL_ATOMIC_COUNTER_BUFFER);
@@ -313,7 +315,8 @@ TEST_P(AtomicCounterBufferTest31, TessellationEvaluationShaderMaxAtomicCounterTe
     GLuint atomicBufferID;
     glGenBuffers(1, &atomicBufferID);
     GLuint *atomicBufferData = new GLuint[maxTessellationEvaluationAtomicCounters];
-    memset(atomicBufferData, 0, sizeof(GLuint) * maxTessellationEvaluationAtomicCounters);
+    ANGLE_UNSAFE_TODO(
+        memset(atomicBufferData, 0, sizeof(GLuint) * maxTessellationEvaluationAtomicCounters));
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, atomicBufferID);
     glBufferData(GL_ATOMIC_COUNTER_BUFFER, sizeof(GLuint) * maxTessellationEvaluationAtomicCounters,
                  NULL, GL_DYNAMIC_COPY);
@@ -343,7 +346,7 @@ TEST_P(AtomicCounterBufferTest31, TessellationEvaluationShaderMaxAtomicCounterTe
     unsigned int expected_value = tessellationControlPointsCount;
     for (GLint n_ac = 0; n_ac < maxTessellationEvaluationAtomicCounters; ++n_ac)
     {
-        EXPECT_EQ(atomicBufferResult[n_ac], expected_value);
+        ANGLE_UNSAFE_TODO(EXPECT_EQ(atomicBufferResult[n_ac], expected_value));
     }
 
     glUnmapBuffer(GL_ATOMIC_COUNTER_BUFFER);
@@ -400,7 +403,7 @@ TEST_P(AtomicCounterBufferTest31, OffsetNotAllSpecifiedWithSameValue)
 TEST_P(AtomicCounterBufferTest31, AtomicCounterReadCompute)
 {
     // Skipping due to a bug on the Adreno OpenGLES Android driver.
-    // http://anglebug.com/2925
+    // http://anglebug.com/42261624
     ANGLE_SKIP_TEST_IF(IsAndroid() && IsAdreno() && IsOpenGLES());
 
     constexpr char kComputeShaderSource[] = R"(#version 310 es
@@ -429,7 +432,7 @@ void main()
 TEST_P(AtomicCounterBufferTest31, AtomicCounterRead)
 {
     // Skipping test while we work on enabling atomic counter buffer support in th D3D renderer.
-    // http://anglebug.com/1729
+    // http://anglebug.com/42260658
     ANGLE_SKIP_TEST_IF(IsD3D11());
 
     constexpr char kFS[] =
@@ -446,7 +449,7 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterRead)
 
     ANGLE_GL_PROGRAM(program, essl31_shaders::vs::Simple(), kFS);
 
-    glUseProgram(program.get());
+    glUseProgram(program);
 
     // The initial value of counter 'ac' is 3u.
     unsigned int bufferData[3] = {11u, 3u, 1u};
@@ -456,7 +459,7 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterRead)
 
     glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, atomicCounterBuffer);
 
-    drawQuad(program.get(), essl31_shaders::PositionAttrib(), 0.0f);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.0f);
     ASSERT_GL_NO_ERROR();
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::white);
 }
@@ -466,7 +469,7 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterRead)
 TEST_P(AtomicCounterBufferTest31, DependentAtomicCounterBufferChange)
 {
     // Skipping test while we work on enabling atomic counter buffer support in th D3D renderer.
-    // http://anglebug.com/1729
+    // http://anglebug.com/42260658
     ANGLE_SKIP_TEST_IF(IsD3D11());
 
     constexpr char kFS[] =
@@ -484,7 +487,7 @@ TEST_P(AtomicCounterBufferTest31, DependentAtomicCounterBufferChange)
 
     ANGLE_GL_PROGRAM(program, essl31_shaders::vs::Simple(), kFS);
 
-    glUseProgram(program.get());
+    glUseProgram(program);
 
     // The initial value of counter 'ac' is 3u.
     unsigned int bufferDataLeft[3] = {11u, 3u, 1u};
@@ -495,13 +498,13 @@ TEST_P(AtomicCounterBufferTest31, DependentAtomicCounterBufferChange)
     glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, atomicCounterBuffer);
     // Draw left quad
     glViewport(0, 0, getWindowWidth() / 2, getWindowHeight());
-    drawQuad(program.get(), essl31_shaders::PositionAttrib(), 0.0f);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.0f);
     // Draw right quad
     unsigned int bufferDataRight[3] = {11u, 19u, 1u};
     glBufferData(GL_ATOMIC_COUNTER_BUFFER, sizeof(bufferDataRight), bufferDataRight,
                  GL_STATIC_DRAW);
     glViewport(getWindowWidth() / 2, 0, getWindowWidth() / 2, getWindowHeight());
-    drawQuad(program.get(), essl31_shaders::PositionAttrib(), 0.0f);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.0f);
     ASSERT_GL_NO_ERROR();
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::white);
     EXPECT_PIXEL_COLOR_EQ(getWindowWidth() / 2, 0, GLColor::red);
@@ -512,11 +515,11 @@ TEST_P(AtomicCounterBufferTest31, DependentAtomicCounterBufferChange)
 TEST_P(AtomicCounterBufferTest31, AtomicCounterBufferRangeRead)
 {
     // Skipping due to a bug on the Qualcomm driver.
-    // http://anglebug.com/3726
+    // http://anglebug.com/42262383
     ANGLE_SKIP_TEST_IF(IsNexus5X() && IsOpenGLES());
 
     // Skipping test while we work on enabling atomic counter buffer support in th D3D renderer.
-    // http://anglebug.com/1729
+    // http://anglebug.com/42260658
     ANGLE_SKIP_TEST_IF(IsD3D11());
 
     constexpr char kFS[] =
@@ -533,7 +536,7 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterBufferRangeRead)
 
     ANGLE_GL_PROGRAM(program, essl31_shaders::vs::Simple(), kFS);
 
-    glUseProgram(program.get());
+    glUseProgram(program);
 
     // The initial value of counter 'ac' is 3u.
     unsigned int bufferData[]     = {0u, 0u, 0u, 0u, 0u, 11u, 3u, 1u};
@@ -553,7 +556,7 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterBufferRangeRead)
                           sizeof(bufferData) - kOffset);
     }
 
-    drawQuad(program.get(), essl31_shaders::PositionAttrib(), 0.0f);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.0f);
     ASSERT_GL_NO_ERROR();
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::white);
 }
@@ -564,7 +567,7 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterBufferRangeRead)
 TEST_P(AtomicCounterBufferTest31, AtomicCounterBufferRepeatedBindUnbind)
 {
     // Skipping test while we work on enabling atomic counter buffer support in th D3D renderer.
-    // http://anglebug.com/1729
+    // http://anglebug.com/42260658
     ANGLE_SKIP_TEST_IF(IsD3D11());
 
     constexpr char kFS[] =
@@ -581,7 +584,7 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterBufferRepeatedBindUnbind)
 
     ANGLE_GL_PROGRAM(program, essl31_shaders::vs::Simple(), kFS);
 
-    glUseProgram(program.get());
+    glUseProgram(program);
 
     constexpr int32_t kBufferCount = 16;
     // The initial value of counter 'ac' is 3u.
@@ -590,7 +593,7 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterBufferRepeatedBindUnbind)
     // Populate atomicCounterBuffer[0] with valid data and the rest with nullptr
     for (int32_t bufferIndex = 0; bufferIndex < kBufferCount; bufferIndex++)
     {
-        glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, atomicCounterBuffer[bufferIndex]);
+        glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, ANGLE_UNSAFE_TODO(atomicCounterBuffer[bufferIndex]));
         glBufferData(GL_ATOMIC_COUNTER_BUFFER, sizeof(bufferData),
                      (bufferIndex == 0) ? bufferData : nullptr, GL_STATIC_DRAW);
     }
@@ -603,7 +606,7 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterBufferRepeatedBindUnbind)
     {
         constexpr int32_t kBufferIndices[kBufferCount] = {7, 12, 15, 5, 13, 14, 1, 2,
                                                           0, 6,  4,  9, 8,  11, 3, 10};
-        int32_t bufferIndex                            = kBufferIndices[i];
+        int32_t bufferIndex                            = ANGLE_UNSAFE_TODO(kBufferIndices[i]);
 
         // Randomly bind/unbind buffers to/from different binding points,
         // capped by GL_MAX_COMPUTE_ATOMIC_COUNTER_BUFFERS
@@ -614,10 +617,10 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterBufferRepeatedBindUnbind)
                                                                    12, 11, 8, 5,  10, 2, 7, 13};
 
             uint32_t bindingSlotIndex = bufferCount % kBindingSlotsSize;
-            uint32_t bindingSlot      = kBindingSlots[bindingSlotIndex];
+            uint32_t bindingSlot      = ANGLE_UNSAFE_TODO(kBindingSlots[bindingSlotIndex]);
             uint32_t bindingPoint     = bindingSlot % maxAtomicCounterBuffers;
             bool even                 = (bufferCount % 2 == 0);
-            int32_t bufferId          = (even) ? 0 : atomicCounterBuffer[bufferIndex];
+            int32_t bufferId = (even) ? 0 : ANGLE_UNSAFE_TODO(atomicCounterBuffer[bufferIndex]);
 
             glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, bindingPoint, bufferId);
         }
@@ -625,7 +628,7 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterBufferRepeatedBindUnbind)
 
     // Bind atomicCounterBuffer[0] to slot 0 and verify result
     glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, atomicCounterBuffer[0]);
-    drawQuad(program.get(), essl31_shaders::PositionAttrib(), 0.0f);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.0f);
     ASSERT_GL_NO_ERROR();
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::white);
 }
@@ -645,7 +648,7 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterIncrementAndDecrement)
 
     ANGLE_GL_COMPUTE_PROGRAM(program, kCS);
 
-    glUseProgram(program.get());
+    glUseProgram(program);
 
     // The initial value of 'ac[0]' is 3u, 'ac[1]' is 1u.
     unsigned int bufferData[3] = {11u, 3u, 1u};
@@ -663,7 +666,7 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterIncrementAndDecrement)
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, atomicCounterBuffer);
     void *mappedBuffer =
         glMapBufferRange(GL_ATOMIC_COUNTER_BUFFER, 0, sizeof(GLuint) * 3, GL_MAP_READ_BIT);
-    memcpy(bufferData, mappedBuffer, sizeof(bufferData));
+    ANGLE_UNSAFE_TODO(memcpy(bufferData, mappedBuffer, sizeof(bufferData)));
     glUnmapBuffer(GL_ATOMIC_COUNTER_BUFFER);
 
     EXPECT_EQ(11u, bufferData[0]);
@@ -702,10 +705,10 @@ void main()
     for (unsigned int ii = 0; ii < kBufferCount; ++ii)
     {
         GLuint initialData[1] = {ii};
-        glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, atomicCounterBuffers[ii]);
+        glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, ANGLE_UNSAFE_TODO(atomicCounterBuffers[ii]));
         glBufferData(GL_ATOMIC_COUNTER_BUFFER, sizeof(initialData), initialData, GL_STATIC_DRAW);
 
-        glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, ii, atomicCounterBuffers[ii]);
+        glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, ii, ANGLE_UNSAFE_TODO(atomicCounterBuffers[ii]));
     }
 
     glDispatchCompute(1, 1, 1);
@@ -715,7 +718,7 @@ void main()
 
     for (unsigned int ii = 0; ii < kBufferCount; ++ii)
     {
-        glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, atomicCounterBuffers[ii]);
+        glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, ANGLE_UNSAFE_TODO(atomicCounterBuffers[ii]));
         GLuint *mappedBuffer = static_cast<GLuint *>(
             glMapBufferRange(GL_ATOMIC_COUNTER_BUFFER, 0, sizeof(GLuint), GL_MAP_READ_BIT));
         EXPECT_EQ(ii + 1, mappedBuffer[0]);
@@ -727,13 +730,13 @@ void main()
 TEST_P(AtomicCounterBufferTest31, AtomicCounterArrayOfArray)
 {
     // Fails on D3D.  Some counters are double-incremented while some are untouched, hinting at a
-    // bug in index translation.  http://anglebug.com/3783
+    // bug in index translation.  http://anglebug.com/42262427
     ANGLE_SKIP_TEST_IF(IsD3D11());
 
-    // Nvidia's OpenGL driver fails to compile the shader.  http://anglebug.com/3791
+    // Nvidia's OpenGL driver fails to compile the shader.  http://anglebug.com/42262434
     ANGLE_SKIP_TEST_IF(IsOpenGL() && IsNVIDIA());
 
-    // Intel's Windows OpenGL driver crashes in this test.  http://anglebug.com/3791
+    // Intel's Windows OpenGL driver crashes in this test.  http://anglebug.com/42262434
     ANGLE_SKIP_TEST_IF(IsOpenGL() && IsIntel() && IsWindows());
 
     constexpr char kCS[] = R"(#version 310 es
@@ -833,13 +836,13 @@ void main()
     ANGLE_SKIP_TEST_IF(static_cast<uint32_t>(maxAtomicCounters) < kAtomicCounterCount);
 
     ANGLE_GL_COMPUTE_PROGRAM(program, kCS);
-    glUseProgram(program.get());
+    glUseProgram(program);
 
     // The initial value of atomic counters is 0, 1, 2, ...
     unsigned int bufferData[kAtomicCounterCount] = {};
     for (uint32_t index = 0; index < kAtomicCounterCount; ++index)
     {
-        bufferData[index] = index;
+        ANGLE_UNSAFE_TODO(bufferData[index]) = index;
     }
 
     GLBuffer atomicCounterBuffer;
@@ -857,12 +860,12 @@ void main()
     glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, atomicCounterBuffer);
     void *mappedBuffer =
         glMapBufferRange(GL_ATOMIC_COUNTER_BUFFER, 0, sizeof(bufferData), GL_MAP_READ_BIT);
-    memcpy(result, mappedBuffer, sizeof(bufferData));
+    ANGLE_UNSAFE_TODO(memcpy(result, mappedBuffer, sizeof(bufferData)));
     glUnmapBuffer(GL_ATOMIC_COUNTER_BUFFER);
 
     for (uint32_t index = 0; index < kAtomicCounterCount; ++index)
     {
-        EXPECT_EQ(result[index], bufferData[index] + 1) << "index " << index;
+        ANGLE_UNSAFE_TODO(EXPECT_EQ(result[index], bufferData[index] + 1)) << "index " << index;
     }
 }
 
@@ -915,6 +918,153 @@ TEST_P(AtomicCounterBufferTest31, AtomicCounterMemoryBarrier)
     ASSERT_GL_NO_ERROR();
 
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+}
+
+// Tests queries for atomic counter
+TEST_P(AtomicCounterBufferTest31, AtomicCounterQueries)
+{
+    constexpr uint32_t kAtomicCounterCount = 1 + 2 + 2 * 3;
+
+    GLint maxAtomicCounters = 0;
+    glGetIntegerv(GL_MAX_COMPUTE_ATOMIC_COUNTERS, &maxAtomicCounters);
+    EXPECT_GL_NO_ERROR();
+
+    // Required minimum is 8 by the spec
+    EXPECT_GE(maxAtomicCounters, 8);
+    ANGLE_SKIP_TEST_IF(static_cast<uint32_t>(maxAtomicCounters) < kAtomicCounterCount);
+
+    constexpr char kComputeShaderSource[] = R"(#version 310 es
+/* 1x1x1 workgroup */
+layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+/* GL_MAX_COMPUTE_ATOMIC_COUNTERS is min 8 and GL_MAX_ATOMIC_COUNTER_BUFFER_SIZE
+ * is min 32 bytes according to GLES 3.1 spec */
+layout (binding=0, offset=0) uniform atomic_uint ac;
+layout (binding=0, offset=4) uniform atomic_uint acArray[2];
+layout (binding=0, offset=12) uniform atomic_uint acArrayArray[2][3];
+
+void main()
+{
+    atomicCounterIncrement(ac);
+    atomicCounterDecrement(acArray[0]);
+    atomicCounterIncrement(acArray[1]);
+    atomicCounterIncrement(acArrayArray[0][0]);
+    atomicCounterDecrement(acArrayArray[0][1]);
+    atomicCounterIncrement(acArrayArray[0][2]);
+    atomicCounterDecrement(acArrayArray[1][0]);
+    atomicCounterIncrement(acArrayArray[1][1]);
+    atomicCounterIncrement(acArrayArray[1][2]);
+}
+)";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kComputeShaderSource);
+    EXPECT_GL_NO_ERROR();
+
+    glUseProgram(program);
+    EXPECT_GL_NO_ERROR();
+
+    GLsizei length = 0;
+    // Tests the resource property GL_BUFFER_DATA_SIZE query for ACB
+    GLenum ACBDataSizeProp = GL_BUFFER_DATA_SIZE;
+    GLint ACBDataSize;
+    glGetProgramResourceiv(program, GL_ATOMIC_COUNTER_BUFFER, 0, 1, &ACBDataSizeProp, 1, &length,
+                           &ACBDataSize);
+    EXPECT_GL_NO_ERROR();
+    EXPECT_EQ(1, length);
+    // sizeof(GLuint) * 9 = 36
+    // Vulkan rounds up to the required buffer alignment, so >= 36
+    EXPECT_GE(ACBDataSize, 36);
+
+    // Array containing the names of all active atomic counters in the shader */
+    GLenum activeVariablesProperty = GL_ACTIVE_VARIABLES;
+    const char *activeACNames[] = {"ac", "acArray[0]", "acArrayArray[0][0]", "acArrayArray[1][0]"};
+    const int numACs            = sizeof(activeACNames) / sizeof(activeACNames[0]);
+    GLuint uniformsIndices[numACs];
+
+    // Getting the uniform indices for the later queries.
+    glGetProgramResourceiv(program, GL_ATOMIC_COUNTER_BUFFER, 0, 1, &activeVariablesProperty,
+                           numACs, &length, (GLint *)&uniformsIndices[0]);
+    EXPECT_EQ(length, numACs);
+
+    // If <pname> is UNIFORM_OFFSET, then the returned value will be its offset
+    // relative to the beginning of its active atomic counter buffer.
+    GLint queryOffsets[numACs] = {0};
+    glGetActiveUniformsiv(program, numACs, uniformsIndices, GL_UNIFORM_OFFSET, queryOffsets);
+
+    GLint maxLength;
+    glGetProgramiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &maxLength);
+    std::vector<char> queryNames(maxLength);
+    for (uint32_t index = 0; index < numACs; index++)
+    {
+        GLint size;
+        GLenum type;
+
+        glGetActiveUniform(program, ANGLE_UNSAFE_TODO(uniformsIndices[index]), maxLength, nullptr,
+                           &size, &type, queryNames.data());
+
+        if (0 == ANGLE_UNSAFE_TODO(std::strcmp(queryNames.data(), activeACNames[0])))
+        {
+            ANGLE_UNSAFE_TODO(EXPECT_EQ(queryOffsets[index], 0));
+        }
+        else if (0 == ANGLE_UNSAFE_TODO(std::strcmp(queryNames.data(), activeACNames[1])))
+        {
+            ANGLE_UNSAFE_TODO(EXPECT_EQ(queryOffsets[index], 4));
+        }
+        else if (0 == ANGLE_UNSAFE_TODO(std::strcmp(queryNames.data(), activeACNames[2])))
+        {
+            ANGLE_UNSAFE_TODO(EXPECT_EQ(queryOffsets[index], 12));
+        }
+        else if (0 == ANGLE_UNSAFE_TODO(std::strcmp(queryNames.data(), activeACNames[3])))
+        {
+            ANGLE_UNSAFE_TODO(EXPECT_EQ(queryOffsets[index], 24));
+        }
+        else
+        {
+            ASSERT(false);
+        }
+    }
+
+    // Create buffer with 9 GLuints = 36 bytes (0, 100, 200, ..., 800)
+    constexpr GLuint kInitialValues[kAtomicCounterCount] = {0,   100, 200, 300, 400,
+                                                            500, 600, 700, 800};
+
+    GLBuffer acBuffer;
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, acBuffer);
+    glBufferData(GL_ATOMIC_COUNTER_BUFFER, sizeof(kInitialValues), kInitialValues, GL_DYNAMIC_DRAW);
+    glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, acBuffer);
+    EXPECT_GL_NO_ERROR();
+
+    // Dispatch single 1x1x1 work group
+    glDispatchCompute(1, 1, 1);
+    EXPECT_GL_NO_ERROR();
+
+    // Make sure compute shader has finished writing
+    glMemoryBarrier(GL_ATOMIC_COUNTER_BARRIER_BIT);
+    EXPECT_GL_NO_ERROR();
+
+    // Read back buffer data
+    GLuint results[kAtomicCounterCount] = {};
+    void *ptr = glMapBufferRange(GL_ATOMIC_COUNTER_BUFFER, 0, sizeof(results), GL_MAP_READ_BIT);
+    ASSERT_NE(ptr, nullptr);
+    ANGLE_UNSAFE_TODO(memcpy(results, ptr, sizeof(results)));
+    glUnmapBuffer(GL_ATOMIC_COUNTER_BUFFER);
+
+    // Validate values:
+    // ac = 0 + 1 = 1
+    // acArray[0] = 100 - 1 = 99
+    // acArray[1] = 200 + 1 = 201
+    // acArrayArray[0][0] = 300 + 1 = 301
+    // acArrayArray[0][1] = 400 - 1 = 399
+    // acArrayArray[0][2] = 500 + 1 = 501
+    // acArrayArray[1][0] = 600 - 1 = 599
+    // acArrayArray[1][1] = 700 + 1 = 701
+    // acArrayArray[1][2] = 800 + 1 = 801
+    const GLuint kExpectedResults[kAtomicCounterCount] = {1, 99, 201, 301, 399, 501, 599, 701, 801};
+    for (uint32_t i = 0; i < kAtomicCounterCount; ++i)
+    {
+        ANGLE_UNSAFE_TODO(EXPECT_EQ(results[i], kExpectedResults[i])) << "at index " << i;
+    }
+    EXPECT_GL_NO_ERROR();
 }
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(AtomicCounterBufferTest);

@@ -19,6 +19,7 @@
 #include "libANGLE/renderer/metal/mtl_command_buffer.h"
 #include "libANGLE/renderer/metal/mtl_context_device.h"
 #include "libANGLE/renderer/metal/mtl_resources.h"
+#include "libANGLE/renderer/renderer_utils.h"
 namespace rx
 {
 
@@ -32,6 +33,9 @@ struct ImageDefinitionMtl
 class TextureMtl : public TextureImpl
 {
   public:
+    using TextureViewVector           = std::vector<mtl::TextureRef>;
+    using LayerLevelTextureViewVector = std::vector<TextureViewVector>;
+
     TextureMtl(const gl::TextureState &state);
     // Texture  view
     TextureMtl(const TextureMtl &mtl, GLenum format);
@@ -86,7 +90,7 @@ class TextureMtl : public TextureImpl
                               const gl::ImageIndex &index,
                               GLenum internalFormat,
                               GLenum type,
-                              GLint sourceLevel,
+                              gl::LevelIndex sourceLevel,
                               bool unpackFlipY,
                               bool unpackPremultiplyAlpha,
                               bool unpackUnmultiplyAlpha,
@@ -94,7 +98,7 @@ class TextureMtl : public TextureImpl
     angle::Result copySubTexture(const gl::Context *context,
                                  const gl::ImageIndex &index,
                                  const gl::Offset &destOffset,
-                                 GLint sourceLevel,
+                                 gl::LevelIndex sourceLevel,
                                  const gl::Box &sourceBox,
                                  bool unpackFlipY,
                                  bool unpackPremultiplyAlpha,
@@ -120,6 +124,13 @@ class TextureMtl : public TextureImpl
                                            GLbitfield createFlags,
                                            GLbitfield usageFlags,
                                            const void *imageCreateInfoPNext) override;
+
+    angle::Result setStorageMultisample(const gl::Context *context,
+                                        gl::TextureType type,
+                                        GLsizei samples,
+                                        GLint internalFormat,
+                                        const gl::Extents &size,
+                                        bool fixedSampleLocations) override;
 
     angle::Result setEGLImageTarget(const gl::Context *context,
                                     gl::TextureType type,
@@ -147,13 +158,6 @@ class TextureMtl : public TextureImpl
                             const gl::Texture::DirtyBits &dirtyBits,
                             gl::Command source) override;
 
-    angle::Result setStorageMultisample(const gl::Context *context,
-                                        gl::TextureType type,
-                                        GLsizei samples,
-                                        GLint internalformat,
-                                        const gl::Extents &size,
-                                        bool fixedSampleLocations) override;
-
     angle::Result initializeContents(const gl::Context *context,
                                      GLenum binding,
                                      const gl::ImageIndex &imageIndex) override;
@@ -162,7 +166,13 @@ class TextureMtl : public TextureImpl
     // of images through glTexImage*/glCopyTex* calls. During draw calls, the caller must make sure
     // the actual texture is created by calling this method to transfer the stored images data
     // to the actual texture.
-    angle::Result ensureTextureCreated(const gl::Context *context);
+    // With |mipLevels| == ImageMipLevels::EnabledLevels, only the mip levels that have actually
+    // been specified are allocated, deferring allocation of the rest of the mip chain. With
+    // ImageMipLevels::FullMipChainForGenerateMipmap (used by glGenerateMipmap), the full mip chain
+    // from base to max level is allocated.
+    angle::Result ensureNativeStorageCreated(const gl::Context *context,
+                                             bool keepImages,
+                                             ImageMipLevels mipLevels);
 
     angle::Result bindToShader(const gl::Context *context,
                                mtl::RenderCommandEncoder *cmdEncoder,
@@ -179,39 +189,44 @@ class TextureMtl : public TextureImpl
                                     int layer,
                                     GLenum format);
 
-    const mtl::Format &getFormat() const { return mFormat; }
-    const mtl::TextureRef &getNativeTexture() const { return mNativeTexture; }
-
   private:
-    void releaseTexture(bool releaseImages);
-    void releaseTexture(bool releaseImages, bool releaseTextureObjectsOnly);
-    angle::Result createNativeTexture(const gl::Context *context,
+    void deallocateNativeStorage(bool keepImages, bool keepSamplerStateAndFormat = false);
+    angle::Result createNativeStorage(const gl::Context *context,
                                       gl::TextureType type,
                                       GLuint mips,
-                                      const gl::Extents &size);
+                                      GLuint samples,
+                                      const gl::Extents &size,
+                                      const mtl::Format &format);
     angle::Result onBaseMaxLevelsChanged(const gl::Context *context);
+    // Number of native mip levels the storage should be allocated with, starting at the effective
+    // base level. With ImageMipLevels::EnabledLevels this is limited to the contiguous levels that
+    // have actually been specified (so a texture with only level 0 defined does not allocate a full
+    // mip pyramid). With ImageMipLevels::FullMipChainForGenerateMipmap the full chain from base to
+    // max level is returned (for glGenerateMipmap).
+    GLuint getStorageMipLevelCount(ImageMipLevels mipLevels) const;
     angle::Result ensureSamplerStateCreated(const gl::Context *context);
     // Ensure image at given index is created:
     angle::Result ensureImageCreated(const gl::Context *context, const gl::ImageIndex &index);
     // Ensure all image views at all faces/levels are retained.
     void retainImageDefinitions();
-    mtl::TextureRef createImageViewFromNativeTexture(GLuint cubeFaceOrZero,
-                                                     const mtl::MipmapNativeLevel &nativeLevel);
-    angle::Result ensureNativeLevelViewsCreated();
-    angle::Result checkForEmulatedChannels(const gl::Context *context,
-                                           const mtl::Format &mtlFormat,
-                                           const mtl::TextureRef &texture);
-    mtl::MipmapNativeLevel getNativeLevel(const gl::ImageIndex &imageIndex) const;
+    mtl::TextureRef createImageViewFromTextureStorage(GLuint cubeFaceOrZero, GLuint glLevel);
+    angle::Result createViewFromBaseToMaxLevel();
+    angle::Result ensureLevelViewsWithinBaseMaxCreated();
+    angle::Result initializeNowIfNeeded(const gl::Context *context,
+                                        const mtl::Format &mtlFormat,
+                                        const mtl::TextureRef &texture);
     mtl::TextureRef &getImage(const gl::ImageIndex &imageIndex);
     ImageDefinitionMtl &getImageDefinition(const gl::ImageIndex &imageIndex);
-    RenderTargetMtl &getRenderTarget(const gl::ImageIndex &imageIndex);
-    bool isIndexWithinMinMaxLevels(const gl::ImageIndex &imageIndex) const;
+    angle::Result getRenderTarget(ContextMtl *context,
+                                  const gl::ImageIndex &imageIndex,
+                                  GLsizei implicitSamples,
+                                  RenderTargetMtl **renderTargetOut);
     mtl::TextureRef &getImplicitMSTexture(const gl::ImageIndex &imageIndex);
 
-    // If levels = 0, this function will create full mipmaps texture.
     angle::Result setStorageImpl(const gl::Context *context,
                                  gl::TextureType type,
-                                 size_t levels,
+                                 GLuint mips,
+                                 GLuint samples,
                                  const mtl::Format &mtlFormat,
                                  const gl::Extents &size);
 
@@ -308,7 +323,7 @@ class TextureMtl : public TextureImpl
                                       size_t pixelsDepthPitch,
                                       gl::Buffer *unpackBuffer,
                                       const uint8_t *pixels,
-                                      const mtl::TextureRef &image);
+                                      const ImageDefinitionMtl &imageDef);
 
     // Convert pixels to suported format before uploading to texture
     angle::Result convertAndSetPerSliceSubImage(const gl::Context *context,
@@ -321,16 +336,24 @@ class TextureMtl : public TextureImpl
                                                 size_t pixelsDepthPitch,
                                                 gl::Buffer *unpackBuffer,
                                                 const uint8_t *pixels,
-                                                const mtl::TextureRef &image);
+                                                const ImageDefinitionMtl &imageDef);
 
     angle::Result generateMipmapCPU(const gl::Context *context);
 
-    bool needsFormatViewForPixelLocalStorage(const ShPixelLocalStorageOptions &) const;
+    bool needsFormatViewForPixelLocalStorage(const ShPixelLocalStorageOptions &,
+                                             const mtl::Format &format) const;
+    bool isImmutableOrPBuffer() const;
 
-    mtl::Format mFormat;
     egl::Surface *mBoundSurface = nullptr;
-    // The real texture used by Metal draw calls.
-    mtl::TextureRef mNativeTexture         = nil;
+    class NativeTextureWrapper;
+    class NativeTextureWrapperWithViewSupport;
+    // The real texture used by Metal.
+    // For non-immutable texture, this usually contains levels from (GL base level -> GL max level).
+    // For immutable texture, this contains levels allocated with glTexStorage which could be
+    // outside (GL base level -> GL max level) range.
+    std::unique_ptr<NativeTextureWrapperWithViewSupport> mNativeTextureStorage;
+    // The view of mNativeTextureStorage from (GL base level -> GL max level)
+    std::unique_ptr<NativeTextureWrapper> mViewFromBaseToMaxLevel;
     id<MTLSamplerState> mMetalSamplerState = nil;
 
     // Number of slices
@@ -339,27 +362,26 @@ class TextureMtl : public TextureImpl
     // Stored images array defined by glTexImage/glCopy*.
     // Once the images array is complete, they will be transferred to real texture object.
     // NOTE:
-    //  - The second dimension is indexed by configured base level + actual native level
     //  - For Cube map, there will be at most 6 entries in the map table, one for each face. This is
     //  because the Cube map's image is defined per face & per level.
     //  - For other texture types, there will be only one entry in the map table. All other textures
     //  except Cube map has texture image defined per level (all slices included).
-    //  - These three variables' second dimension are indexed by image index (base level included).
+    //  - The second dimension is indexed by GL level.
     std::map<int, gl::TexLevelArray<ImageDefinitionMtl>> mTexImageDefs;
-    std::map<int, gl::TexLevelArray<RenderTargetMtl>> mPerLayerRenderTargets;
-    std::map<int, gl::TexLevelArray<mtl::TextureRef>> mImplicitMSTextures;
+    // 1st index = image index, 2nd index = samples count.
+    std::map<gl::ImageIndex, gl::RenderToTextureImageMap<RenderTargetMtl>> mRenderTargets;
+    std::map<gl::ImageIndex, gl::RenderToTextureImageMap<mtl::TextureRef>> mImplicitMSTextures;
 
-    // Views for glBindImageTexture.
-    std::map<MTLPixelFormat, gl::TexLevelArray<mtl::TextureRef>> mShaderImageViews;
+    // Lazily populated 2D views for shader storage images.
+    // May have different formats than the original texture.
+    // Indexed by format, then layer, then level.
+    std::map<MTLPixelFormat, LayerLevelTextureViewVector> mShaderImageViews;
 
-    // Mipmap views are indexed by native level (ignored base level):
-    mtl::NativeTexLevelArray mNativeLevelViews;
+    // Mipmap views are indexed from (base GL level -> max GL level):
+    mtl::NativeTexLevelArray mLevelViewsWithinBaseMax;
 
     // The swizzled or stencil view used for shader sampling.
-    mtl::TextureRef mNativeSwizzleStencilSamplingView;
-
-    GLuint mCurrentBaseLevel = 0;
-    GLuint mCurrentMaxLevel  = 1000;
+    mtl::TextureRef mSwizzleStencilSamplingView;
 };
 
 }  // namespace rx

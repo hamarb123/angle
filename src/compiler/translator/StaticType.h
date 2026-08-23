@@ -10,6 +10,7 @@
 #ifndef COMPILER_TRANSLATOR_STATIC_TYPE_H_
 #define COMPILER_TRANSLATOR_STATIC_TYPE_H_
 
+#include "common/unsafe_buffers.h"
 #include "compiler/translator/Types.h"
 
 namespace sh
@@ -50,7 +51,7 @@ constexpr StaticMangledName BuildStaticMangledName(TBasicType basicType,
     char *mangledName = typeName.getName();
     static_assert(TBasicMangledName::mangledNameSize == 2, "Mangled name size is not 2");
     name.name[1] = mangledName[0];
-    name.name[2] = mangledName[1];
+    name.name[2] = ANGLE_UNSAFE_TODO(mangledName[1]);
     name.name[3] = '\0';
     return name;
 }
@@ -135,7 +136,7 @@ static constexpr TType instance =
           qualifier,
           primarySize,
           secondarySize,
-          TSpan<const unsigned int>(),
+          angle::Span<const unsigned int>(),
           kMangledNameInstance<basicType, precision, qualifier, primarySize, secondarySize>.name);
 
 // Same as instance, but for array types.
@@ -152,7 +153,7 @@ static constexpr TType arrayInstance =
           qualifier,
           primarySize,
           secondarySize,
-          TSpan<const unsigned int>(arraySizes, numArraySizes),
+          angle::Span<const unsigned int>(arraySizes, numArraySizes),
           kMangledNameArrayInstance<basicType, precision, qualifier, primarySize, secondarySize, arraySizes, numArraySizes>.name);
 
 }  // namespace Helpers

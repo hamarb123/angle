@@ -151,7 +151,7 @@ class BlitGL : angle::NonCopyable
                                     GLenum sizedInternalFormat);
 
     angle::Result clearFramebuffer(const gl::Context *context,
-                                   bool colorClear,
+                                   const gl::DrawBufferMask &colorAttachments,
                                    bool depthClear,
                                    bool stencilClear,
                                    FramebufferGL *source);
@@ -161,6 +161,12 @@ class BlitGL : angle::NonCopyable
                                                    gl::TextureTarget target,
                                                    size_t level);
 
+    angle::Result generateMipmap(const gl::Context *context,
+                                 TextureGL *source,
+                                 GLuint baseLevel,
+                                 GLuint levelCount,
+                                 const gl::Extents &sourceBaseLevelSize,
+                                 const nativegl::TexImageFormat &format);
     angle::Result generateSRGBMipmap(const gl::Context *context,
                                      TextureGL *source,
                                      GLuint baseLevel,
@@ -208,8 +214,8 @@ class BlitGL : angle::NonCopyable
     GLuint mScratchFBO         = 0;
 
     GLuint mVAO                   = 0;
+    bool mOwnsVAO                 = false;
     VertexArrayStateGL *mVAOState = nullptr;
-    bool mOwnsVAOState            = false;
 
     const GLuint mTexcoordAttribLocation = 0;
     GLuint mVertexBuffer                 = 0;

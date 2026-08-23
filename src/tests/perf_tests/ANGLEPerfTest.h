@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "libANGLE/trace.h"
 #include "platform/PlatformMethods.h"
 #include "test_utils/angle_test_configs.h"
 #include "test_utils/angle_test_instantiate.h"
@@ -26,6 +27,7 @@
 #include "util/EGLWindow.h"
 #include "util/OSWindow.h"
 #include "util/Timer.h"
+#include "util/shader_utils.h"
 #include "util/util_gl.h"
 
 class Event;
@@ -39,25 +41,18 @@ class Event;
         ASSERT_EQ(static_cast<GLenum>(expected), static_cast<GLenum>(actual))
 #endif  // !defined(ASSERT_GLENUM_EQ)
 
-// These are trace events according to Google's "Trace Event Format".
-// See https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU
-// Only a subset of the properties are implemented.
-struct TraceEvent final
+#if defined(ANGLE_USE_PERFETTO)
+namespace perfetto
 {
-    TraceEvent() {}
-    TraceEvent(char phaseIn,
-               const char *categoryNameIn,
-               const char *nameIn,
-               double timestampIn,
-               uint32_t tidIn);
+class TracingSession;
+}  // namespace perfetto
+#endif
 
-    static constexpr uint32_t kMaxNameLen = 64;
-
-    char phase               = 0;
-    const char *categoryName = nullptr;
-    char name[kMaxNameLen]   = {};
-    double timestamp         = 0;
-    uint32_t tid             = 0;
+enum class VulkanApiWallTimeTracking
+{
+    None,
+    Summary,
+    Detailed,
 };
 
 class ANGLEPerfTest : public testing::Test, angle::NonCopyable
@@ -87,6 +82,7 @@ class ANGLEPerfTest : public testing::Test, angle::NonCopyable
     enum class RunTrialPolicy
     {
         FinishEveryStep,
+        RunContinuouslyWarmup,
         RunContinuously,
     };
 
@@ -102,10 +98,15 @@ class ANGLEPerfTest : public testing::Test, angle::NonCopyable
 
     int getNumStepsPerformed() const { return mTrialNumStepsPerformed; }
 
+    bool isVulkanApiWallTimeTrackingActive() const
+    {
+        return mVulkanApiWallTimeTracking != VulkanApiWallTimeTracking::None;
+    }
+
     void runTrial(double maxRunTime, int maxStepsToRun, RunTrialPolicy runPolicy);
+    void resetVulkanApiCounters();
 
     // Overriden in trace perf tests.
-    virtual void saveScreenshot(const std::string &screenshotName) {}
     virtual void computeGPUTime() {}
 
     void calibrateStepsToRun();
@@ -118,6 +119,7 @@ class ANGLEPerfTest : public testing::Test, angle::NonCopyable
     void processResults();
     void processClockResult(const char *metric, double resultSeconds);
     void processMemoryResult(const char *metric, uint64_t resultKB);
+    void processVulkanApiCounters();
 
     void skipTest(const std::string &reason)
     {
@@ -131,11 +133,15 @@ class ANGLEPerfTest : public testing::Test, angle::NonCopyable
         FAIL() << reason;
     }
 
+    void atraceCounter(const char *counterName, int64_t counterValue);
+
     std::string mName;
     std::string mBackend;
     std::string mStory;
     Timer mTrialTimer;
     uint64_t mGPUTimeNs;
+    double mFrameWallTimeSec;
+    double mBusyWaitCpuTimeSec;
     bool mSkipTest;
     std::string mSkipTestReason;
     std::unique_ptr<perf_test::PerfResultReporter> mReporter;
@@ -152,7 +158,27 @@ class ANGLEPerfTest : public testing::Test, angle::NonCopyable
         std::vector<GLuint64> samples;
     };
     std::map<GLuint, CounterInfo> mPerfCounterInfo;
+
+    struct VulkanApiCounterInfo
+    {
+        GLuint counterIndex;
+        std::string metricName;
+        uint64_t count;
+    };
+    template <typename T>
+    using VulkanApiCounterMap =
+        angle::PackedEnumMap<angle::VulkanApiPerfCounterType,
+                             angle::PackedEnumMap<angle::VulkanApiPerfCounterGroup, T>>;
+    VulkanApiCounterMap<VulkanApiCounterInfo> mVulkanApiCounterInfos;
+    VulkanApiWallTimeTracking mVulkanApiWallTimeTracking;
+
+    GLuint mPerfMonitor;
+    bool mPerfMonitorReady;
+
     std::vector<uint64_t> mProcessMemoryUsageKBSamples;
+#if defined(ANGLE_USE_PERFETTO)
+    std::unique_ptr<perfetto::TracingSession> mTracingSession;
+#endif
 };
 
 enum class SurfaceType
@@ -179,6 +205,9 @@ struct RenderTestParams : public angle::PlatformParameters
     EGLenum colorSpace             = EGL_COLORSPACE_LINEAR;
     bool multisample               = false;
     EGLint samples                 = -1;
+    bool isCL                      = false;
+
+    VulkanApiWallTimeTracking vulkanApiWallTimeTracking = VulkanApiWallTimeTracking::None;
 };
 
 class ANGLERenderTest : public ANGLEPerfTest
@@ -202,48 +231,55 @@ class ANGLERenderTest : public ANGLEPerfTest
     OSWindow *getWindow();
     GLWindowBase *getGLWindow();
 
-    std::vector<TraceEvent> &getTraceEventBuffer();
-
     virtual void overrideWorkaroundsD3D(angle::FeaturesD3D *featuresD3D) {}
     void onErrorMessage(const char *errorMessage);
 
     uint32_t getCurrentThreadSerial();
-    std::mutex &getTraceEventMutex() { return mTraceEventMutex; }
     bool isRenderTest() const override { return true; }
 
   protected:
     const RenderTestParams &mTestParams;
 
     void setWebGLCompatibilityEnabled(bool webglCompatibility);
+    void setHardenedContextEnabled(bool hardenedContext);
     void setRobustResourceInit(bool enabled);
 
-    void startGpuTimer();
-    void stopGpuTimer();
-
-    void beginInternalTraceEvent(const char *name);
-    void endInternalTraceEvent(const char *name);
-    void beginGLTraceEvent(const char *name, double hostTimeSec);
-    void endGLTraceEvent(const char *name, double hostTimeSec);
+    virtual void startGpuTimer();
+    virtual void stopGpuTimer(bool mayNeedFlush = true);
 
     void disableTestHarnessSwap() { mSwapEnabled = false; }
     void updatePerfCounters();
 
+    void startVulkanApiTimer();
+    void stopVulkanApiTimer();
+
     bool mIsTimestampQueryAvailable;
     bool mEnableDebugCallback = true;
+
+    void startTest() override;
+    void finishTest() override;
+
+    // non-const, so tests (e.g., TracePerfTest,
+    // ProgramPipelineObjectBenchmark) can set the values they need.
+    ConfigParameters &getConfigParams() { return mConfigParams; }
 
   private:
     void SetUp() override;
     void TearDown() override;
 
     void step() override;
-    void startTest() override;
-    void finishTest() override;
     void computeGPUTime() override;
 
     void skipTestIfMissingExtensionPrerequisites();
     void skipTestIfFailsIntegerPrerequisite();
 
     void initPerfCounters();
+    void initVulkanApiCounters(const CounterNameToIndexMap &indexMap);
+
+    bool isVulkanApiWallTimeTrackingEnabled() const
+    {
+        return mTestParams.vulkanApiWallTimeTracking != VulkanApiWallTimeTracking::None;
+    }
 
     GLWindowBase *mGLWindow;
     OSWindow *mOSWindow;
@@ -258,6 +294,13 @@ class ANGLERenderTest : public ANGLEPerfTest
     ConfigParameters mConfigParams;
     bool mSwapEnabled;
 
+    enum class EndQueryFlushPolicy
+    {
+        NoFlush,
+        Flush,
+        FenceSync
+    };
+
     struct TimestampSample
     {
         GLuint beginQuery;
@@ -266,15 +309,14 @@ class ANGLERenderTest : public ANGLEPerfTest
 
     GLuint mCurrentTimestampBeginQuery = 0;
     std::queue<TimestampSample> mTimestampQueries;
+    EndQueryFlushPolicy mEndQueryFlushPolicy = EndQueryFlushPolicy::NoFlush;
 
-    // Trace event record that can be output.
-    std::vector<TraceEvent> mTraceEventBuffer;
+    VulkanApiCounterMap<uint64_t> mCurrentVulkanApiCounterBeginValues;
 
     // Handle to the entry point binding library.
     std::unique_ptr<angle::Library> mEntryPointsLib;
 
     std::vector<uint64_t> mThreadIDs;
-    std::mutex mTraceEventMutex;
 };
 
 // Mixins.

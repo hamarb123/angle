@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "common/unsafe_buffers.h"
 #include "compiler/translator/msl/IdGen.h"
 
 using namespace sh;
@@ -31,31 +32,23 @@ Name IdGen::createNewName(size_t count,
     mNewNameBuffer += '_';
     mNewNameBuffer += idBuffer;
 
-    // Note:
-    // Double underscores are only allowed in C++ (and thus Metal) vendor identifiers, so here we
-    // take care not to introduce any.
-
     for (size_t i = 0; i < count; ++i)
     {
-        const ImmutableString baseName = toImmutable(baseNames[i]);
+        const ImmutableString baseName = toImmutable(ANGLE_UNSAFE_TODO(baseNames[i]));
         if (!baseName.empty())
         {
             const char *base = baseName.data();
             if (baseName.beginsWith(kAngleInternalPrefix))
             {
-                base += sizeof(kAngleInternalPrefix) - 1;
-            }
-            if (*base == '_')
-            {
-                ++base;
-            }
-            ASSERT(*base != '_');
-
-            if (mNewNameBuffer.back() != '_')
-            {
-                mNewNameBuffer += '_';
+                // skip 'ANGLE' or 'ANGLE_' prefix
+                ANGLE_UNSAFE_TODO(base += sizeof(kAngleInternalPrefix) - 1);
+                if (*base == '_')
+                {
+                    ANGLE_UNSAFE_TODO(++base);
+                }
             }
 
+            mNewNameBuffer += '_';
             mNewNameBuffer += base;
         }
     }
@@ -98,6 +91,6 @@ Name IdGen::createNewName(std::initializer_list<const char *> baseNames)
 
 Name IdGen::createNewName()
 {
-    // TODO(anglebug.com/5505): refactor this later.
+    // TODO(anglebug.com/40096755): refactor this later.
     return createNewName<int>(0, nullptr, [](int) { return kEmptyImmutableString; });
 }

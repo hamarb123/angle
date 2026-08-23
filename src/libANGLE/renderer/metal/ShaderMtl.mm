@@ -62,9 +62,15 @@ std::shared_ptr<ShaderTranslateTask> ShaderMtl::compile(const gl::Context *conte
     // is in place. https://bugs.webkit.org/show_bug.cgi?id=224991
     options->validateAST = false;
 
+    options->simplifyLoopConditions = true;
+
     options->initializeUninitializedLocals = true;
 
-    if (context->isWebGL() && mState.getShaderType() != gl::ShaderType::Compute)
+    options->separateCompoundStructDeclarations = true;
+
+    options->forceDeferNonConstGlobalInitializers = true;
+
+    if (context->isHardenedContext() && mState.getShaderType() != gl::ShaderType::Compute)
     {
         options->initOutputVariables = true;
     }
@@ -72,14 +78,8 @@ std::shared_ptr<ShaderTranslateTask> ShaderMtl::compile(const gl::Context *conte
     options->metal.generateShareableShaders =
         displayMtl->getFeatures().generateShareableShaders.enabled;
 
-    if (displayMtl->getFeatures().intelExplicitBoolCastWorkaround.enabled ||
-        options->metal.generateShareableShaders)
-    {
-        options->addExplicitBoolCasts = true;
-    }
-
     options->clampPointSize = true;
-#if ANGLE_PLATFORM_IOS_FAMILY && !ANGLE_PLATFORM_MACCATALYST
+#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
     options->clampFragDepth = true;
 #endif
 
@@ -87,6 +87,9 @@ std::shared_ptr<ShaderTranslateTask> ShaderMtl::compile(const gl::Context *conte
     {
         options->emulateAlphaToCoverage = true;
     }
+
+    options->removeInactiveVariables = true;
+    options->retainInactiveFragmentOutputs = true;
 
     // Constants:
     options->metal.driverUniformsBindingIndex    = mtl::kDriverUniformsBindingIndex;
@@ -104,12 +107,28 @@ std::shared_ptr<ShaderTranslateTask> ShaderMtl::compile(const gl::Context *conte
 
     options->rescopeGlobalVariables = displayMtl->getFeatures().rescopeGlobalVariables.enabled;
 
+    if (displayMtl->getFeatures().injectAsmStatementIntoLoopBodies.enabled)
+    {
+        options->metal.injectAsmStatementIntoLoopBodies = true;
+    }
+    if (displayMtl->getFeatures().ensureLoopForwardProgress.enabled)
+    {
+        options->ensureLoopForwardProgress = true;
+    }
+
     return std::shared_ptr<ShaderTranslateTask>(new ShaderTranslateTaskMtl(mCompiledState));
+}
+
+std::shared_ptr<ShaderTranslateTask> ShaderMtl::load(const gl::Context *context,
+                                                     gl::BinaryInputStream *stream)
+{
+    UNREACHABLE();
+    return std::shared_ptr<ShaderTranslateTask>(new ShaderTranslateTask);
 }
 
 std::string ShaderMtl::getDebugInfo() const
 {
-    return mState.getCompiledState()->translatedSource;
+    return *mState.getCompiledState()->translatedSource;
 }
 
 }  // namespace rx

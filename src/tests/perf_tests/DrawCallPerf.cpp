@@ -10,6 +10,7 @@
 #include "ANGLEPerfTest.h"
 #include "DrawCallPerfParams.h"
 #include "common/PackedEnums.h"
+#include "common/unsafe_buffers.h"
 #include "test_utils/draw_call_perf_utils.h"
 #include "util/shader_utils.h"
 
@@ -316,13 +317,13 @@ void main()
         {
             char stringBuffer[8];
             snprintf(stringBuffer, sizeof(stringBuffer), "tex%zu", i);
-            program3TexLocs[i] = glGetUniformLocation(mProgram3, stringBuffer);
+            ANGLE_UNSAFE_TODO(program3TexLocs[i]) = glGetUniformLocation(mProgram3, stringBuffer);
         }
 
         glUseProgram(mProgram3);
         for (size_t i = 0; i < mTextures.size(); ++i)
         {
-            glUniform1i(program3TexLocs[i], i);
+            glUniform1i(ANGLE_UNSAFE_TODO(program3TexLocs[i]), i);
         }
 
         for (size_t i = 0; i < mTextures.size(); ++i)

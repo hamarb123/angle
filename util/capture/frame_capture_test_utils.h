@@ -16,9 +16,11 @@
 #include <sstream>
 #include <type_traits>
 #include <vector>
+#include "common/unsafe_buffers.h"
 
 #include "common/angleutils.h"
 #include "common/debug.h"
+#include "common/frame_capture_binary_data.h"
 #include "common/frame_capture_utils.h"
 #include "common/system_utils.h"
 #include "trace_interface.h"
@@ -43,7 +45,9 @@ using SetupEntryPoints = void (*)(angle::TraceCallbacks *, angle::TraceFunctions
 class TraceLibrary : angle::NonCopyable, angle::TraceCallbacks
 {
   public:
-    TraceLibrary(const std::string &traceName, const TraceInfo &traceInfo);
+    TraceLibrary(const std::string &traceName,
+                 const TraceInfo &traceInfo,
+                 const std::string &baseDir);
 
     bool valid() const
     {
@@ -62,6 +66,8 @@ class TraceLibrary : angle::NonCopyable, angle::TraceCallbacks
         mTraceFunctions->SetBinaryDataDir(dataDir);
     }
 
+    void setDebugOutputDir(const char *dataDir) { mDebugOutputDir = dataDir; }
+
     void replayFrame(uint32_t frameIndex) { mTraceFunctions->ReplayFrame(frameIndex); }
 
     void setupReplay() { mTraceFunctions->SetupReplay(); }
@@ -73,6 +79,8 @@ class TraceLibrary : angle::NonCopyable, angle::TraceCallbacks
         mTraceFunctions->FinishReplay();
         mBinaryData = {};  // set to empty vector to release memory.
     }
+
+    void setupFirstFrame() { mTraceFunctions->SetupFirstFrame(); }
 
     const char *getSerializedContextState(uint32_t frameIndex)
     {
@@ -97,18 +105,20 @@ class TraceLibrary : angle::NonCopyable, angle::TraceCallbacks
         void *untypedFunc = mTraceLibrary->getSymbol(funcName);
         if (!untypedFunc)
         {
-            fprintf(stderr, "Error loading function: %s\n", funcName);
+            ANGLE_UNSAFE_TODO(fprintf(stderr, "Error loading function: %s\n", funcName));
             ASSERT(untypedFunc);
         }
         auto typedFunc = reinterpret_cast<FuncT>(untypedFunc);
         return typedFunc(args...);
     }
 
+    FrameCaptureBinaryData *ConfigureBinaryDataLoader(const char *fileName) override;
     uint8_t *LoadBinaryData(const char *fileName) override;
 
     std::unique_ptr<Library> mTraceLibrary;
     std::vector<uint8_t> mBinaryData;
     std::string mBinaryDataDir;
+    std::string mDebugOutputDir;
     angle::TraceInfo mTraceInfo;
     angle::TraceFunctions *mTraceFunctions = nullptr;
 };

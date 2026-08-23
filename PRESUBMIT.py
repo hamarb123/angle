@@ -188,12 +188,6 @@ def _CheckCommitMessageFormatting(input_api, output_api):
 def _CheckChangeHasBugField(input_api, output_api):
     """Requires that the changelist have a Bug: field from a known project."""
     bugs = input_api.change.BugsFromDescription()
-    if not bugs:
-        return [
-            output_api.PresubmitError('Please ensure that your description contains:\n'
-                                      '"Bug: angleproject:[bug number]"\n'
-                                      'directly above the Change-Id tag.')
-        ]
 
     # The bug must be in the form of "project:number".  None is also accepted, which is used by
     # rollers as well as in very minor changes.
@@ -205,27 +199,35 @@ def _CheckChangeHasBugField(input_api, output_api):
     ]
     bug_regex = re.compile(r"([a-z]+[:/])(\d+)")
     errors = []
-    extra_help = None
+    extra_help = False
+
+    if not bugs:
+        errors.append('Please ensure that your description contains\n'
+                      'Bug: bugtag\n'
+                      'directly above the Change-Id tag (no empty line in-between)')
+        extra_help = True
 
     for bug in bugs:
         if bug == 'None':
-            errors.append(
-                output_api.PresubmitError('Invalid bug tag "None" in presence of other bug tags.'))
+            errors.append('Invalid bug tag "None" in presence of other bug tags.')
             continue
 
         match = re.match(bug_regex, bug)
         if match == None or bug != match.group(0) or match.group(1) not in projects:
-            errors.append(output_api.PresubmitError('Incorrect bug tag "' + bug + '".'))
-            if not extra_help:
-                extra_help = output_api.PresubmitError('Acceptable format is:\n\n'
-                                                       '    Bug: project:bugnumber\n\n'
-                                                       'Acceptable projects are:\n\n    ' +
-                                                       '\n    '.join(projects))
+            errors.append('Incorrect bug tag "' + bug + '".')
+            extra_help = True
 
     if extra_help:
-        errors.append(extra_help)
+        change_ids = re.findall('^Change-Id:', input_api.change.FullDescriptionText(), re.M)
+        if len(change_ids) > 1:
+            errors.append('Note: multiple Change-Id tags found in description')
 
-    return errors
+        errors.append('''Acceptable bugtags:
+    project:bugnumber - where project is one of ({projects})
+    b/bugnumber - for Buganizer/IssueTracker bugs
+'''.format(projects=', '.join(p[:-1] for p in projects if p != 'b/')))
+
+    return [output_api.PresubmitError('\n\n'.join(errors))] if errors else []
 
 
 def _CheckCodeGeneration(input_api, output_api):
@@ -305,7 +307,8 @@ def _CheckExportValidity(input_api, output_api):
     use_shell = input_api.is_windows
     try:
         try:
-            subprocess.check_output(['gn', 'gen', outdir], shell=use_shell)
+            subprocess.check_output(
+                [sys.executable, 'third_party/depot_tools/gn.py', 'gen', outdir], shell=use_shell)
         except subprocess.CalledProcessError as e:
             return [
                 output_api.PresubmitError('Unable to run gn gen for export_targets.py: %s' %
@@ -409,7 +412,17 @@ def _CheckCommentBeforeTestInTestFiles(input_api, output_api):
             if line.startswith('-'):
                 continue
 
-            new_line_is_comment = line.startswith(' //') or line.startswith('+//')
+            # Note: we don't always get the context of the diff, so if a test already has a comment
+            # but is only renamed, the diff looks like:
+            #
+            #     @@ <line info>
+            #     -TEST_P(OLD, NAME)
+            #     +TEST_P(NEW, NAME)
+            #
+            # Treat @@ as if it was a comment in that case, assuming the test already had a comment
+            # previously.
+            new_line_is_comment = (
+                line.startswith(' //') or line.startswith('+//') or line.startswith('@@'))
             new_line_is_test_declaration = (
                 line.startswith('+TEST_P(') or line.startswith('+TEST(') or
                 line.startswith('+TYPED_TEST('))
@@ -425,6 +438,69 @@ def _CheckCommentBeforeTestInTestFiles(input_api, output_api):
                 'Tests without comment.',
                 items=sorted(tests_with_no_comment),
                 long_text='ANGLE requires a comment describing what a test does.')
+        ]
+    return []
+
+
+def _CheckWildcardInTestExpectationFiles(input_api, output_api):
+    """Require wildcard as API tag (i.e. in foo.bar/*) in expectations when no additional feature is
+    enabled."""
+
+    def expectation_files(f):
+        return input_api.FilterSourceFile(
+            f, files_to_check=[r'^src/tests/angle_end2end_tests_expectations.txt$'])
+
+    expectation_pattern = re.compile(r'^.*:\s*[a-zA-Z0-9._*]+\/([^ ]*)\s*=.*$')
+
+    expectations_without_wildcard = []
+    for f in input_api.AffectedSourceFiles(expectation_files):
+        diff = f.GenerateScmDiff()
+        for line in diff.splitlines():
+            # Only look at new lines
+            if not line.startswith('+'):
+                continue
+
+            match = re.match(expectation_pattern, line[1:].strip())
+            if match is None:
+                continue
+
+            tag = match.group(1)
+
+            # The tag is in the following general form:
+            #
+            #     FRONTENDAPI_BACKENDAPI[_FEATURE]*
+            #
+            # Any part of the above may be a wildcard.  Warn about usage of FRONTEND_BACKENDAPI as
+            # the tag.  Instead, the backend should be specified before the : and `*` used as the
+            # tag.  If any additional tags are present, it's a specific expectation that should
+            # remain specific (and not wildcarded).  NoFixture is an exception as X_Y_NoFixture is
+            # the generic form of the tags of tests that don't use the fixture.
+
+            sections = [section for section in tag.split('_') if section != 'NoFixture']
+
+            # Allow '*_...', or 'FRONTENDAPI_*_...'.
+            if '*' in sections[0] or (len(sections) > 1 and '*' in sections[1]):
+                continue
+
+            # Warn if no additional tags are present
+            if len(sections) == 2:
+                expectations_without_wildcard.append(line[1:])
+
+    if expectations_without_wildcard:
+        return [
+            output_api.PresubmitError(
+                'Use wildcard in API tags (after /) in angle_end2end_tests_expectations.txt.',
+                items=expectations_without_wildcard,
+                long_text="""ANGLE prefers end2end expections to use the following form:
+
+1234 MAC OPENGL : Foo.Bar/* = SKIP
+
+instead of:
+
+1234 MAC OPENGL : Foo.Bar/ES2_OpenGL = SKIP
+1234 MAC OPENGL : Foo.Bar/ES3_OpenGL = SKIP
+
+Expectatations that are specific (such as Foo.Bar/ES2_OpenGL_SomeFeature) are allowed.""")
         ]
     return []
 
@@ -487,12 +563,147 @@ def _CheckGClientExists(input_api, output_api, search_limit=None):
             '\n\nhttps://chromium.googlesource.com/angle/angle/+/refs/heads/main/doc/DevSetup.md')
     ]
 
+
+def _CheckRestrictedTraces(input_api, output_api):
+    import json
+    json_path = 'src/tests/restricted_traces/restricted_traces.json'
+    trace_file = None
+    for f in input_api.AffectedFiles():
+        if f.LocalPath() == json_path:
+            trace_file = f
+            break
+
+    # If the traces JSON file was not modified in this CL, skip the check.
+    if not trace_file:
+        return []
+
+    abs_path = input_api.os_path.join(input_api.PresubmitLocalPath(), json_path)
+    try:
+        with open(abs_path, 'r') as f:
+            json_data = json.load(f)
+    except Exception as e:
+        return [output_api.PresubmitError(f'Failed to parse {json_path}: {e}')]
+
+    if 'traces' not in json_data:
+        return [output_api.PresubmitError(f'{json_path} is missing the "traces" key.')]
+
+    old_traces = []
+    old_contents = trace_file.OldContents()
+    if old_contents:
+        try:
+            old_data = json.loads('\n'.join(old_contents))
+            old_traces = [t.split(' ')[0] for t in old_data.get('traces', [])]
+        except Exception as e:
+            return [output_api.PresubmitError(f'Failed to parse old version of {json_path}: {e}')]
+
+    raw_trace_parts = [trace.split(' ') for trace in json_data['traces']]
+    cq_extra_traces = [
+        p[0] for p in raw_trace_parts if 'ci' not in p[2:] and 'representative' not in p[2:]
+    ]
+
+    TAG_ORDER = ['ci', 'representative', 'smoke']
+
+    def get_sort_key(tag):
+        if tag in TAG_ORDER:
+            return (0, TAG_ORDER.index(tag))
+        else:
+            return (1, tag)
+
+    for p in raw_trace_parts:
+        name = p[0]
+        tags = p[2:]
+
+        if name not in old_traces and tags:
+            return [
+                output_api.PresubmitError(
+                    f'New trace "{name}" has tags: {tags}. '
+                    f'New traces must not have any tags initially so they are tested on CQ.')
+            ]
+
+        sorted_tags = sorted(tags, key=get_sort_key)
+        if tags != sorted_tags:
+            return [
+                output_api.PresubmitError(
+                    f'Trace "{name}" has unsorted tags: {tags}. '
+                    f'Expected order: {sorted_tags} (broadest first: ci, representative, smoke).')
+            ]
+
+    LIMIT_N = 10
+    if len(cq_extra_traces) > LIMIT_N:
+        return [
+            output_api.PresubmitError(
+                f'Too many CQ extra traces ({len(cq_extra_traces)}). Limit is {LIMIT_N}.\n'
+                'Please move some traces to conditional checkout by adding the "ci" tag.')
+        ]
+
+    return []
+
+
+def _CheckUnwrappedVulkanCalls(input_api, output_api):
+    """Runs find_unwrapped_vk_calls.py to detect unwrapped calls."""
+
+    vulkan_dir = input_api.os_path.join('src', 'libANGLE', 'renderer', 'vulkan')
+    vulkan_dir_re = vulkan_dir.replace('\\', '/')
+
+    results = []
+
+    # Only run if Vulkan renderer files are affected
+    def vulkan_source_files(f):
+        return input_api.FilterSourceFile(f, files_to_check=[rf'^{vulkan_dir_re}/.*\.(h|cpp|mm)$'])
+
+    if not input_api.AffectedSourceFiles(vulkan_source_files):
+        return results
+
+    # First, run tests if the script or test files are changed
+    def find_unwrapped_vk_calls_files(f):
+        return input_api.FilterSourceFile(
+            f,
+            files_to_check=[
+                rf'^{vulkan_dir_re}/find_unwrapped_vk_calls_test/.*$',
+                rf'^{vulkan_dir_re}/find_unwrapped_vk_calls\.py$'
+            ])
+
+    if input_api.AffectedSourceFiles(find_unwrapped_vk_calls_files):
+        cmd_name = 'find_unwrapped_vk_calls TESTS'
+        cmd = [
+            input_api.python3_executable,
+            input_api.os_path.join(input_api.PresubmitLocalPath(), vulkan_dir,
+                                   'find_unwrapped_vk_calls_test', 'run_tests.py')
+        ]
+        test_cmd = input_api.Command(
+            name=cmd_name, cmd=cmd, kwargs={}, message=output_api.PresubmitError)
+        if input_api.verbose:
+            print('Running ' + cmd_name)
+        results.extend(input_api.RunTests([test_cmd]))
+
+    # Do not run the script if tests fail
+    for result in results:
+        if isinstance(result, output_api.PresubmitError):
+            return results
+
+    # Finally, run the main script
+    cmd_name = 'find_unwrapped_vk_calls'
+    cmd = [
+        input_api.python3_executable,
+        input_api.os_path.join(input_api.PresubmitLocalPath(), vulkan_dir,
+                               'find_unwrapped_vk_calls.py')
+    ]
+    test_cmd = input_api.Command(
+        name=cmd_name, cmd=cmd, kwargs={}, message=output_api.PresubmitError)
+    if input_api.verbose:
+        print('Running ' + cmd_name)
+    results.extend(input_api.RunTests([test_cmd]))
+
+    return results
+
+
 def CheckChangeOnUpload(input_api, output_api):
     results = []
     results.extend(input_api.canned_checks.CheckForCommitObjects(input_api, output_api))
     results.extend(_CheckTabsInSourceFiles(input_api, output_api))
     results.extend(_CheckNonAsciiInSourceFiles(input_api, output_api))
     results.extend(_CheckCommentBeforeTestInTestFiles(input_api, output_api))
+    results.extend(_CheckWildcardInTestExpectationFiles(input_api, output_api))
     results.extend(_CheckShaderVersionInShaderLangHeader(input_api, output_api))
     results.extend(_CheckCodeGeneration(input_api, output_api))
     results.extend(_CheckChangeHasBugField(input_api, output_api))
@@ -504,6 +715,8 @@ def CheckChangeOnUpload(input_api, output_api):
             input_api, output_api, result_factory=output_api.PresubmitError))
     results.extend(_CheckCommitMessageFormatting(input_api, output_api))
     results.extend(_CheckGClientExists(input_api, output_api))
+    results.extend(_CheckRestrictedTraces(input_api, output_api))
+    results.extend(_CheckUnwrappedVulkanCalls(input_api, output_api))
 
     return results
 

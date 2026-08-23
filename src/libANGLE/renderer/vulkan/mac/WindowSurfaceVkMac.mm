@@ -12,7 +12,7 @@
 #include <Metal/Metal.h>
 #include <QuartzCore/CAMetalLayer.h>
 
-#include "libANGLE/renderer/vulkan/RendererVk.h"
+#include "libANGLE/renderer/vulkan/vk_renderer.h"
 #include "libANGLE/renderer/vulkan/vk_utils.h"
 
 namespace rx
@@ -29,8 +29,7 @@ WindowSurfaceVkMac::~WindowSurfaceVkMac()
     [mMetalLayer release];
 }
 
-angle::Result WindowSurfaceVkMac::createSurfaceVk(vk::Context *context, gl::Extents *extentsOut)
-    API_AVAILABLE(macosx(10.11))
+angle::Result WindowSurfaceVkMac::createSurfaceVk(vk::ErrorContext *context)
 {
     mMetalDevice = MTLCreateSystemDefaultDevice();
 
@@ -53,15 +52,14 @@ angle::Result WindowSurfaceVkMac::createSurfaceVk(vk::Context *context, gl::Exte
     createInfo.flags                       = 0;
     createInfo.pNext                       = nullptr;
     createInfo.pLayer                      = mMetalLayer;
-    ANGLE_VK_TRY(context, vkCreateMetalSurfaceEXT(context->getRenderer()->getInstance(),
-                                                  &createInfo, nullptr, &mSurface));
+    ANGLE_VK_TRY(context, VK_CALL(vkCreateMetalSurfaceEXT, context->getRenderer()->getInstance(),
+                                  &createInfo, nullptr, &mSurface));
 
-    return getCurrentWindowSize(context, extentsOut);
+    return angle::Result::Continue;
 }
 
-angle::Result WindowSurfaceVkMac::getCurrentWindowSize(vk::Context *context,
-                                                       gl::Extents *extentsOut)
-    API_AVAILABLE(macosx(10.11))
+angle::Result WindowSurfaceVkMac::getCurrentWindowSize(vk::ErrorContext *context,
+                                                       gl::Extents *extentsOut) const
 {
     ANGLE_VK_CHECK(context, (mMetalLayer != nullptr), VK_ERROR_INITIALIZATION_FAILED);
 

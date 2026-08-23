@@ -143,7 +143,6 @@ case_image_format_template1 = """        case angle::FormatID::{angle_format}:
 """
 
 case_image_format_template2 = """        case angle::FormatID::{angle_format}:
-#if defined(__IPHONE_13_0) || defined(__MAC_10_15)
             if (display->getFeatures().hasTextureSwizzle.enabled)
             {{
                 {image_format_assign_swizzled}
@@ -151,7 +150,6 @@ case_image_format_template2 = """        case angle::FormatID::{angle_format}:
                 this->swizzle  = {mtl_swizzle};
             }}
             else
-#endif  // #if defined(__IPHONE_13_0) || defined(__MAC_10_15)
             {{
                 {image_format_assign_default}
             }}
@@ -199,6 +197,28 @@ def wrap_init_function(str):
 def wrap_actual_same_gl_type(str):
     return '' if str == 'true' else f'this->actualSameGLType = {str};'
 
+
+# Returns either the header or footer of a deprecation warning
+# suppression block depending on if `pixel_format` is a deprecated
+# format and if it the first or last pixel format being added.
+# TODO(crbug.com/383994655) Remove function when
+# 'MTLPixelFormatPVRTC_RGB_*' is no longer supported.
+def maybe_add_deprecation_warning_supression(is_deprecated_pixel_format,
+                                             deprecated_format_previously_found):
+    output = ''
+    if is_deprecated_pixel_format and not deprecated_format_previously_found:
+        # Begin the deprecation suppression block.
+        output += "#pragma clang diagnostic push\n"
+        output += "#pragma clang diagnostic ignored \"-Wdeprecated-declarations\"\n"
+    if not is_deprecated_pixel_format and deprecated_format_previously_found:
+        # End the deprecation suppression block.
+        output += "#pragma clang diagnostic pop\n"
+    return output
+
+
+# Returns a bool indicating whether `pixel_format` has been deprecated in iOS 18.0+.
+def is_format_deprecated(pixel_format):
+    return 'MTLPixelFormatPVRTC_RGB' in pixel_format
 
 # NOTE(hqle): This is a modified version of the get_vertex_copy_function() function in
 # src/libANGLE/renderer/angle_format.py
@@ -347,7 +367,7 @@ def gen_image_map_switch_mac_case(angle_format, actual_angle_format_info, angle_
                                      gen_format_assign_code)
 
 
-# Generate format conversion switch case (non-desktop ES 3.0 case)
+# Generate format conversion switch case (ES 3.0 case)
 def gen_image_map_switch_es3_case(angle_format, actual_angle_format_info, angle_to_gl,
                                   angle_to_mtl_map, mac_fallbacks):
     gl_format = angle_to_gl[angle_format]
@@ -412,17 +432,19 @@ def gen_image_map_switch_string(image_table, angle_to_gl):
     angle_override = image_table["override"]
     mac_override = image_table["override_mac"]
     mac_override_es3 = image_table["override_mac_es3"]
-    mac_override_bc1 = image_table["override_mac_bc1"]
+    override_bc1 = image_table["override_bc1"]
     ios_override = image_table["override_ios"]
     mac_depth_fallbacks = image_table["depth_fallbacks_mac"]
     angle_to_mtl = image_table["map"]
-    mac_specific_map = image_table["map_mac"]
+    mac_specific_map = image_table["map_mac"].copy()
+    bc = image_table["map_bc"]
     ios_specific_map = image_table["map_ios"]
     astc_tpl_map = image_table["map_astc_tpl"]
     sim_specific_map = image_table["map_sim"]
     sim_override = image_table["override_sim"]
 
     # mac_specific_map + angle_to_mtl:
+    mac_specific_map.update(bc)
     mac_angle_to_mtl = mac_specific_map.copy()
     mac_angle_to_mtl.update(angle_to_mtl)
     # ios_specific_map + angle_to_mtl
@@ -451,9 +473,8 @@ def gen_image_map_switch_string(image_table, angle_to_gl):
     for angle_format in sorted(mac_override.keys()):
         switch_data += gen_image_map_switch_simple_case(angle_format, mac_override[angle_format],
                                                         angle_to_gl, mac_angle_to_mtl)
-    for angle_format in sorted(mac_override_bc1.keys()):
-        switch_data += gen_image_map_switch_simple_case(angle_format,
-                                                        mac_override_bc1[angle_format],
+    for angle_format in sorted(override_bc1.keys()):
+        switch_data += gen_image_map_switch_simple_case(angle_format, override_bc1[angle_format],
                                                         angle_to_gl, mac_angle_to_mtl)
     switch_data += "#endif\n"
 
@@ -473,7 +494,7 @@ def gen_image_map_switch_string(image_table, angle_to_gl):
     for angle_format in sorted(sim_override.keys()):
         switch_data += gen_image_map_switch_simple_case(angle_format, sim_override[angle_format],
                                                         angle_to_gl, sim_angle_to_mtl)
-    switch_data += "#if TARGET_OS_IOS\n"
+    switch_data += "#if TARGET_OS_IOS || TARGET_OS_VISION\n"
     for angle_format in sorted(astc_tpl_map.keys()):
         switch_data += gen_image_map_switch_astc_case_iosmac(angle_format, angle_to_gl,
                                                              astc_tpl_map)
@@ -482,16 +503,36 @@ def gen_image_map_switch_string(image_table, angle_to_gl):
     for angle_format in sorted(astc_tpl_map.keys()):
         switch_data += gen_image_map_switch_astc_case_tv_watchos(angle_format, angle_to_gl,
                                                                  astc_tpl_map)
-    switch_data += "#endif // TARGET_OS_IOS\n "
+    switch_data += "#endif // ASTC formats\n"
+
+    # BC formats
+    switch_data += "#if (TARGET_OS_IOS && __IPHONE_OS_VERSION_MAX_ALLOWED >= 160400) || \\\n"
+    switch_data += "    (TARGET_OS_TV && __TV_OS_VERSION_MAX_ALLOWED >= 160400) || TARGET_OS_VISION\n"
+    for angle_format in sorted(bc.keys()):
+        switch_data += gen_image_map_switch_simple_case(angle_format, angle_format, angle_to_gl,
+                                                        bc)
+    for angle_format in sorted(override_bc1.keys()):
+        switch_data += gen_image_map_switch_simple_case(angle_format, override_bc1[angle_format],
+                                                        angle_to_gl, bc)
+    switch_data += "#endif // BC formats on iOS/tvOS/visionOS \n"
+
     # iOS specific
     switch_data += "#elif TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST\n"
+    # Tracks whether the pixel format family being added to `switch_data` is deprecated.
+    section_contains_deprecated_format = False
     for angle_format in sorted(ios_specific_map.keys()):
+        # Add deprecation warnings around MTLPixelFormatPVRTC_* enums.
+        format_is_deprecated = is_format_deprecated(ios_specific_map[angle_format])
+        switch_data += maybe_add_deprecation_warning_supression(
+            format_is_deprecated, section_contains_deprecated_format)
+        section_contains_deprecated_format = format_is_deprecated
+
         switch_data += gen_image_map_switch_simple_case(angle_format, angle_format, angle_to_gl,
                                                         ios_specific_map)
     for angle_format in sorted(ios_override.keys()):
         switch_data += gen_image_map_switch_simple_case(angle_format, ios_override[angle_format],
                                                         angle_to_gl, ios_angle_to_mtl)
-    switch_data += "#if TARGET_OS_IOS\n"
+    switch_data += "#if TARGET_OS_IOS || TARGET_OS_VISION\n"
     for angle_format in sorted(astc_tpl_map.keys()):
         switch_data += gen_image_map_switch_astc_case_iosmac(angle_format, angle_to_gl,
                                                              astc_tpl_map)
@@ -501,7 +542,19 @@ def gen_image_map_switch_string(image_table, angle_to_gl):
     for angle_format in sorted(astc_tpl_map.keys()):
         switch_data += gen_image_map_switch_astc_case_tv_watchos(angle_format, angle_to_gl,
                                                                  astc_tpl_map)
-    switch_data += "#endif // TARGET_OS_IOS || TARGET_OS_TV\n"
+    switch_data += "#endif // ASTC formats\n"
+
+    # BC formats
+    switch_data += "#if (TARGET_OS_IOS && __IPHONE_OS_VERSION_MAX_ALLOWED >= 160400) || \\\n"
+    switch_data += "    (TARGET_OS_TV && __TV_OS_VERSION_MAX_ALLOWED >= 160400) || TARGET_OS_VISION\n"
+    for angle_format in sorted(bc.keys()):
+        switch_data += gen_image_map_switch_simple_case(angle_format, angle_format, angle_to_gl,
+                                                        bc)
+    for angle_format in sorted(override_bc1.keys()):
+        switch_data += gen_image_map_switch_simple_case(angle_format, override_bc1[angle_format],
+                                                        angle_to_gl, bc)
+    switch_data += "#endif // BC formats on iOS/tvOS/visionOS \n"
+
     switch_data += "#endif // TARGET_OS_IPHONE\n"
 
     # Try to support all iOS formats on newer macOS with Apple GPU.
@@ -515,6 +568,12 @@ def gen_image_map_switch_string(image_table, angle_to_gl):
                                                              angle_to_gl, ios_angle_to_mtl,
                                                              mac_override_es3)
             else:
+                # Add deprecation warnings around MTLPixelFormatPVRTC_* enums.
+                format_is_deprecated = is_format_deprecated(ios_specific_map[angle_format])
+                switch_data += maybe_add_deprecation_warning_supression(
+                    format_is_deprecated, section_contains_deprecated_format)
+                section_contains_deprecated_format = format_is_deprecated
+
                 # ASTC sRGB or PVRTC1
                 switch_data += gen_image_map_switch_simple_case(angle_format, angle_format,
                                                                 angle_to_gl, ios_specific_map)
@@ -532,6 +591,7 @@ def gen_image_map_switch_string(image_table, angle_to_gl):
 
 def gen_image_mtl_to_angle_switch_string(image_table):
     angle_to_mtl = image_table["map"]
+    bc_map = image_table["map_bc"]
     mac_specific_map = image_table["map_mac"]
     ios_specific_map = image_table["map_ios"]
     astc_tpl_map = image_table["map_astc_tpl"]
@@ -543,6 +603,15 @@ def gen_image_mtl_to_angle_switch_string(image_table):
         switch_data += case_image_mtl_to_angle_template.format(
             mtl_format=angle_to_mtl[angle_format], angle_format=angle_format)
 
+    # BC formats
+    switch_data += "#if TARGET_OS_OSX || TARGET_OS_MACCATALYST ||\\\n"
+    switch_data += "    (TARGET_OS_IOS && __IPHONE_OS_VERSION_MAX_ALLOWED >= 160400) ||\\\n"
+    switch_data += "    (TARGET_OS_TV && __TV_OS_VERSION_MAX_ALLOWED >= 160400) || TARGET_OS_VISION\n"
+    for angle_format in sorted(bc_map.keys()):
+        switch_data += case_image_mtl_to_angle_template.format(
+            mtl_format=bc_map[angle_format], angle_format=angle_format)
+    switch_data += "#endif  // BC formats\n"
+
     # Mac specific
     switch_data += "#if TARGET_OS_OSX || TARGET_OS_MACCATALYST\n"
     for angle_format in sorted(mac_specific_map.keys()):
@@ -552,6 +621,8 @@ def gen_image_mtl_to_angle_switch_string(image_table):
 
     # iOS + macOS 11.0+ specific
     switch_data += "#if TARGET_OS_IPHONE || (TARGET_OS_OSX && (__MAC_OS_X_VERSION_MAX_ALLOWED >= 110000))\n"
+    # Tracks whether the pixel format family being added to `switch_data` is deprecated.
+    section_contains_deprecated_format = False
     for angle_format in sorted(ios_specific_map.keys()):
         # ETC1_R8G8B8_UNORM_BLOCK is a duplicated of ETC2_R8G8B8_UNORM_BLOCK
         if angle_format == 'ETC1_R8G8B8_UNORM_BLOCK':
@@ -559,16 +630,22 @@ def gen_image_mtl_to_angle_switch_string(image_table):
         # Do not re-emit formats that are in the general Mac table
         if angle_format in mac_specific_map.keys():
             continue
+        # Add deprecation warnings around MTLPixelFormatPVRTC_* enums.
+        format_is_deprecated = is_format_deprecated(ios_specific_map[angle_format])
+        switch_data += maybe_add_deprecation_warning_supression(
+            format_is_deprecated, section_contains_deprecated_format)
+        section_contains_deprecated_format = format_is_deprecated
+
         switch_data += case_image_mtl_to_angle_template.format(
             mtl_format=ios_specific_map[angle_format], angle_format=angle_format)
     for angle_format in sorted(astc_tpl_map.keys()):
         switch_data += case_image_mtl_to_angle_template.format(
             mtl_format=astc_tpl_map[angle_format] + "LDR", angle_format=angle_format)
-    switch_data += "#if TARGET_OS_IOS || TARGET_OS_OSX \n"
+    switch_data += "#if TARGET_OS_IOS || TARGET_OS_OSX || TARGET_OS_VISION\n"
     for angle_format in sorted(astc_tpl_map.keys()):
         switch_data += case_image_mtl_to_angle_template.format(
             mtl_format=astc_tpl_map[angle_format] + "HDR", angle_format=angle_format)
-    switch_data += "#endif // TARGET_OS_IOS || TARGET_OS_OSX\n"
+    switch_data += "#endif // TARGET_OS_IOS || TARGET_OS_OSX || TARGET_OS_VISION\n"
     switch_data += "#endif  // TARGET_OS_IPHONE || mac 11.0+\n"
 
     switch_data += "        default:\n"
@@ -637,6 +714,7 @@ def gen_vertex_map_switch_string(vertex_table):
 
 def gen_mtl_format_caps_init_string(map_image):
     caps = map_image['caps']
+    bc_caps = map_image['caps_bc']
     mac_caps = map_image['caps_mac']
     ios_platform_caps = map_image['caps_ios_platform']
     ios_specific_caps = map_image['caps_ios_specific']
@@ -647,6 +725,8 @@ def gen_mtl_format_caps_init_string(map_image):
 
     def caps_to_cpp(caps_table):
         init_str = ''
+        # Tracks whether the pixel format family being added to `init_str` is deprecated.
+        section_contains_deprecated_format = False
         for mtl_format in sorted(caps_table.keys()):
             caps = caps_table[mtl_format]
             filterable = cap_to_param(caps, 'filterable')
@@ -657,6 +737,12 @@ def gen_mtl_format_caps_init_string(map_image):
             multisample = cap_to_param(caps, 'multisample')
             resolve = cap_to_param(caps, 'resolve')
 
+            # Add deprecation warnings around MTLPixelFormatPVRTC_* enums.
+            format_is_deprecated = is_format_deprecated(mtl_format)
+            init_str += maybe_add_deprecation_warning_supression(
+                format_is_deprecated, section_contains_deprecated_format)
+            section_contains_deprecated_format = format_is_deprecated
+
             init_str += "    setFormatCaps({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7});\n\n".format(
                 mtl_format, filterable, writable, blendable, multisample, resolve, colorRenderable,
                 depthRenderable)
@@ -664,6 +750,12 @@ def gen_mtl_format_caps_init_string(map_image):
         return init_str
 
     caps_init_str += caps_to_cpp(caps)
+
+    caps_init_str += "#if TARGET_OS_OSX || TARGET_OS_MACCATALYST ||\\\n"
+    caps_init_str += "    (TARGET_OS_IOS && __IPHONE_OS_VERSION_MAX_ALLOWED >= 160400) ||\\\n"
+    caps_init_str += "    (TARGET_OS_TV && __TV_OS_VERSION_MAX_ALLOWED >= 160400) || TARGET_OS_VISION\n"
+    caps_init_str += caps_to_cpp(bc_caps)
+    caps_init_str += "#endif  // BC formats\n"
 
     caps_init_str += "#if TARGET_OS_OSX || TARGET_OS_MACCATALYST\n"
     caps_init_str += caps_to_cpp(mac_caps)
@@ -674,9 +766,9 @@ def gen_mtl_format_caps_init_string(map_image):
 
     caps_init_str += caps_to_cpp(ios_platform_caps)
 
-    caps_init_str += "#if TARGET_OS_IOS || TARGET_OS_OSX\n"
+    caps_init_str += "#if TARGET_OS_IOS || TARGET_OS_OSX || TARGET_OS_VISION\n"
     caps_init_str += caps_to_cpp(ios_specific_caps)
-    caps_init_str += "#endif // TARGET_OS_IOS || mac 11.0+ \n"
+    caps_init_str += "#endif // TARGET_OS_IOS || mac 11.0+ || TARGET_OS_VISION\n"
     caps_init_str += "#endif // TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST || mac 11.0+ \n"
 
     return caps_init_str

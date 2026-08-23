@@ -29,8 +29,8 @@ ImageVk::~ImageVk() {}
 
 void ImageVk::onDestroy(const egl::Display *display)
 {
-    DisplayVk *displayVk = vk::GetImpl(display);
-    RendererVk *renderer = displayVk->getRenderer();
+    DisplayVk *displayVk   = vk::GetImpl(display);
+    vk::Renderer *renderer = displayVk->getRenderer();
 
     if (mImage != nullptr && mOwnsImage)
     {
@@ -51,7 +51,7 @@ void ImageVk::onDestroy(const egl::Display *display)
         // This is called as a special case where resources may be allocated by the caller, without
         // the caller ever issuing a draw command to free them. Specifically, SurfaceFlinger
         // optimistically allocates EGLImages that it may never draw to.
-        renderer->cleanupGarbage();
+        renderer->cleanupGarbage(nullptr);
     }
 }
 
@@ -74,8 +74,8 @@ egl::Error ImageVk::initialize(const egl::Display *display)
         ANGLE_TRY(ResultToEGL(textureVk->ensureRenderable(contextVk, &updateResult)));
 
         // Make sure the texture has created its backing storage
-        ANGLE_TRY(ResultToEGL(
-            textureVk->ensureImageInitialized(contextVk, ImageMipLevels::EnabledLevels)));
+        ANGLE_TRY(ResultToEGL(textureVk->ensureImageAndReadViewsInitialized(
+            contextVk, ImageMipLevels::EnabledLevels)));
 
         mImage = &textureVk->getImage();
 
@@ -104,7 +104,7 @@ egl::Error ImageVk::initialize(const egl::Display *display)
         else
         {
             UNREACHABLE();
-            return egl::EglBadAccess();
+            return egl::Error(EGL_BAD_ACCESS);
         }
 
         mOwnsImage = false;
@@ -153,19 +153,24 @@ egl::Error ImageVk::exportVkImage(void *vkImage, void *vkImageCreateInfo)
     return egl::NoError();
 }
 
-gl::TextureType ImageVk::getImageTextureType() const
+bool ImageVk::isFixedRatedCompression(const gl::Context *context)
 {
-    return mState.imageIndex.getType();
-}
+    ContextVk *contextVk   = vk::GetImpl(context);
+    vk::Renderer *renderer = contextVk->getRenderer();
 
-gl::LevelIndex ImageVk::getImageLevel() const
-{
-    return gl::LevelIndex(mState.imageIndex.getLevelIndex());
-}
+    ASSERT(mImage != nullptr && mImage->valid());
+    ASSERT(renderer->getFeatures().supportsImageCompressionControl.enabled);
 
-uint32_t ImageVk::getImageLayer() const
-{
-    return mState.imageIndex.hasLayer() ? mState.imageIndex.getLayerIndex() : 0;
+    VkImageCompressionPropertiesEXT compressionProperties = {};
+    compressionProperties.sType               = VK_STRUCTURE_TYPE_IMAGE_COMPRESSION_PROPERTIES_EXT;
+    VkSubresourceLayout2 subresourceLayout    = {};
+    subresourceLayout.sType                   = VK_STRUCTURE_TYPE_SUBRESOURCE_LAYOUT_2_EXT;
+    subresourceLayout.pNext                   = &compressionProperties;
+
+    mImage->getImageSubresourceLayout(renderer, &subresourceLayout);
+
+    return compressionProperties.imageCompressionFixedRateFlags >
+           VK_IMAGE_COMPRESSION_FIXED_RATE_NONE_EXT;
 }
 
 }  // namespace rx

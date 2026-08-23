@@ -8,6 +8,7 @@
 //
 
 #include "Matrix.h"
+#include "common/unsafe_buffers.h"
 
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -266,7 +267,7 @@ Matrix4 operator*(const Matrix4 &a, float b)
     Matrix4 ret(a);
     for (size_t i = 0; i < 16; i++)
     {
-        ret.data[i] *= b;
+        ANGLE_UNSAFE_TODO(ret.data[i]) *= b;
     }
     return ret;
 }
@@ -275,7 +276,7 @@ Matrix4 &operator*=(Matrix4 &a, float b)
 {
     for (size_t i = 0; i < 16; i++)
     {
-        a.data[i] *= b;
+        ANGLE_UNSAFE_TODO(a.data[i]) *= b;
     }
     return a;
 }
@@ -292,7 +293,7 @@ bool operator==(const Matrix4 &a, const Matrix4 &b)
 {
     for (size_t i = 0; i < 16; i++)
     {
-        if (a.data[i] != b.data[i])
+        if (ANGLE_UNSAFE_TODO(a.data[i]) != ANGLE_UNSAFE_TODO(b.data[i]))
         {
             return false;
         }

@@ -4,6 +4,7 @@
 // found in the LICENSE file.
 //
 
+#include "common/unsafe_buffers.h"
 #include "gtest/gtest.h"
 
 #include "angle_gl.h"
@@ -84,7 +85,7 @@ TEST(VariablePacking, Pack)
 
     for (size_t tt = 0; tt < ArraySize(types); ++tt)
     {
-        sh::GLenum type            = types[tt];
+        sh::GLenum type            = ANGLE_UNSAFE_TODO(types[tt]);
         int num_rows               = sh::GetTypePackingRows(type);
         int num_components_per_row = sh::GetTypePackingComponentsPerRow(type);
         // Check 1 of the type.
@@ -136,7 +137,7 @@ TEST(VariablePacking, PackSizes)
 {
     for (size_t tt = 0; tt < ArraySize(types); ++tt)
     {
-        sh::GLenum type = types[tt];
+        sh::GLenum type = ANGLE_UNSAFE_TODO(types[tt]);
 
         int expectedComponents = gl::VariableComponentCount(type);
         int expectedRows       = gl::VariableRowCount(type);
@@ -164,7 +165,7 @@ TEST(VariablePacking, NonSquareMats)
     for (size_t mt = 0; mt < ArraySize(nonSqMatTypes); ++mt)
     {
 
-        sh::GLenum type = nonSqMatTypes[mt];
+        sh::GLenum type = ANGLE_UNSAFE_TODO(nonSqMatTypes[mt]);
 
         int rows       = gl::VariableRowCount(type);
         int cols       = gl::VariableColumnCount(type);

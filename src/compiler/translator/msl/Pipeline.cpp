@@ -112,7 +112,7 @@ bool Pipeline::uses(const TVariable &var) const
                 case TQualifier::EvqSampleMaskIn:
                 case TQualifier::EvqSampleMask:
                     return var.symbolType() == SymbolType::BuiltIn;
-                case TQualifier::EvqUniform:
+                case TQualifier::EvqNumSamples:
                     return var.name() == "gl_NumSamples";
                 default:
                     return false;
@@ -220,12 +220,14 @@ Name Pipeline::getStructInstanceName(Variant variant) const
             name = VARIANT_NAME(variant, "vertexIn");
             break;
         case Type::VertexOut:
+            // Used by name in compiler/translator/tree_ops/msl/RewriteOutArgs.cpp
             name = VARIANT_NAME(variant, "vertexOut");
             break;
         case Type::FragmentIn:
             name = VARIANT_NAME(variant, "fragmentIn");
             break;
         case Type::FragmentOut:
+            // Used by name in compiler/translator/tree_ops/msl/RewriteOutArgs.cpp
             name = VARIANT_NAME(variant, "fragmentOut");
             break;
         case Type::UserUniforms:
@@ -235,6 +237,7 @@ Name Pipeline::getStructInstanceName(Variant variant) const
             name = VARIANT_NAME(variant, "angleUniforms");
             break;
         case Type::NonConstantGlobals:
+            // Used by name in compiler/translator/tree_ops/msl/RewriteOutArgs.cpp
             name = VARIANT_NAME(variant, "nonConstGlobals");
             break;
         case Type::InvocationVertexGlobals:

@@ -12,8 +12,8 @@
 
 #include "libANGLE/renderer/vulkan/SurfaceVk.h"
 
-struct wl_display;
 struct wl_egl_window;
+struct wl_display;
 
 namespace rx
 {
@@ -25,29 +25,23 @@ class WindowSurfaceVkWayland : public WindowSurfaceVk
     // before the next operation which would provoke a backbuffer to be pulled.
     static void ResizeCallback(wl_egl_window *window, void *payload);
 
+    // waylandDisplay is the wl_display the EGL display was initialized with, and it owns
+    // the window's wl_surface for conformant EGL usage. Passing it explicitly avoids
+    // wl_proxy_get_display(), which only exists in libwayland 1.20+ and otherwise breaks
+    // builds against older system wayland headers (https://anglebug.com/534371626).
     WindowSurfaceVkWayland(const egl::SurfaceState &surfaceState,
                            EGLNativeWindowType window,
-                           wl_display *display);
+                           wl_display *waylandDisplay);
 
-    // On Wayland, currentExtent is undefined (0xFFFFFFFF, 0xFFFFFFFF).
-    // Whatever the application sets a swapchain's imageExtent to will be the size of the window,
-    // after the first image is presented
-    egl::Error getUserWidth(const egl::Display *display, EGLint *value) const override;
-    egl::Error getUserHeight(const egl::Display *display, EGLint *value) const override;
-
-    angle::Result getAttachmentRenderTarget(const gl::Context *context,
-                                            GLenum binding,
-                                            const gl::ImageIndex &imageIndex,
-                                            GLsizei samples,
-                                            FramebufferAttachmentRenderTarget **rtOut) override;
+    ~WindowSurfaceVkWayland() override;
 
   private:
-    angle::Result createSurfaceVk(vk::Context *context, gl::Extents *extentsOut) override;
-    angle::Result getCurrentWindowSize(vk::Context *context, gl::Extents *extentsOut) override;
+    angle::Result createSurfaceVk(vk::ErrorContext *context) override;
+    angle::Result getCurrentWindowSize(vk::ErrorContext *context,
+                                       gl::Extents *extentsOut) const override;
 
-    wl_display *mWaylandDisplay;
     gl::Extents mExtents;
-    bool mResized;
+    wl_display *mWaylandDisplay;
 };
 
 }  // namespace rx

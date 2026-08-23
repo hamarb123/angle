@@ -6,6 +6,7 @@
 
 // validationES1.cpp: Validation functions for OpenGL ES 1.0 entry point parameters
 
+#include "common/unsafe_buffers.h"
 #include "libANGLE/validationES1_autogen.h"
 
 #include "common/debug.h"
@@ -15,24 +16,16 @@
 #include "libANGLE/queryconversions.h"
 #include "libANGLE/queryutils.h"
 #include "libANGLE/validationES.h"
-
-#define ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint)                                \
-    do                                                                                    \
-    {                                                                                     \
-        if (state.getClientType() != EGL_OPENGL_API && state.getClientMajorVersion() > 1) \
-        {                                                                                 \
-            errors->validationError(entryPoint, GL_INVALID_OPERATION, kGLES1Only);        \
-            return false;                                                                 \
-        }                                                                                 \
-    } while (0)
-
-#define ANGLE_VALIDATE_IS_GLES1_CONTEXT(context, entryPoint) \
-    ANGLE_VALIDATE_IS_GLES1(context->getPrivateState(),      \
-                            context->getMutableErrorSetForValidation(), entryPoint)
+#include "libANGLE/validationES2.h"
 
 namespace gl
 {
 using namespace err;
+
+void RecordVersionErrorES10(const Context *context, angle::EntryPoint entryPoint)
+{
+    ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kEntryPointRequiresES10);
+}
 
 bool ValidateAlphaFuncCommon(const PrivateState &state,
                              ErrorSet *errors,
@@ -60,7 +53,6 @@ bool ValidateClientStateCommon(const Context *context,
                                angle::EntryPoint entryPoint,
                                ClientVertexArrayType arrayType)
 {
-    ANGLE_VALIDATE_IS_GLES1_CONTEXT(context, entryPoint);
     switch (arrayType)
     {
         case ClientVertexArrayType::Vertex:
@@ -89,8 +81,6 @@ bool ValidateBuiltinVertexAttributeCommon(const Context *context,
                                           GLsizei stride,
                                           const void *pointer)
 {
-    ANGLE_VALIDATE_IS_GLES1_CONTEXT(context, entryPoint);
-
     if (stride < 0)
     {
         ANGLE_VALIDATION_ERROR(GL_INVALID_VALUE, kInvalidVertexPointerStride);
@@ -192,9 +182,6 @@ bool ValidateLightCommon(const PrivateState &state,
                          LightParameter pname,
                          const GLfloat *params)
 {
-
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-
     if (!ValidateLightCaps(state, errors, entryPoint, light))
     {
         return false;
@@ -209,7 +196,7 @@ bool ValidateLightCommon(const PrivateState &state,
         case LightParameter::SpotDirection:
             return true;
         case LightParameter::SpotExponent:
-            if (params[0] < 0.0f || params[0] > 128.0f)
+            if (isOutsideOfBounds(params[0], 0.0f, 128.0f))
             {
                 errors->validationError(entryPoint, GL_INVALID_VALUE, kLightParameterOutOfRange);
                 return false;
@@ -220,7 +207,7 @@ bool ValidateLightCommon(const PrivateState &state,
             {
                 return true;
             }
-            if (params[0] < 0.0f || params[0] > 90.0f)
+            if (isOutsideOfBounds(params[0], 0.0f, 90.0f))
             {
                 errors->validationError(entryPoint, GL_INVALID_VALUE, kLightParameterOutOfRange);
                 return false;
@@ -229,7 +216,7 @@ bool ValidateLightCommon(const PrivateState &state,
         case LightParameter::ConstantAttenuation:
         case LightParameter::LinearAttenuation:
         case LightParameter::QuadraticAttenuation:
-            if (params[0] < 0.0f)
+            if (params[0] < 0.0f || isNaN(params[0]))
             {
                 errors->validationError(entryPoint, GL_INVALID_VALUE, kLightParameterOutOfRange);
                 return false;
@@ -278,7 +265,7 @@ bool ValidateMaterialCommon(const PrivateState &state,
         case MaterialParameter::Emission:
             return true;
         case MaterialParameter::Shininess:
-            if (params[0] < 0.0f || params[0] > 128.0f)
+            if (isOutsideOfBounds(params[0], 0.0f, 128.0f))
             {
                 errors->validationError(entryPoint, GL_INVALID_VALUE, kMaterialParameterOutOfRange);
                 return false;
@@ -297,8 +284,6 @@ bool ValidateMaterialSetting(const PrivateState &state,
                              MaterialParameter pname,
                              const GLfloat *params)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-
     if (face != GL_FRONT_AND_BACK)
     {
         errors->validationError(entryPoint, GL_INVALID_ENUM, kInvalidMaterialFace);
@@ -314,8 +299,6 @@ bool ValidateMaterialQuery(const PrivateState &state,
                            GLenum face,
                            MaterialParameter pname)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-
     if (face != GL_FRONT && face != GL_BACK)
     {
         errors->validationError(entryPoint, GL_INVALID_ENUM, kInvalidMaterialFace);
@@ -353,7 +336,6 @@ bool ValidateLightModelCommon(const PrivateState &state,
                               angle::EntryPoint entryPoint,
                               GLenum pname)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     switch (pname)
     {
         case GL_LIGHT_MODEL_AMBIENT:
@@ -390,8 +372,6 @@ bool ValidateClipPlaneCommon(const PrivateState &state,
                              angle::EntryPoint entryPoint,
                              GLenum plane)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-
     if (plane < GL_CLIP_PLANE0 || plane >= GL_CLIP_PLANE0 + state.getCaps().maxClipPlanes)
     {
         errors->validationError(entryPoint, GL_INVALID_ENUM, kInvalidClipPlane);
@@ -407,8 +387,6 @@ bool ValidateFogCommon(const PrivateState &state,
                        GLenum pname,
                        const GLfloat *params)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-
     switch (pname)
     {
         case GL_FOG_MODE:
@@ -430,7 +408,7 @@ bool ValidateFogCommon(const PrivateState &state,
         case GL_FOG_COLOR:
             break;
         case GL_FOG_DENSITY:
-            if (params[0] < 0.0f)
+            if (params[0] < 0.0f || isNaN(params[0]))
             {
                 errors->validationError(entryPoint, GL_INVALID_VALUE, kInvalidFogDensity);
                 return false;
@@ -450,8 +428,6 @@ bool ValidateTexEnvCommon(const PrivateState &state,
                           TextureEnvParameter pname,
                           const GLfloat *params)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-
     switch (target)
     {
         case TextureEnvTarget::Env:
@@ -591,6 +567,22 @@ bool ValidateTexEnvCommon(const PrivateState &state,
                     return false;
             }
             break;
+        case TextureEnvTarget::TextureFilterControl:
+            if (!state.getExtensions().textureLodBiasEXT)
+            {
+                errors->validationError(entryPoint, GL_INVALID_ENUM, kInvalidTextureEnvTarget);
+                return false;
+            }
+            switch (pname)
+            {
+                case TextureEnvParameter::LodBias:
+                    break;
+                default:
+                    errors->validationError(entryPoint, GL_INVALID_ENUM,
+                                            kInvalidTextureEnvParameter);
+                    return false;
+            }
+            break;
         default:
             errors->validationError(entryPoint, GL_INVALID_ENUM, kInvalidTextureEnvTarget);
             return false;
@@ -648,8 +640,6 @@ bool ValidatePointParameterCommon(const PrivateState &state,
                                   PointParameter pname,
                                   const GLfloat *params)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-
     switch (pname)
     {
         case PointParameter::PointSizeMin:
@@ -658,7 +648,8 @@ bool ValidatePointParameterCommon(const PrivateState &state,
         case PointParameter::PointDistanceAttenuation:
             for (unsigned int i = 0; i < GetPointParameterCount(pname); i++)
             {
-                if (params[i] < 0.0f)
+                const GLfloat paramValue = ANGLE_UNSAFE_TODO(params[i]);
+                if (paramValue < 0.0f || isNaN(paramValue))
                 {
                     errors->validationError(entryPoint, GL_INVALID_VALUE,
                                             kInvalidPointParameterValue);
@@ -679,9 +670,7 @@ bool ValidatePointSizeCommon(const PrivateState &state,
                              angle::EntryPoint entryPoint,
                              GLfloat size)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-
-    if (size <= 0.0f)
+    if (size <= 0.0f || isNaN(size))
     {
         errors->validationError(entryPoint, GL_INVALID_VALUE, kInvalidPointSizeValue);
         return false;
@@ -695,9 +684,7 @@ bool ValidateDrawTexCommon(const Context *context,
                            float width,
                            float height)
 {
-    ANGLE_VALIDATE_IS_GLES1_CONTEXT(context, entryPoint);
-
-    if (width <= 0.0f || height <= 0.0f)
+    if (width <= 0.0f || height <= 0.0f || isNaN(width) || isNaN(height))
     {
         ANGLE_VALIDATION_ERROR(GL_INVALID_VALUE, kNonPositiveDrawTextureDimension);
         return false;
@@ -717,7 +704,6 @@ bool ValidateAlphaFunc(const PrivateState &state,
                        AlphaTestFunc func,
                        GLfloat ref)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     return ValidateAlphaFuncCommon(state, errors, entryPoint, func);
 }
 
@@ -727,36 +713,13 @@ bool ValidateAlphaFuncx(const PrivateState &state,
                         AlphaTestFunc func,
                         GLfixed ref)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     return ValidateAlphaFuncCommon(state, errors, entryPoint, func);
-}
-
-bool ValidateClearColorx(const PrivateState &state,
-                         ErrorSet *errors,
-                         angle::EntryPoint entryPoint,
-                         GLfixed red,
-                         GLfixed green,
-                         GLfixed blue,
-                         GLfixed alpha)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
-bool ValidateClearDepthx(const PrivateState &state,
-                         ErrorSet *errors,
-                         angle::EntryPoint entryPoint,
-                         GLfixed depth)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
 }
 
 bool ValidateClientActiveTexture(const Context *context,
                                  angle::EntryPoint entryPoint,
                                  GLenum texture)
 {
-    ANGLE_VALIDATE_IS_GLES1_CONTEXT(context, entryPoint);
     return ValidateMultitextureUnit(context->getPrivateState(),
                                     context->getMutableErrorSetForValidation(), entryPoint,
                                     texture);
@@ -780,42 +743,6 @@ bool ValidateClipPlanex(const PrivateState &state,
     return ValidateClipPlaneCommon(state, errors, entryPoint, plane);
 }
 
-bool ValidateColor4f(const PrivateState &state,
-                     ErrorSet *errors,
-                     angle::EntryPoint entryPoint,
-                     GLfloat red,
-                     GLfloat green,
-                     GLfloat blue,
-                     GLfloat alpha)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
-bool ValidateColor4ub(const PrivateState &state,
-                      ErrorSet *errors,
-                      angle::EntryPoint entryPoint,
-                      GLubyte red,
-                      GLubyte green,
-                      GLubyte blue,
-                      GLubyte alpha)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
-bool ValidateColor4x(const PrivateState &state,
-                     ErrorSet *errors,
-                     angle::EntryPoint entryPoint,
-                     GLfixed red,
-                     GLfixed green,
-                     GLfixed blue,
-                     GLfixed alpha)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
 bool ValidateColorPointer(const Context *context,
                           angle::EntryPoint entryPoint,
                           GLint size,
@@ -825,31 +752,6 @@ bool ValidateColorPointer(const Context *context,
 {
     return ValidateBuiltinVertexAttributeCommon(context, entryPoint, ClientVertexArrayType::Color,
                                                 size, type, stride, pointer);
-}
-
-bool ValidateCullFace(const PrivateState &state,
-                      ErrorSet *errors,
-                      angle::EntryPoint entryPoint,
-                      GLenum mode)
-{
-    UNIMPLEMENTED();
-    return true;
-}
-
-bool ValidateDepthRangex(const PrivateState &state,
-                         ErrorSet *errors,
-                         angle::EntryPoint entryPoint,
-                         GLfixed n,
-                         GLfixed f)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    if (state.isWebGL() && n > f)
-    {
-        errors->validationError(entryPoint, GL_INVALID_OPERATION, kInvalidDepthRange);
-        return false;
-    }
-
-    return true;
 }
 
 bool ValidateDisableClientState(const Context *context,
@@ -890,7 +792,6 @@ bool ValidateFogx(const PrivateState &state,
                   GLenum pname,
                   GLfixed param)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     GLfloat asFloat =
         pname == GL_FOG_MODE ? static_cast<GLfloat>(param) : ConvertFixedToFloat(param);
     return ValidateFogCommon(state, errors, entryPoint, pname, &asFloat);
@@ -902,7 +803,6 @@ bool ValidateFogxv(const PrivateState &state,
                    GLenum pname,
                    const GLfixed *params)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     unsigned int paramCount = GetFogParameterCount(pname);
     GLfloat paramsf[4]      = {};
 
@@ -914,7 +814,7 @@ bool ValidateFogxv(const PrivateState &state,
     {
         for (unsigned int i = 0; i < paramCount; i++)
         {
-            paramsf[i] = ConvertFixedToFloat(params[i]);
+            ANGLE_UNSAFE_TODO(paramsf[i] = ConvertFixedToFloat(params[i]));
         }
     }
 
@@ -931,7 +831,6 @@ bool ValidateFrustumf(const PrivateState &state,
                       GLfloat n,
                       GLfloat f)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     if (l == r || b == t || n == f || n <= 0.0f || f <= 0.0f)
     {
         errors->validationError(entryPoint, GL_INVALID_VALUE, kInvalidProjectionMatrix);
@@ -950,22 +849,11 @@ bool ValidateFrustumx(const PrivateState &state,
                       GLfixed n,
                       GLfixed f)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     if (l == r || b == t || n == f || n <= 0 || f <= 0)
     {
         errors->validationError(entryPoint, GL_INVALID_VALUE, kInvalidProjectionMatrix);
         return false;
     }
-    return true;
-}
-
-bool ValidateGetBufferParameteriv(const Context *context,
-                                  angle::EntryPoint entryPoint,
-                                  GLenum target,
-                                  GLenum pname,
-                                  const GLint *params)
-{
-    UNIMPLEMENTED();
     return true;
 }
 
@@ -990,12 +878,9 @@ bool ValidateGetClipPlanex(const PrivateState &state,
 bool ValidateGetFixedv(const Context *context,
                        angle::EntryPoint entryPoint,
                        GLenum pname,
-                       const GLfixed *params)
+                       const GLfixed *data)
 {
-    ANGLE_VALIDATE_IS_GLES1_CONTEXT(context, entryPoint);
-    GLenum nativeType;
-    unsigned int numParams = 0;
-    return ValidateStateQuery(context, entryPoint, pname, &nativeType, &numParams);
+    return ValidateStateQuery(context, entryPoint, pname, data, nullptr);
 }
 
 bool ValidateGetLightfv(const PrivateState &state,
@@ -1072,18 +957,11 @@ bool ValidateGetTexEnvxv(const PrivateState &state,
 
 bool ValidateGetTexParameterxv(const Context *context,
                                angle::EntryPoint entryPoint,
-                               TextureType target,
+                               TextureType targetPacked,
                                GLenum pname,
                                const GLfixed *params)
 {
-    ANGLE_VALIDATE_IS_GLES1_CONTEXT(context, entryPoint);
-
-    if (!ValidateGetTexParameterBase(context, entryPoint, target, pname, nullptr))
-    {
-        return false;
-    }
-
-    return true;
+    return ValidateGetTexParameterBase(context, entryPoint, targetPacked, pname, nullptr);
 }
 
 bool ValidateLightModelf(const PrivateState &state,
@@ -1163,7 +1041,7 @@ bool ValidateLightxv(const PrivateState &state,
     GLfloat paramsf[4];
     for (unsigned int i = 0; i < GetLightParameterCount(pname); i++)
     {
-        paramsf[i] = ConvertFixedToFloat(params[i]);
+        ANGLE_UNSAFE_TODO(paramsf[i] = ConvertFixedToFloat(params[i]));
     }
 
     return ValidateLightCommon(state, errors, entryPoint, light, pname, paramsf);
@@ -1174,7 +1052,6 @@ bool ValidateLineWidthx(const PrivateState &state,
                         angle::EntryPoint entryPoint,
                         GLfixed width)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     if (width <= 0)
     {
         errors->validationError(entryPoint, GL_INVALID_VALUE, kInvalidWidth);
@@ -1184,36 +1061,11 @@ bool ValidateLineWidthx(const PrivateState &state,
     return true;
 }
 
-bool ValidateLoadIdentity(const PrivateState &state, ErrorSet *errors, angle::EntryPoint entryPoint)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
-bool ValidateLoadMatrixf(const PrivateState &state,
-                         ErrorSet *errors,
-                         angle::EntryPoint entryPoint,
-                         const GLfloat *m)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
-bool ValidateLoadMatrixx(const PrivateState &state,
-                         ErrorSet *errors,
-                         angle::EntryPoint entryPoint,
-                         const GLfixed *m)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
 bool ValidateLogicOp(const PrivateState &state,
                      ErrorSet *errors,
                      angle::EntryPoint entryPoint,
                      LogicalOperation opcode)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     return ValidateLogicOpCommon(state, errors, entryPoint, opcode);
 }
 
@@ -1259,7 +1111,7 @@ bool ValidateMaterialxv(const PrivateState &state,
 
     for (unsigned int i = 0; i < GetMaterialParameterCount(pname); i++)
     {
-        paramsf[i] = ConvertFixedToFloat(params[i]);
+        ANGLE_UNSAFE_TODO(paramsf[i] = ConvertFixedToFloat(params[i]));
     }
 
     return ValidateMaterialSetting(state, errors, entryPoint, face, pname, paramsf);
@@ -1270,7 +1122,6 @@ bool ValidateMatrixMode(const PrivateState &state,
                         angle::EntryPoint entryPoint,
                         MatrixType mode)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     switch (mode)
     {
         case MatrixType::Projection:
@@ -1283,24 +1134,6 @@ bool ValidateMatrixMode(const PrivateState &state,
     }
 }
 
-bool ValidateMultMatrixf(const PrivateState &state,
-                         ErrorSet *errors,
-                         angle::EntryPoint entryPoint,
-                         const GLfloat *m)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
-bool ValidateMultMatrixx(const PrivateState &state,
-                         ErrorSet *errors,
-                         angle::EntryPoint entryPoint,
-                         const GLfixed *m)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
 bool ValidateMultiTexCoord4f(const PrivateState &state,
                              ErrorSet *errors,
                              angle::EntryPoint entryPoint,
@@ -1310,7 +1143,6 @@ bool ValidateMultiTexCoord4f(const PrivateState &state,
                              GLfloat r,
                              GLfloat q)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     return ValidateMultitextureUnit(state, errors, entryPoint, target);
 }
 
@@ -1323,30 +1155,7 @@ bool ValidateMultiTexCoord4x(const PrivateState &state,
                              GLfixed r,
                              GLfixed q)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     return ValidateMultitextureUnit(state, errors, entryPoint, target);
-}
-
-bool ValidateNormal3f(const PrivateState &state,
-                      ErrorSet *errors,
-                      angle::EntryPoint entryPoint,
-                      GLfloat nx,
-                      GLfloat ny,
-                      GLfloat nz)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
-bool ValidateNormal3x(const PrivateState &state,
-                      ErrorSet *errors,
-                      angle::EntryPoint entryPoint,
-                      GLfixed nx,
-                      GLfixed ny,
-                      GLfixed nz)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
 }
 
 bool ValidateNormalPointer(const Context *context,
@@ -1369,7 +1178,6 @@ bool ValidateOrthof(const PrivateState &state,
                     GLfloat n,
                     GLfloat f)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     // [OpenGL ES 1.1.12] section 2.10.2 page 31:
     // If l is equal to r, b is equal to t, or n is equal to f, the
     // error INVALID VALUE results.
@@ -1391,7 +1199,6 @@ bool ValidateOrthox(const PrivateState &state,
                     GLfixed n,
                     GLfixed f)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     if (l == r || b == t || n == f)
     {
         errors->validationError(entryPoint, GL_INVALID_VALUE, kInvalidProjectionMatrix);
@@ -1451,7 +1258,7 @@ bool ValidatePointParameterxv(const PrivateState &state,
     GLfloat paramsf[4] = {};
     for (unsigned int i = 0; i < GetPointParameterCount(pname); i++)
     {
-        paramsf[i] = ConvertFixedToFloat(params[i]);
+        ANGLE_UNSAFE_TODO(paramsf[i] = ConvertFixedToFloat(params[i]));
     }
     return ValidatePointParameterCommon(state, errors, entryPoint, pname, paramsf);
 }
@@ -1472,19 +1279,8 @@ bool ValidatePointSizex(const PrivateState &state,
     return ValidatePointSizeCommon(state, errors, entryPoint, ConvertFixedToFloat(size));
 }
 
-bool ValidatePolygonOffsetx(const PrivateState &state,
-                            ErrorSet *errors,
-                            angle::EntryPoint entryPoint,
-                            GLfixed factor,
-                            GLfixed units)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
 bool ValidatePopMatrix(const PrivateState &state, ErrorSet *errors, angle::EntryPoint entryPoint)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     const auto &stack = state.gles1().currentMatrixStack();
     if (stack.size() == 1)
     {
@@ -1496,7 +1292,6 @@ bool ValidatePopMatrix(const PrivateState &state, ErrorSet *errors, angle::Entry
 
 bool ValidatePushMatrix(const PrivateState &state, ErrorSet *errors, angle::EntryPoint entryPoint)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     const auto &stack = state.gles1().currentMatrixStack();
     if (stack.size() == stack.max_size())
     {
@@ -1506,68 +1301,11 @@ bool ValidatePushMatrix(const PrivateState &state, ErrorSet *errors, angle::Entr
     return true;
 }
 
-bool ValidateRotatef(const PrivateState &state,
-                     ErrorSet *errors,
-                     angle::EntryPoint entryPoint,
-                     GLfloat angle,
-                     GLfloat x,
-                     GLfloat y,
-                     GLfloat z)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
-bool ValidateRotatex(const PrivateState &state,
-                     ErrorSet *errors,
-                     angle::EntryPoint entryPoint,
-                     GLfixed angle,
-                     GLfixed x,
-                     GLfixed y,
-                     GLfixed z)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
-bool ValidateSampleCoveragex(const PrivateState &state,
-                             ErrorSet *errors,
-                             angle::EntryPoint entryPoint,
-                             GLclampx value,
-                             GLboolean invert)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
-bool ValidateScalef(const PrivateState &state,
-                    ErrorSet *errors,
-                    angle::EntryPoint entryPoint,
-                    GLfloat x,
-                    GLfloat y,
-                    GLfloat z)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
-bool ValidateScalex(const PrivateState &state,
-                    ErrorSet *errors,
-                    angle::EntryPoint entryPoint,
-                    GLfixed x,
-                    GLfixed y,
-                    GLfixed z)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
 bool ValidateShadeModel(const PrivateState &state,
                         ErrorSet *errors,
                         angle::EntryPoint entryPoint,
                         ShadingModel mode)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     switch (mode)
     {
         case ShadingModel::Flat:
@@ -1631,7 +1369,7 @@ bool ValidateTexEnviv(const PrivateState &state,
     GLfloat paramsf[4];
     for (unsigned int i = 0; i < GetTextureEnvParameterCount(pname); i++)
     {
-        paramsf[i] = static_cast<GLfloat>(params[i]);
+        ANGLE_UNSAFE_TODO(paramsf[i] = static_cast<GLfloat>(params[i]));
     }
     return ValidateTexEnvCommon(state, errors, entryPoint, target, pname, paramsf);
 }
@@ -1643,7 +1381,6 @@ bool ValidateTexEnvx(const PrivateState &state,
                      TextureEnvParameter pname,
                      GLfixed param)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     GLfloat paramsf[4] = {};
     ConvertTextureEnvFromFixed(pname, &param, paramsf);
     return ValidateTexEnvCommon(state, errors, entryPoint, target, pname, paramsf);
@@ -1656,7 +1393,6 @@ bool ValidateTexEnvxv(const PrivateState &state,
                       TextureEnvParameter pname,
                       const GLfixed *params)
 {
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
     GLfloat paramsf[4] = {};
     ConvertTextureEnvFromFixed(pname, params, paramsf);
     return ValidateTexEnvCommon(state, errors, entryPoint, target, pname, paramsf);
@@ -1664,10 +1400,8 @@ bool ValidateTexEnvxv(const PrivateState &state,
 
 bool ValidateTexParameterBaseForGLfixed(const Context *context,
                                         angle::EntryPoint entryPoint,
-                                        TextureType target,
+                                        TextureType targetPacked,
                                         GLenum pname,
-                                        GLsizei bufSize,
-                                        bool vectorParams,
                                         const GLfixed *params)
 {
     // Convert GLfixed parameter for GL_TEXTURE_MAX_ANISOTROPY_EXT independently
@@ -1683,51 +1417,25 @@ bool ValidateTexParameterBaseForGLfixed(const Context *context,
     {
         paramValue = static_cast<GLfloat>(params[0]);
     }
-    return ValidateTexParameterBase(context, entryPoint, target, pname, bufSize, vectorParams,
-                                    &paramValue);
+    return ValidateTexParameterBase(context, entryPoint, targetPacked, pname, &paramValue);
 }
 
 bool ValidateTexParameterx(const Context *context,
                            angle::EntryPoint entryPoint,
-                           TextureType target,
+                           TextureType targetPacked,
                            GLenum pname,
                            GLfixed param)
 {
-    ANGLE_VALIDATE_IS_GLES1_CONTEXT(context, entryPoint);
-    return ValidateTexParameterBaseForGLfixed(context, entryPoint, target, pname, -1, false,
-                                              &param);
+    return ValidateTexParameterBaseForGLfixed(context, entryPoint, targetPacked, pname, &param);
 }
 
 bool ValidateTexParameterxv(const Context *context,
                             angle::EntryPoint entryPoint,
-                            TextureType target,
+                            TextureType targetPacked,
                             GLenum pname,
                             const GLfixed *params)
 {
-    ANGLE_VALIDATE_IS_GLES1_CONTEXT(context, entryPoint);
-    return ValidateTexParameterBaseForGLfixed(context, entryPoint, target, pname, -1, true, params);
-}
-
-bool ValidateTranslatef(const PrivateState &state,
-                        ErrorSet *errors,
-                        angle::EntryPoint entryPoint,
-                        GLfloat x,
-                        GLfloat y,
-                        GLfloat z)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
-}
-
-bool ValidateTranslatex(const PrivateState &state,
-                        ErrorSet *errors,
-                        angle::EntryPoint entryPoint,
-                        GLfixed x,
-                        GLfixed y,
-                        GLfixed z)
-{
-    ANGLE_VALIDATE_IS_GLES1(state, errors, entryPoint);
-    return true;
+    return ValidateTexParameterBaseForGLfixed(context, entryPoint, targetPacked, pname, params);
 }
 
 bool ValidateVertexPointer(const Context *context,
@@ -1756,7 +1464,8 @@ bool ValidateDrawTexfvOES(const Context *context,
                           angle::EntryPoint entryPoint,
                           const GLfloat *coords)
 {
-    return ValidateDrawTexCommon(context, entryPoint, coords[3], coords[4]);
+    return ValidateDrawTexCommon(context, entryPoint, ANGLE_UNSAFE_TODO(coords[3]),
+                                 ANGLE_UNSAFE_TODO(coords[4]));
 }
 
 bool ValidateDrawTexiOES(const Context *context,
@@ -1773,8 +1482,9 @@ bool ValidateDrawTexiOES(const Context *context,
 
 bool ValidateDrawTexivOES(const Context *context, angle::EntryPoint entryPoint, const GLint *coords)
 {
-    return ValidateDrawTexCommon(context, entryPoint, static_cast<GLfloat>(coords[3]),
-                                 static_cast<GLfloat>(coords[4]));
+    return ValidateDrawTexCommon(context, entryPoint,
+                                 static_cast<GLfloat>(ANGLE_UNSAFE_TODO(coords[3])),
+                                 static_cast<GLfloat>(ANGLE_UNSAFE_TODO(coords[4])));
 }
 
 bool ValidateDrawTexsOES(const Context *context,
@@ -1793,8 +1503,9 @@ bool ValidateDrawTexsvOES(const Context *context,
                           angle::EntryPoint entryPoint,
                           const GLshort *coords)
 {
-    return ValidateDrawTexCommon(context, entryPoint, static_cast<GLfloat>(coords[3]),
-                                 static_cast<GLfloat>(coords[4]));
+    return ValidateDrawTexCommon(context, entryPoint,
+                                 static_cast<GLfloat>(ANGLE_UNSAFE_TODO(coords[3])),
+                                 static_cast<GLfloat>(ANGLE_UNSAFE_TODO(coords[4])));
 }
 
 bool ValidateDrawTexxOES(const Context *context,
@@ -1813,19 +1524,14 @@ bool ValidateDrawTexxvOES(const Context *context,
                           angle::EntryPoint entryPoint,
                           const GLfixed *coords)
 {
-    return ValidateDrawTexCommon(context, entryPoint, ConvertFixedToFloat(coords[3]),
-                                 ConvertFixedToFloat(coords[4]));
+    return ValidateDrawTexCommon(context, entryPoint,
+                                 ConvertFixedToFloat(ANGLE_UNSAFE_TODO(coords[3])),
+                                 ConvertFixedToFloat(ANGLE_UNSAFE_TODO(coords[4])));
 }
 
 bool ValidateCurrentPaletteMatrixOES(const Context *context,
                                      angle::EntryPoint entryPoint,
                                      GLuint matrixpaletteindex)
-{
-    UNIMPLEMENTED();
-    return true;
-}
-
-bool ValidateLoadPaletteFromModelViewMatrixOES(const Context *context, angle::EntryPoint entryPoint)
 {
     UNIMPLEMENTED();
     return true;
@@ -1863,27 +1569,13 @@ bool ValidatePointSizePointerOES(const Context *context,
         context, entryPoint, ClientVertexArrayType::PointSize, 1, type, stride, pointer);
 }
 
-bool ValidateQueryMatrixxOES(const Context *context,
-                             angle::EntryPoint entryPoint,
-                             const GLfixed *mantissa,
-                             const GLint *exponent)
-{
-    UNIMPLEMENTED();
-    return true;
-}
-
 bool ValidateGenFramebuffersOES(const Context *context,
                                 angle::EntryPoint entryPoint,
                                 GLsizei n,
                                 const FramebufferID *framebuffers)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
-    return ValidateGenOrDelete(context, entryPoint, n);
+    return ValidateGenOrDelete(context->getMutableErrorSetForValidation(), entryPoint, n,
+                               framebuffers);
 }
 
 bool ValidateDeleteFramebuffersOES(const Context *context,
@@ -1891,13 +1583,8 @@ bool ValidateDeleteFramebuffersOES(const Context *context,
                                    GLsizei n,
                                    const FramebufferID *framebuffers)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
-    return ValidateGenOrDelete(context, entryPoint, n);
+    return ValidateGenOrDelete(context->getMutableErrorSetForValidation(), entryPoint, n,
+                               framebuffers);
 }
 
 bool ValidateGenRenderbuffersOES(const Context *context,
@@ -1905,13 +1592,8 @@ bool ValidateGenRenderbuffersOES(const Context *context,
                                  GLsizei n,
                                  const RenderbufferID *renderbuffers)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
-    return ValidateGenOrDelete(context, entryPoint, n);
+    return ValidateGenOrDelete(context->getMutableErrorSetForValidation(), entryPoint, n,
+                               renderbuffers);
 }
 
 bool ValidateDeleteRenderbuffersOES(const Context *context,
@@ -1919,13 +1601,8 @@ bool ValidateDeleteRenderbuffersOES(const Context *context,
                                     GLsizei n,
                                     const RenderbufferID *renderbuffers)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
-    return ValidateGenOrDelete(context, entryPoint, n);
+    return ValidateGenOrDelete(context->getMutableErrorSetForValidation(), entryPoint, n,
+                               renderbuffers);
 }
 
 bool ValidateBindFramebufferOES(const Context *context,
@@ -1933,12 +1610,6 @@ bool ValidateBindFramebufferOES(const Context *context,
                                 GLenum target,
                                 FramebufferID framebuffer)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
     return ValidateBindFramebufferBase(context, entryPoint, target, framebuffer);
 }
 
@@ -1947,12 +1618,6 @@ bool ValidateBindRenderbufferOES(const Context *context,
                                  GLenum target,
                                  RenderbufferID renderbuffer)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
     return ValidateBindRenderbufferBase(context, entryPoint, target, renderbuffer);
 }
 
@@ -1960,19 +1625,7 @@ bool ValidateCheckFramebufferStatusOES(const Context *context,
                                        angle::EntryPoint entryPoint,
                                        GLenum target)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
-    if (!ValidFramebufferTarget(context, target))
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_ENUM, kInvalidFramebufferTarget);
-        return false;
-    }
-
-    return true;
+    return ValidateCheckFramebufferStatus(context, entryPoint, target);
 }
 
 bool ValidateFramebufferRenderbufferOES(const Context *context,
@@ -1982,12 +1635,6 @@ bool ValidateFramebufferRenderbufferOES(const Context *context,
                                         GLenum rbtarget,
                                         RenderbufferID renderbuffer)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
     return ValidateFramebufferRenderbufferBase(context, entryPoint, target, attachment, rbtarget,
                                                renderbuffer);
 }
@@ -2000,92 +1647,14 @@ bool ValidateFramebufferTexture2DOES(const Context *context,
                                      TextureID texture,
                                      GLint level)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
-    if (level != 0)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_VALUE, kInvalidFramebufferTextureLevel);
-        return false;
-    }
-
-    if (!ValidateFramebufferTextureBase(context, entryPoint, target, attachment, texture, level))
-    {
-        return false;
-    }
-
-    if (texture.value != 0)
-    {
-        Texture *tex = context->getTexture(texture);
-        ASSERT(tex);
-
-        const Caps &caps = context->getCaps();
-
-        switch (textarget)
-        {
-            case TextureTarget::_2D:
-            {
-                if (level > log2(caps.max2DTextureSize))
-                {
-                    ANGLE_VALIDATION_ERROR(GL_INVALID_VALUE, kInvalidMipLevel);
-                    return false;
-                }
-                if (tex->getType() != TextureType::_2D)
-                {
-                    ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kInvalidTextureTarget);
-                    return false;
-                }
-            }
-            break;
-
-            case TextureTarget::CubeMapNegativeX:
-            case TextureTarget::CubeMapNegativeY:
-            case TextureTarget::CubeMapNegativeZ:
-            case TextureTarget::CubeMapPositiveX:
-            case TextureTarget::CubeMapPositiveY:
-            case TextureTarget::CubeMapPositiveZ:
-            {
-                if (!context->getExtensions().textureCubeMapOES)
-                {
-                    ANGLE_VALIDATION_ERROR(GL_INVALID_ENUM, kInvalidTextureTarget);
-                    return false;
-                }
-
-                if (level > log2(caps.maxCubeMapTextureSize))
-                {
-                    ANGLE_VALIDATION_ERROR(GL_INVALID_VALUE, kInvalidMipLevel);
-                    return false;
-                }
-                if (tex->getType() != TextureType::CubeMap)
-                {
-                    ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kTextureTargetMismatch);
-                    return false;
-                }
-            }
-            break;
-
-            default:
-                ANGLE_VALIDATION_ERROR(GL_INVALID_ENUM, kInvalidTextureTarget);
-                return false;
-        }
-    }
-
-    return true;
+    return ValidateFramebufferTexture2D(context, entryPoint, target, attachment, textarget, texture,
+                                        level);
 }
 
 bool ValidateGenerateMipmapOES(const Context *context,
                                angle::EntryPoint entryPoint,
                                TextureType target)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
     return ValidateGenerateMipmapBase(context, entryPoint, target);
 }
 
@@ -2096,12 +1665,6 @@ bool ValidateGetFramebufferAttachmentParameterivOES(const Context *context,
                                                     GLenum pname,
                                                     const GLint *params)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
     return ValidateGetFramebufferAttachmentParameterivBase(context, entryPoint, target, attachment,
                                                            pname, nullptr);
 }
@@ -2112,39 +1675,7 @@ bool ValidateGetRenderbufferParameterivOES(const Context *context,
                                            GLenum pname,
                                            const GLint *params)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
     return ValidateGetRenderbufferParameterivBase(context, entryPoint, target, pname, nullptr);
-}
-
-bool ValidateIsFramebufferOES(const Context *context,
-                              angle::EntryPoint entryPoint,
-                              FramebufferID framebuffer)
-{
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
-    return true;
-}
-
-bool ValidateIsRenderbufferOES(const Context *context,
-                               angle::EntryPoint entryPoint,
-                               RenderbufferID renderbuffer)
-{
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
-    return true;
 }
 
 bool ValidateRenderbufferStorageOES(const Context *context,
@@ -2154,12 +1685,6 @@ bool ValidateRenderbufferStorageOES(const Context *context,
                                     GLsizei width,
                                     GLsizei height)
 {
-    if (!context->getExtensions().framebufferObjectOES)
-    {
-        ANGLE_VALIDATION_ERROR(GL_INVALID_OPERATION, kExtensionNotEnabled);
-        return false;
-    }
-
     return ValidateRenderbufferStorageParametersBase(context, entryPoint, target, 0, internalformat,
                                                      width, height);
 }

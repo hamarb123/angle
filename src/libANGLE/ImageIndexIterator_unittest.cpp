@@ -4,6 +4,7 @@
 // found in the LICENSE file.
 //
 
+#include "common/unsafe_buffers.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -107,7 +108,7 @@ TEST(ImageIndexTest, Iterator2DArray)
 
     for (GLint mip = minMip; mip < maxMip; mip++)
     {
-        for (GLint layer = 0; layer < layerCounts[mip]; layer++)
+        for (GLint layer = 0; layer < ANGLE_UNSAFE_TODO(layerCounts[mip]); layer++)
         {
             EXPECT_TRUE(iter.hasNext());
             ImageIndex nextIndex = iter.next();
@@ -135,9 +136,10 @@ TEST(ImageIndexTest, LayerIterator2DArray)
     {
         // Make a layer iterator.
         ImageIndex mipImageIndex = ImageIndex::Make2DArray(mip, ImageIndex::kEntireLevel);
-        ImageIndexIterator iter  = mipImageIndex.getLayerIterator(layerCounts[mip]);
+        ImageIndexIterator iter =
+            mipImageIndex.getLayerIterator(ANGLE_UNSAFE_TODO(layerCounts[mip]));
 
-        for (GLint layer = 0; layer < layerCounts[mip]; layer++)
+        for (GLint layer = 0; layer < ANGLE_UNSAFE_TODO(layerCounts[mip]); layer++)
         {
             EXPECT_TRUE(iter.hasNext());
             ImageIndex nextIndex = iter.next();
@@ -148,7 +150,7 @@ TEST(ImageIndexTest, LayerIterator2DArray)
             EXPECT_EQ(layer, nextIndex.getLayerIndex());
             EXPECT_TRUE(nextIndex.hasLayer());
             EXPECT_TRUE(nextIndex.has3DLayer());
-            EXPECT_LT(nextIndex.getLayerIndex(), layerCounts[mip]);
+            ANGLE_UNSAFE_TODO(EXPECT_LT(nextIndex.getLayerIndex(), layerCounts[mip]));
         }
 
         EXPECT_FALSE(iter.hasNext());

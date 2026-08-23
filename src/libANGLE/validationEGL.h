@@ -10,6 +10,7 @@
 #define LIBANGLE_VALIDATIONEGL_H_
 
 #include "common/PackedEnums.h"
+#include "libANGLE/Display.h"
 #include "libANGLE/Error.h"
 #include "libANGLE/Thread.h"
 
@@ -55,7 +56,6 @@ struct ValidationContext
 };
 
 // Object validation
-bool ValidateDisplay(const ValidationContext *val, const Display *display);
 bool ValidateSurface(const ValidationContext *val, const Display *display, SurfaceID surfaceID);
 bool ValidateConfig(const ValidationContext *val, const Display *display, const Config *config);
 bool ValidateContext(const ValidationContext *val, const Display *display, gl::ContextID contextID);
@@ -66,6 +66,7 @@ bool ValidateSync(const ValidationContext *val, const Display *display, SyncID s
 // Return the requested object only if it is valid (otherwise nullptr)
 const Thread *GetThreadIfValid(const Thread *thread);
 const Display *GetDisplayIfValid(const Display *display);
+Display *GetDisplayIfValid(Display *display);
 const Surface *GetSurfaceIfValid(const Display *display, SurfaceID surfaceID);
 const Image *GetImageIfValid(const Display *display, ImageID imageID);
 const Stream *GetStreamIfValid(const Display *display, const Stream *stream);
@@ -97,6 +98,13 @@ ANGLE_INLINE EGLint
 GetDefaultReturnValue<angle::EntryPoint::EGLLabelObjectKHR, EGLint>(Thread *thread)
 {
     return thread->getError();
+}
+
+template <>
+ANGLE_INLINE EGLint
+GetDefaultReturnValue<angle::EntryPoint::EGLDupNativeFenceFDANDROID, EGLint>(Thread *thread)
+{
+    return EGL_NO_NATIVE_FENCE_FD_ANDROID;
 }
 
 template <angle::EntryPoint EP, typename ReturnType>
@@ -200,6 +208,14 @@ typename std::remove_reference<PackedT>::type PackParam(FromT from)
             return RETVAL;                                                \
         }                                                                 \
     } while (0)
+
+#if ANGLE_USE_DISPLAY_PREPARE_FOR_CALL
+#    define ANGLE_EGL_TRY_PREPARE_FOR_CALL_RETURN ANGLE_EGL_TRY_RETURN
+#    define ANGLE_EGL_TRY_PREPARE_FOR_CALL ANGLE_EGL_TRY
+#else
+#    define ANGLE_EGL_TRY_PREPARE_FOR_CALL_RETURN(...)
+#    define ANGLE_EGL_TRY_PREPARE_FOR_CALL(...)
+#endif
 
 #define ANGLE_EGLBOOLEAN_TRY(EXPR)           \
     do                                       \

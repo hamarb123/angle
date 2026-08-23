@@ -39,6 +39,7 @@ class OcclusionQueryPool
     // the render pass or the query that already has an allocated offset.
     // Note: a query might have more than one allocated offset. They will be combined in the final
     // step.
+    bool canAllocateQueryOffset(ContextMtl *contextMtl) const;
     angle::Result allocateQueryOffset(ContextMtl *contextMtl, QueryMtl *query, bool clearOldValue);
     // Deallocate all offsets used for a query.
     void deallocateQueryOffset(ContextMtl *contextMtl, QueryMtl *query);
@@ -48,6 +49,8 @@ class OcclusionQueryPool
     size_t getNumRenderPassAllocatedQueries() const { return mAllocatedQueries.size(); }
     // This function is called at the end of render pass
     void resolveVisibilityResults(ContextMtl *contextMtl);
+    // Clear visibility pool buffer to drop previous results
+    void prepareRenderPassVisibilityPoolBuffer(ContextMtl *contextMtl);
 
   private:
     // Buffer to hold the visibility results for current render pass
@@ -57,6 +60,7 @@ class OcclusionQueryPool
     std::vector<QueryMtl *> mAllocatedQueries;
 
     bool mResetFirstQuery = false;
+    bool mUsed            = false;
 };
 
 }  // namespace mtl

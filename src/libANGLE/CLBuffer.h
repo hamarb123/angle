@@ -8,8 +8,15 @@
 #ifndef LIBANGLE_CLBUFFER_H_
 #define LIBANGLE_CLBUFFER_H_
 
-#include "libANGLE/CLMemory.h"
+#include <angle_cl.h>
 
+#include "libANGLE/CLBitField.h"
+#include "libANGLE/CLMemory.h"
+#include "libANGLE/CLObject.h"
+#include "libANGLE/cl_types.h"
+#include "libANGLE/cl_utils.h"
+
+#include <cstddef>
 namespace cl
 {
 
@@ -22,8 +29,7 @@ class Buffer final : public Memory
 
     cl_mem createSubBuffer(MemFlags flags,
                            cl_buffer_create_type createType,
-                           const void *createInfo,
-                           cl_int &errorCode);
+                           const void *createInfo);
 
     bool isRegionValid(size_t offset, size_t size) const;
     bool isRegionValid(const cl_buffer_region &region) const;
@@ -34,16 +40,12 @@ class Buffer final : public Memory
     MemObjectType getType() const final;
 
     bool isSubBuffer() const;
+    static Buffer *Cast(cl_mem memobj);
 
   private:
-    Buffer(Context &context,
-           PropArray &&properties,
-           MemFlags flags,
-           size_t size,
-           void *hostPtr,
-           cl_int &errorCode);
+    Buffer(Context &context, PropArray &&properties, MemFlags flags, size_t size, void *hostPtr);
 
-    Buffer(Buffer &parent, MemFlags flags, size_t offset, size_t size, cl_int &errorCode);
+    Buffer(Buffer &parent, MemFlags flags, size_t offset, size_t size);
 
     friend class Object;
 };
@@ -71,6 +73,12 @@ inline MemObjectType Buffer::getType() const
 inline bool Buffer::isSubBuffer() const
 {
     return mParent != nullptr;
+}
+
+inline Buffer *Buffer::Cast(cl_mem memobj)
+{
+    ASSERT(cl::IsBufferType(Memory::Cast(memobj)->getType()));
+    return static_cast<Buffer *>(memobj);
 }
 
 }  // namespace cl

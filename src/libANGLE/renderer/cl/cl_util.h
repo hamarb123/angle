@@ -8,7 +8,7 @@
 #ifndef LIBANGLE_RENDERER_CL_CL_UTIL_H_
 #define LIBANGLE_RENDERER_CL_CL_UTIL_H_
 
-#include "libANGLE/renderer/CLtypes.h"
+#include "libANGLE/renderer/cl_types.h"
 
 #include "anglebase/no_destructor.h"
 
@@ -47,7 +47,9 @@ inline const CLExtensionSet &GetSupportedCLExtensions()
         "cl_khr_fp64",
         "cl_khr_icd",
         "cl_khr_int64_base_atomics",
-        "cl_khr_int64_extended_atomics"
+        "cl_khr_int64_extended_atomics",
+
+        "cl_arm_non_uniform_work_group_size"
 
         // clang-format on
     });

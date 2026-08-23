@@ -21,9 +21,11 @@ void *OpenLibVulkan()
 #if defined(ANGLE_PLATFORM_WINDOWS)
         "vulkan-1.dll",
 #elif defined(ANGLE_PLATFORM_APPLE)
-        "libvulkan.dylib",
-        "libvulkan.1.dylib",
-        "libMoltenVK.dylib"
+        "libvulkan.dylib", "libvulkan.1.dylib", "libMoltenVK.dylib",
+        // Fallback paths for static macOS builds where the Vulkan loader is bundled
+        // in the "Libraries/" subdirectory but the host module (containing ANGLE)
+        // is in the parent directory.
+        "Libraries/libvulkan.dylib", "Libraries/libvulkan.1.dylib", "Libraries/libMoltenVK.dylib"
 #else
         "libvulkan.so",
         "libvulkan.so.1",
@@ -34,7 +36,7 @@ void *OpenLibVulkan()
 // If it's already loaded, allow that always.
         SearchType::AlreadyLoaded,
 
-// On Android, Fuchsia and GGP we use the system libvulkan.
+// On Android and Fuchsia we use the system libvulkan.
 #if defined(ANGLE_USE_CUSTOM_LIBVULKAN)
         SearchType::ModuleDir,
 #else

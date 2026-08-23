@@ -13,6 +13,7 @@
 
 #include "bitset_utils.h"
 #include "common/debug.h"
+#include "common/unsafe_buffers.h"
 
 #include <algorithm>
 #include <array>
@@ -49,21 +50,21 @@ class WrapIter
 
     WrapIter &operator++()
     {
-        mIter++;
+        ANGLE_UNSAFE_TODO(mIter++);
         return *this;
     }
 
     WrapIter operator++(int)
     {
         WrapIter tmp(mIter);
-        mIter++;
+        ANGLE_UNSAFE_TODO(mIter++);
         return tmp;
     }
 
     WrapIter operator+(difference_type n)
     {
         WrapIter tmp(mIter);
-        tmp.mIter += n;
+        ANGLE_UNSAFE_TODO(tmp.mIter += n);
         return tmp;
     }
 
@@ -175,6 +176,7 @@ class FastVector final
   private:
     void assign_from_initializer_list(std::initializer_list<value_type> init);
     void ensure_capacity(size_t capacity);
+    void increase_capacity(size_t capacity);
     bool uses_fixed_storage() const;
     void resize_impl(size_type count);
 
@@ -287,7 +289,7 @@ template <class T, size_t N, class Storage>
 typename FastVector<T, N, Storage>::reference FastVector<T, N, Storage>::at(size_type pos)
 {
     ASSERT(pos < mSize);
-    return mData[pos];
+    return ANGLE_UNSAFE_TODO(mData[pos]);
 }
 
 template <class T, size_t N, class Storage>
@@ -303,7 +305,7 @@ ANGLE_INLINE typename FastVector<T, N, Storage>::reference FastVector<T, N, Stor
     size_type pos)
 {
     ASSERT(pos < mSize);
-    return mData[pos];
+    return ANGLE_UNSAFE_TODO(mData[pos]);
 }
 
 template <class T, size_t N, class Storage>
@@ -311,7 +313,7 @@ ANGLE_INLINE typename FastVector<T, N, Storage>::const_reference
 FastVector<T, N, Storage>::operator[](size_type pos) const
 {
     ASSERT(pos < mSize);
-    return mData[pos];
+    return ANGLE_UNSAFE_TODO(mData[pos]);
 }
 
 template <class T, size_t N, class Storage>
@@ -343,14 +345,14 @@ ANGLE_INLINE typename FastVector<T, N, Storage>::const_iterator FastVector<T, N,
 template <class T, size_t N, class Storage>
 ANGLE_INLINE typename FastVector<T, N, Storage>::iterator FastVector<T, N, Storage>::end()
 {
-    return mData + mSize;
+    return ANGLE_UNSAFE_TODO(mData + mSize);
 }
 
 template <class T, size_t N, class Storage>
 ANGLE_INLINE typename FastVector<T, N, Storage>::const_iterator FastVector<T, N, Storage>::end()
     const
 {
-    return mData + mSize;
+    return ANGLE_UNSAFE_TODO(mData + mSize);
 }
 
 template <class T, size_t N, class Storage>
@@ -376,7 +378,7 @@ ANGLE_INLINE void FastVector<T, N, Storage>::push_back(const value_type &value)
 {
     if (mSize == mReservedSize)
         ensure_capacity(mSize + 1);
-    mData[mSize++] = value;
+    ANGLE_UNSAFE_TODO(mData[mSize++]) = value;
 }
 
 template <class T, size_t N, class Storage>
@@ -391,7 +393,7 @@ ANGLE_INLINE void FastVector<T, N, Storage>::emplace_back(Args &&...args)
 {
     if (mSize == mReservedSize)
         ensure_capacity(mSize + 1);
-    mData[mSize++] = std::move(T(std::forward<Args>(args)...));
+    ANGLE_UNSAFE_TODO(mData[mSize++]) = std::move(T(std::forward<Args>(args)...));
 }
 
 template <class T, size_t N, class Storage>
@@ -420,7 +422,7 @@ template <class T, size_t N, class Storage>
 ANGLE_INLINE typename FastVector<T, N, Storage>::reference FastVector<T, N, Storage>::back()
 {
     ASSERT(mSize > 0);
-    return mData[mSize - 1];
+    return ANGLE_UNSAFE_TODO(mData[mSize - 1]);
 }
 
 template <class T, size_t N, class Storage>
@@ -428,7 +430,7 @@ ANGLE_INLINE typename FastVector<T, N, Storage>::const_reference FastVector<T, N
     const
 {
     ASSERT(mSize > 0);
-    return mData[mSize - 1];
+    return ANGLE_UNSAFE_TODO(mData[mSize - 1]);
 }
 
 template <class T, size_t N, class Storage>
@@ -458,7 +460,7 @@ void FastVector<T, N, Storage>::resetWithRawData(size_type count, const uint8_t 
                   "This is a special method for trivially copyable types.");
     ASSERT(count > 0 && data != nullptr);
     resize_impl(count);
-    std::memcpy(mData, data, count * sizeof(value_type));
+    ANGLE_UNSAFE_TODO(std::memcpy(mData, data, count * sizeof(value_type)));
 }
 
 template <class T, size_t N, class Storage>
@@ -488,7 +490,7 @@ ANGLE_INLINE void FastVector<T, N, Storage>::resize_down(size_type count)
                   "This is a special method for non trivially constructible types. "
                   "Please use regular resize(count) method.");
     ASSERT(count <= mSize);
-    resize_impl(count);
+    mSize = count;
 }
 
 template <class T, size_t N, class Storage>
@@ -507,7 +509,7 @@ void FastVector<T, N, Storage>::resize(size_type count, const value_type &value)
     if (count > mSize)
     {
         ensure_capacity(count);
-        std::fill(mData + mSize, mData + count, value);
+        ANGLE_UNSAFE_TODO(std::fill(mData + mSize, mData + count, value));
     }
     mSize = count;
 }
@@ -526,7 +528,7 @@ void FastVector<T, N, Storage>::assign_from_initializer_list(std::initializer_li
     size_t index = 0;
     for (auto &value : init)
     {
-        mData[index++] = value;
+        ANGLE_UNSAFE_TODO(mData[index++]) = value;
     }
 }
 
@@ -536,9 +538,9 @@ ANGLE_INLINE void FastVector<T, N, Storage>::remove_and_permute(const value_type
     size_t len = mSize - 1;
     for (size_t index = 0; index < len; ++index)
     {
-        if (mData[index] == element)
+        if (ANGLE_UNSAFE_TODO(mData[index]) == element)
         {
-            mData[index] = std::move(mData[len]);
+            ANGLE_UNSAFE_TODO(mData[index] = std::move(mData[len]));
             break;
         }
     }
@@ -551,7 +553,7 @@ ANGLE_INLINE void FastVector<T, N, Storage>::remove_and_permute(iterator pos)
     ASSERT(pos >= begin());
     ASSERT(pos < end());
     size_t len = mSize - 1;
-    *pos       = std::move(mData[len]);
+    *pos       = std::move(ANGLE_UNSAFE_TODO(mData[len]));
     pop_back();
 }
 
@@ -561,28 +563,34 @@ void FastVector<T, N, Storage>::ensure_capacity(size_t capacity)
     // We have a minimum capacity of N.
     if (mReservedSize < capacity)
     {
-        ASSERT(capacity > N);
-        size_type newSize = std::max(mReservedSize, N);
-        while (newSize < capacity)
-        {
-            newSize *= 2;
-        }
-
-        pointer newData = new value_type[newSize];
-
-        if (mSize > 0)
-        {
-            std::move(begin(), end(), newData);
-        }
-
-        if (!uses_fixed_storage())
-        {
-            delete[] mData;
-        }
-
-        mData         = newData;
-        mReservedSize = newSize;
+        increase_capacity(capacity);
     }
+}
+
+template <class T, size_t N, class Storage>
+ANGLE_NOINLINE void FastVector<T, N, Storage>::increase_capacity(size_t capacity)
+{
+    ASSERT(capacity > N);
+    size_type newSize = std::max(mReservedSize, N);
+    while (newSize < capacity)
+    {
+        newSize *= 2;
+    }
+
+    pointer newData = new value_type[newSize];
+
+    if (mSize > 0)
+    {
+        std::move(begin(), end(), newData);
+    }
+
+    if (!uses_fixed_storage())
+    {
+        delete[] mData;
+    }
+
+    mData         = newData;
+    mReservedSize = newSize;
 }
 
 template <class Value, size_t N, class Storage = FastVector<Value, N>>

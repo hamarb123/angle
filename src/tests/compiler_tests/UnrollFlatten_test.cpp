@@ -11,6 +11,7 @@
 #include "GLSLANG/ShaderLang.h"
 #include "angle_gl.h"
 #include "common/angleutils.h"
+#include "common/unsafe_buffers.h"
 #include "gtest/gtest.h"
 #include "tests/test_utils/compiler_test.h"
 
@@ -47,7 +48,7 @@ class UnrollFlattenTest : public testing::Test
         const char *badPatterns[] = {UNROLL, FLATTEN};
         for (size_t i = 0; i < count; i++)
         {
-            const char *pattern = patterns[i];
+            const char *pattern = ANGLE_UNSAFE_TODO(patterns[i]);
             auto position       = mTranslatedSource.find(pattern, mCurrentPosition);
             if (position == std::string::npos)
             {
@@ -58,7 +59,7 @@ class UnrollFlattenTest : public testing::Test
 
             for (size_t j = 0; j < ArraySize(badPatterns); j++)
             {
-                const char *badPattern = badPatterns[j];
+                const char *badPattern = ANGLE_UNSAFE_TODO(badPatterns[j]);
                 if (pattern != badPattern &&
                     mTranslatedSource.find(badPattern, mCurrentPosition) < position)
                 {
@@ -201,14 +202,14 @@ TEST_F(UnrollFlattenTest, GradientInDiscont)
     expect(expectations, ArraySize(expectations));
 }
 
-class UnrollFlattenTest_ES3 : public UnrollFlattenTest
+class UnrollFlattenTestES3 : public UnrollFlattenTest
 {
   public:
-    UnrollFlattenTest_ES3() : UnrollFlattenTest(SH_GLES3_SPEC) {}
+    UnrollFlattenTestES3() : UnrollFlattenTest(SH_GLES3_SPEC) {}
 };
 
 // Check that we correctly detect the ES3 builtin "texture" function as a gradient operation.
-TEST_F(UnrollFlattenTest_ES3, TextureBuiltin)
+TEST_F(UnrollFlattenTestES3, TextureBuiltin)
 {
     const std::string &shaderString =
         "#version 300 es\n"

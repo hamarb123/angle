@@ -8,6 +8,7 @@
 //
 
 #include "libANGLE/renderer/vulkan/linux/wayland/DisplayVkWayland.h"
+#include "common/unsafe_buffers.h"
 
 #include <wayland-client.h>
 
@@ -15,9 +16,9 @@
 #include "common/linux/dma_buf_utils.h"
 #include "common/system_utils.h"
 #include "libANGLE/Display.h"
-#include "libANGLE/renderer/vulkan/RendererVk.h"
 #include "libANGLE/renderer/vulkan/linux/wayland/WindowSurfaceVkWayland.h"
 #include "libANGLE/renderer/vulkan/vk_caps_utils.h"
+#include "libANGLE/renderer/vulkan/vk_renderer.h"
 
 namespace rx
 {
@@ -42,7 +43,7 @@ egl::Error DisplayVkWayland::initialize(egl::Display *display)
     if (!mWaylandDisplay)
     {
         ERR() << "Failed to retrieve wayland display";
-        return egl::EglNotInitialized();
+        return egl::Error(EGL_NOT_INITIALIZED);
     }
 
     egl::Error ret = DisplayVk::initialize(display);
@@ -89,7 +90,8 @@ egl::ConfigSet DisplayVkWayland::generateConfigs()
 
     std::vector<GLenum> depthStencilFormats(
         egl_vk::kConfigDepthStencilFormats,
-        egl_vk::kConfigDepthStencilFormats + ArraySize(egl_vk::kConfigDepthStencilFormats));
+        ANGLE_UNSAFE_TODO(egl_vk::kConfigDepthStencilFormats +
+                          ArraySize(egl_vk::kConfigDepthStencilFormats)));
 
     if (getCaps().stencil8)
     {
@@ -109,9 +111,9 @@ const char *DisplayVkWayland::getWSIExtension() const
     return VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME;
 }
 
-bool DisplayVkWayland::isWayland() const
+angle::NativeWindowSystem DisplayVkWayland::getWindowSystem() const
 {
-    return true;
+    return angle::NativeWindowSystem::Wayland;
 }
 
 bool IsVulkanWaylandDisplayAvailable()

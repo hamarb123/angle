@@ -7,6 +7,7 @@
 // Platform.cpp: Implementation methods for angle::Platform.
 
 #include <platform/PlatformMethods.h>
+#include "common/unsafe_buffers.h"
 
 #include <cstring>
 
@@ -46,16 +47,16 @@ bool ANGLE_APIENTRY ANGLEGetDisplayPlatform(angle::EGLDisplayType display,
 
     for (unsigned int nameIndex = 0; nameIndex < methodNameCount; ++nameIndex)
     {
-        const char *expectedName = angle::g_PlatformMethodNames[nameIndex];
-        const char *actualName   = methodNames[nameIndex];
+        const char *expectedName = ANGLE_UNSAFE_TODO(angle::g_PlatformMethodNames[nameIndex]);
+        const char *actualName   = ANGLE_UNSAFE_TODO(methodNames[nameIndex]);
 
         // Skip deprecated methods.  The names of these methods start with |placeholder|.
         constexpr char kPlaceholder[] = "placeholder";
-        if (strncmp(expectedName, kPlaceholder, sizeof(kPlaceholder) - 1) == 0)
+        if (ANGLE_UNSAFE_TODO(strncmp(expectedName, kPlaceholder, sizeof(kPlaceholder) - 1)) == 0)
         {
             continue;
         }
-        if (strcmp(expectedName, actualName) != 0)
+        if (ANGLE_UNSAFE_TODO(strcmp(expectedName, actualName)) != 0)
         {
             ERR() << "Invalid platform method name: " << actualName << ", expected " << expectedName
                   << ".";

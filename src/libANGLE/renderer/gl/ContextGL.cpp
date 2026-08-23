@@ -8,18 +8,17 @@
 //
 
 #include "libANGLE/renderer/gl/ContextGL.h"
+#include "common/unsafe_buffers.h"
 
 #include "libANGLE/Context.h"
 #include "libANGLE/Context.inl.h"
 #include "libANGLE/PixelLocalStorage.h"
-#include "libANGLE/renderer/OverlayImpl.h"
 #include "libANGLE/renderer/gl/BufferGL.h"
 #include "libANGLE/renderer/gl/CompilerGL.h"
 #include "libANGLE/renderer/gl/FenceNVGL.h"
 #include "libANGLE/renderer/gl/FramebufferGL.h"
 #include "libANGLE/renderer/gl/FunctionsGL.h"
 #include "libANGLE/renderer/gl/MemoryObjectGL.h"
-#include "libANGLE/renderer/gl/PLSProgramCache.h"
 #include "libANGLE/renderer/gl/ProgramExecutableGL.h"
 #include "libANGLE/renderer/gl/ProgramGL.h"
 #include "libANGLE/renderer/gl/ProgramPipelineGL.h"
@@ -57,18 +56,56 @@ GLsizei GetInstancedDrawAdjustedInstanceCount(const gl::ProgramExecutable *execu
 }
 }  // anonymous namespace
 
+ContextGL::PixelBufferGL::PixelBufferGL(const FunctionsGL *functions_)
+    : functions(functions_), bufferID(0), size(0), lifetimeCounter(0)
+{
+    functions->genBuffers(1, &bufferID);
+}
+ContextGL::PixelBufferGL::~PixelBufferGL()
+{
+    if (functions && bufferID != 0)
+    {
+        functions->deleteBuffers(1, &bufferID);
+    }
+}
+ContextGL::PixelBufferGL::PixelBufferGL(PixelBufferGL &&other)
+{
+    *this = std::move(other);
+}
+ContextGL::PixelBufferGL &ContextGL::PixelBufferGL::operator=(PixelBufferGL &&other)
+{
+    if (this != &other)
+    {
+        if (functions && bufferID != 0)
+        {
+            functions->deleteBuffers(1, &bufferID);
+        }
+        functions       = other.functions;
+        bufferID        = other.bufferID;
+        size            = other.size;
+        lifetimeCounter = other.lifetimeCounter;
+
+        other.bufferID = 0;
+        other.size     = 0;
+    }
+    return *this;
+}
+
 ContextGL::ContextGL(const gl::State &state,
                      gl::ErrorSet *errorSet,
                      const std::shared_ptr<RendererGL> &renderer,
                      RobustnessVideoMemoryPurgeStatus robustnessVideoMemoryPurgeStatus)
     : ContextImpl(state, errorSet),
+      // Maximum 3 cached depth initialization PBOs stored for now; can be changed in the future if
+      // needed.
+      mDepthInitPBOs(/*max=*/3),
       mRenderer(renderer),
       mRobustnessVideoMemoryPurgeStatus(robustnessVideoMemoryPurgeStatus)
 {}
 
 ContextGL::~ContextGL() {}
 
-angle::Result ContextGL::initialize()
+angle::Result ContextGL::initialize(const angle::ImageLoadContext &imageLoadContext)
 {
     return angle::Result::Continue;
 }
@@ -83,7 +120,7 @@ ShaderImpl *ContextGL::createShader(const gl::ShaderState &data)
     const FunctionsGL *functions = getFunctions();
     GLuint shader                = functions->createShader(ToGLenum(data.getShaderType()));
 
-    return new ShaderGL(data, shader, mRenderer->getMultiviewImplementationType(), mRenderer);
+    return new ShaderGL(data, shader);
 }
 
 ProgramImpl *ContextGL::createProgram(const gl::ProgramState &data)
@@ -106,7 +143,7 @@ FramebufferImpl *ContextGL::createFramebuffer(const gl::FramebufferState &data)
         funcs->genFramebuffers(1, &fbo);
     }
 
-    return new FramebufferGL(data, fbo, false);
+    return new FramebufferGL(data, fbo, false, funcs, getStateManager());
 }
 
 TextureImpl *ContextGL::createTexture(const gl::TextureState &state)
@@ -143,37 +180,41 @@ BufferImpl *ContextGL::createBuffer(const gl::BufferState &state)
     return new BufferGL(state, buffer);
 }
 
-VertexArrayImpl *ContextGL::createVertexArray(const gl::VertexArrayState &data)
+VertexArrayImpl *ContextGL::createVertexArray(const gl::VertexArrayState &data,
+                                              const gl::VertexArrayBuffers &vertexArrayBuffers)
 {
+    const FunctionsGL *functions      = getFunctions();
     const angle::FeaturesGL &features = getFeaturesGL();
+    StateManagerGL *stateManager      = getStateManager();
 
-    if (features.syncVertexArraysToDefault.enabled)
+    GLuint vaoID           = 0;
+    bool vertexArrayOwnsID = false;
+
+    // Use the shared default vertex array when forced to for workarounds
+    // (syncAllVertexArraysToDefault) or for the frontend default vertex array so that client data
+    // can be used directly
+    // Disable on external contexts so that the default VAO is not modified by both ANGLE and the
+    // external user.
+    if (features.syncAllVertexArraysToDefault.enabled ||
+        (features.syncDefaultVertexArraysToDefault.enabled && data.isDefault() &&
+         mState.areClientArraysEnabled()))
     {
-        StateManagerGL *stateManager = getStateManager();
-
-        return new VertexArrayGL(data, stateManager->getDefaultVAO(),
-                                 stateManager->getDefaultVAOState());
+        vaoID             = stateManager->getDefaultVAO();
+        vertexArrayOwnsID = false;
     }
     else
     {
-        const FunctionsGL *functions = getFunctions();
-
-        GLuint vao = 0;
-        functions->genVertexArrays(1, &vao);
-        return new VertexArrayGL(data, vao);
+        functions->genVertexArrays(1, &vaoID);
+        vertexArrayOwnsID = true;
     }
+
+    VertexArrayStateGL *vaoState = stateManager->getOrCreateVAOState(vaoID);
+    return new VertexArrayGL(data, vaoID, vertexArrayOwnsID, vertexArrayBuffers, vaoState);
 }
 
 QueryImpl *ContextGL::createQuery(gl::QueryType type)
 {
-    switch (type)
-    {
-        case gl::QueryType::CommandsCompleted:
-            return new SyncQueryGL(type, getFunctions());
-
-        default:
-            return new StandardQueryGL(type, getFunctions(), getStateManager());
-    }
+    return new StandardQueryGL(type, getFunctions(), getStateManager());
 }
 
 FenceNVImpl *ContextGL::createFenceNV()
@@ -192,7 +233,7 @@ FenceNVImpl *ContextGL::createFenceNV()
 
 SyncImpl *ContextGL::createSync()
 {
-    return new SyncGL(getFunctions());
+    return new SyncGL(mRenderer);
 }
 
 TransformFeedbackImpl *ContextGL::createTransformFeedback(const gl::TransformFeedbackState &state)
@@ -230,12 +271,6 @@ SemaphoreImpl *ContextGL::createSemaphore()
     return new SemaphoreGL(semaphore);
 }
 
-OverlayImpl *ContextGL::createOverlay(const gl::OverlayState &state)
-{
-    // Not implemented.
-    return new OverlayImpl(state);
-}
-
 angle::Result ContextGL::flush(const gl::Context *context)
 {
     return mRenderer->flush();
@@ -252,7 +287,7 @@ ANGLE_INLINE angle::Result ContextGL::setDrawArraysState(const gl::Context *cont
                                                          GLsizei instanceCount)
 {
     const angle::FeaturesGL &features = getFeaturesGL();
-    if (context->getStateCache().hasAnyActiveClientAttrib() ||
+    if (context->hasAnyActiveClientAttrib() ||
         (features.shiftInstancedArrayDataWithOffset.enabled && first > 0))
     {
         const gl::State &glState                = context->getState();
@@ -263,9 +298,7 @@ ANGLE_INLINE angle::Result ContextGL::setDrawArraysState(const gl::Context *cont
         ANGLE_TRY(vaoGL->syncClientSideData(context, executable->getActiveAttribLocationsMask(),
                                             first, count, instanceCount));
 
-#if defined(ANGLE_STATE_VALIDATION_ENABLED)
-        ANGLE_TRY(vaoGL->validateState(context));
-#endif  // ANGLE_STATE_VALIDATION_ENABLED
+        validateState(StateTypes{StateType::GlobalState, StateType::VAOState});
     }
     else if (features.shiftInstancedArrayDataWithOffset.enabled && first == 0)
     {
@@ -297,7 +330,6 @@ ANGLE_INLINE angle::Result ContextGL::setDrawElementsState(const gl::Context *co
     const gl::State &glState                = context->getState();
     const gl::ProgramExecutable *executable = getState().getProgramExecutable();
     const gl::VertexArray *vao              = glState.getVertexArray();
-    const gl::StateCache &stateCache        = context->getStateCache();
 
     const angle::FeaturesGL &features = getFeaturesGL();
     if (features.shiftInstancedArrayDataWithOffset.enabled)
@@ -308,7 +340,7 @@ ANGLE_INLINE angle::Result ContextGL::setDrawElementsState(const gl::Context *co
         ANGLE_TRY(vaoGL->recoverForcedStreamingAttributesForDrawArraysInstanced(context));
     }
 
-    if (stateCache.hasAnyActiveClientAttrib() || vao->getElementArrayBuffer() == nullptr)
+    if (context->hasAnyActiveClientAttrib() || vao->getElementArrayBuffer() == nullptr)
     {
         const VertexArrayGL *vaoGL = GetImplAs<VertexArrayGL>(vao);
         ANGLE_TRY(vaoGL->syncDrawElementsState(context, executable->getActiveAttribLocationsMask(),
@@ -328,10 +360,7 @@ ANGLE_INLINE angle::Result ContextGL::setDrawElementsState(const gl::Context *co
         ANGLE_TRY(stateManager->setPrimitiveRestartIndex(context, primitiveRestartIndex));
     }
 
-#if defined(ANGLE_STATE_VALIDATION_ENABLED)
-    const VertexArrayGL *vaoGL = GetImplAs<VertexArrayGL>(vao);
-    ANGLE_TRY(vaoGL->validateState(context));
-#endif  // ANGLE_STATE_VALIDATION_ENABLED
+    validateState(StateTypes{StateType::GlobalState, StateType::VAOState});
 
     return angle::Result::Continue;
 }
@@ -344,9 +373,7 @@ angle::Result ContextGL::drawArrays(const gl::Context *context,
     const gl::ProgramExecutable *executable = context->getState().getProgramExecutable();
     const GLsizei instanceCount             = GetDrawAdjustedInstanceCount(executable);
 
-#if defined(ANGLE_STATE_VALIDATION_ENABLED)
-    validateState();
-#endif
+    validateState(StateTypes{StateType::GlobalState});
 
     ANGLE_TRY(setDrawArraysState(context, first, count, instanceCount));
     if (!executable->usesMultiview())
@@ -400,9 +427,9 @@ gl::AttributesMask ContextGL::updateAttributesForBaseInstance(GLuint baseInstanc
                 attribToUpdateMask.set(attribIndex);
                 const char *p             = static_cast<const char *>(attrib.pointer);
                 const size_t sourceStride = gl::ComputeVertexAttributeStride(attrib, binding);
-                const void *newPointer    = p + sourceStride * baseInstance;
-
-                const BufferGL *buffer = GetImplAs<BufferGL>(binding.getBuffer().get());
+                const void *newPointer    = ANGLE_UNSAFE_TODO(p + sourceStride * baseInstance);
+                const BufferGL *buffer    = GetImplAs<BufferGL>(
+                    mState.getVertexArray()->getVertexArrayBuffer(attrib.bindingIndex));
                 // We often stream data from scratch buffers when client side data is being used
                 // and that information is in VertexArrayGL.
                 // Assert that the buffer is non-null because this case isn't handled.
@@ -435,11 +462,10 @@ void ContextGL::resetUpdatedAttributes(gl::AttributesMask attribMask)
     {
         const gl::VertexAttribute &attrib =
             mState.getVertexArray()->getVertexAttributes()[attribIndex];
-        const gl::VertexBinding &binding =
-            (mState.getVertexArray()->getVertexBindings())[attrib.bindingIndex];
-        getStateManager()->bindBuffer(
-            gl::BufferBinding::Array,
-            GetImplAs<BufferGL>(binding.getBuffer().get())->getBufferID());
+        const gl::Buffer *buffer =
+            mState.getVertexArray()->getVertexArrayBuffer(attrib.bindingIndex);
+        getStateManager()->bindBuffer(gl::BufferBinding::Array,
+                                      GetImplAs<BufferGL>(buffer)->getBufferID());
         if (attrib.format->isPureInt())
         {
             functions->vertexAttribIPointer(static_cast<GLuint>(attribIndex),
@@ -482,7 +508,7 @@ angle::Result ContextGL::drawArraysInstancedBaseInstance(const gl::Context *cont
     else
     {
         // GL 3.3+ or GLES 3.2+
-        // TODO(http://anglebug.com/3910): This is a temporary solution by setting and resetting
+        // TODO(http://anglebug.com/42262554): This is a temporary solution by setting and resetting
         // pointer offset calling vertexAttribPointer Will refactor stateCache and pass baseInstance
         // to setDrawArraysState to set pointer offset
 
@@ -510,9 +536,7 @@ angle::Result ContextGL::drawElements(const gl::Context *context,
     const GLsizei instanceCount             = GetDrawAdjustedInstanceCount(executable);
     const void *drawIndexPtr                = nullptr;
 
-#if defined(ANGLE_STATE_VALIDATION_ENABLED)
-    validateState();
-#endif  // ANGLE_STATE_VALIDATION_ENABLED
+    validateState(StateTypes{StateType::GlobalState});
 
     ANGLE_TRY(setDrawElementsState(context, count, type, indices, instanceCount, &drawIndexPtr));
     if (!executable->usesMultiview())
@@ -543,9 +567,7 @@ angle::Result ContextGL::drawElementsBaseVertex(const gl::Context *context,
     const GLsizei instanceCount             = GetDrawAdjustedInstanceCount(executable);
     const void *drawIndexPtr                = nullptr;
 
-#if defined(ANGLE_STATE_VALIDATION_ENABLED)
-    validateState();
-#endif  // ANGLE_STATE_VALIDATION_ENABLED
+    validateState(StateTypes{StateType::GlobalState});
 
     ANGLE_TRY(setDrawElementsState(context, count, type, indices, instanceCount, &drawIndexPtr));
     if (!executable->usesMultiview())
@@ -636,7 +658,7 @@ angle::Result ContextGL::drawElementsInstancedBaseVertexBaseInstance(const gl::C
     else
     {
         // GL 3.3+ or GLES 3.2+
-        // TODO(http://anglebug.com/3910): same as above
+        // TODO(http://anglebug.com/42262554): same as above
         gl::AttributesMask attribToResetMask = updateAttributesForBaseInstance(baseInstance);
 
         ANGLE_GL_TRY(context, functions->drawElementsInstancedBaseVertex(
@@ -919,6 +941,7 @@ angle::Result ContextGL::onUnMakeCurrent(const gl::Context *context)
     {
         mRenderer->getStateManager()->bindFramebuffer(GL_FRAMEBUFFER, 0);
     }
+    tickGC();
     return ContextImpl::onUnMakeCurrent(context);
 }
 
@@ -994,20 +1017,44 @@ void ContextGL::framebufferFetchBarrier()
     mRenderer->framebufferFetchBarrier();
 }
 
+angle::Result ContextGL::startTiling(const gl::Context *context,
+                                     const gl::Rectangle &area,
+                                     GLbitfield preserveMask)
+{
+    const FunctionsGL *functions = getFunctions();
+    ANGLE_GL_TRY(context,
+                 functions->startTilingQCOM(area.x, area.y, area.width, area.height, preserveMask));
+    return angle::Result::Continue;
+}
+
+angle::Result ContextGL::endTiling(const gl::Context *context, GLbitfield preserveMask)
+{
+    const FunctionsGL *functions = getFunctions();
+    ANGLE_GL_TRY(context, functions->endTilingQCOM(preserveMask));
+    return angle::Result::Continue;
+}
+
 void ContextGL::setMaxShaderCompilerThreads(GLuint count)
 {
     mRenderer->setMaxShaderCompilerThreads(count);
 }
 
-void ContextGL::invalidateTexture(gl::TextureType target)
+void ContextGL::validateState(StateTypes statesToValidate)
 {
-    mRenderer->getStateManager()->invalidateTexture(target);
-}
+    if (getFeaturesGL().validateState.enabled)
+    {
+        if (statesToValidate[StateType::GlobalState])
+        {
+            StateManagerGL *stateManager = mRenderer->getStateManager();
+            stateManager->validateState();
+        }
 
-void ContextGL::validateState() const
-{
-    const StateManagerGL *stateManager = mRenderer->getStateManager();
-    stateManager->validateState();
+        if (statesToValidate[StateType::VAOState])
+        {
+            VertexArrayGL *vao = GetImplAs<VertexArrayGL>(mState.getVertexArray());
+            vao->validateState(getFunctions());
+        }
+    }
 }
 
 void ContextGL::setNeedsFlushBeforeDeleteTextures()
@@ -1025,111 +1072,72 @@ void ContextGL::markWorkSubmitted()
     mRenderer->markWorkSubmitted();
 }
 
-void ContextGL::resetDrawStateForPixelLocalStorageEXT(const gl::Context *context)
+bool ContextGL::hasNativeParallelCompile()
 {
-    // Since our load/store shaders require shader images, this extension should only be used if the
-    // context version is 3.1+.
-    ASSERT(getFunctions()->isAtLeastGLES(gl::Version(3, 1)));
-    StateManagerGL *stateMgr = getStateManager();
-    stateMgr->setCullFaceEnabled(false);
-    stateMgr->setDepthTestEnabled(false);
-    stateMgr->setFramebufferSRGBEnabled(context, false);
-    stateMgr->setPolygonMode(gl::PolygonMode::Fill);
-    stateMgr->setPolygonOffsetPointEnabled(false);
-    stateMgr->setPolygonOffsetLineEnabled(false);
-    stateMgr->setPolygonOffsetFillEnabled(false);
-    stateMgr->setRasterizerDiscardEnabled(false);
-    stateMgr->setSampleAlphaToCoverageEnabled(false);
-    stateMgr->setSampleCoverageEnabled(false);
-    stateMgr->setScissorTestEnabled(false);
-    stateMgr->setStencilTestEnabled(false);
-    stateMgr->setSampleMaskEnabled(false);
-    stateMgr->setViewport({0, 0, mState.getDrawFramebuffer()->getDefaultWidth(),
-                           mState.getDrawFramebuffer()->getDefaultHeight()});
-    // Color mask, dither, and blend don't affect EXT_shader_pixel_local_storage or shader images.
+    return mRenderer->hasNativeParallelCompile();
 }
 
-angle::Result ContextGL::drawPixelLocalStorageEXTEnable(gl::Context *context,
-                                                        GLsizei n,
-                                                        const gl::PixelLocalStoragePlane planes[],
-                                                        const GLenum loadops[])
+angle::Result ContextGL::getDepthInitPBO(const gl::Context *context,
+                                         size_t requestedSize,
+                                         GLenum type,
+                                         GLuint *pboIdOut)
 {
-    ASSERT(getNativePixelLocalStorageOptions().type ==
-           ShPixelLocalStorageType::PixelLocalStorageEXT);
+    const FunctionsGL *functions = mRenderer->getFunctions();
+    StateManagerGL *stateManager = mRenderer->getStateManager();
 
-    getFunctions()->enable(GL_SHADER_PIXEL_LOCAL_STORAGE_EXT);
-
-    PLSProgramKeyBuilder b;
-    for (GLsizei i = n - 1; i >= 0; --i)
+    auto iter = mDepthInitPBOs.Get(type);
+    if (iter == mDepthInitPBOs.end())
     {
-        const gl::PixelLocalStoragePlane &plane = planes[i];
-        GLenum loadop                           = loadops[i];
-        bool preserved                          = loadop == GL_LOAD_OP_LOAD_ANGLE;
-        b.prependPlane(plane.getInternalformat(), preserved);
-        if (preserved)
-        {
-            const gl::ImageIndex &idx = plane.getTextureImageIndex();
-            getStateManager()->bindImageTexture(i, plane.getBackingTexture(context)->getNativeID(),
-                                                idx.getLevelIndex(), GL_FALSE, idx.getLayerIndex(),
-                                                GL_READ_ONLY, plane.getInternalformat());
-        }
+        iter = mDepthInitPBOs.Put(type, PixelBufferGL(functions));
     }
-    PLSProgramKey key = b.finish(PLSProgramType::Load);
 
-    PLSProgramCache *cache       = mRenderer->getPLSProgramCache();
-    const PLSProgram *plsProgram = cache->getProgram(key);
-    getStateManager()->forceUseProgram(plsProgram->getProgramID());
-    plsProgram->setClearValues(planes, loadops);
-    getStateManager()->bindVertexArray(cache->getEmptyVAO(), cache->getEmptyVAOState());
-    resetDrawStateForPixelLocalStorageEXT(context);
+    PixelBufferGL &pbo = iter->second;
 
-    ANGLE_GL_TRY(context, getFunctions()->drawArrays(GL_TRIANGLE_STRIP, 0, 4));
-    mRenderer->markWorkSubmitted();
+    // We only reset the counter if the requested size is equal to or larger than the cached PBO's
+    // size. If the app keeps asking for smaller buffers, do not reset the counter. This allows the
+    // oversized PBO to be garbage-collected gradually and eventually re-allocated at the correct
+    // smaller size.
+    if (requestedSize >= pbo.size)
+    {
+        pbo.lifetimeCounter = 100;
+    }
 
+    if (requestedSize > pbo.size)
+    {
+        stateManager->bindBuffer(gl::BufferBinding::PixelUnpack, pbo.bufferID);
+
+        functions->bufferData(GL_PIXEL_UNPACK_BUFFER, requestedSize, nullptr, GL_STATIC_DRAW);
+        GLubyte *mapPointer = static_cast<GLubyte *>(
+            functions->mapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, requestedSize,
+                                      GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT));
+        if (mapPointer)
+        {
+            ANGLE_UNSAFE_TODO(FillDepthOneMemory(type, {mapPointer, requestedSize}));
+            functions->unmapBuffer(GL_PIXEL_UNPACK_BUFFER);
+        }
+        pbo.size = requestedSize;
+    }
+
+    *pboIdOut = pbo.bufferID;
     return angle::Result::Continue;
 }
 
-angle::Result ContextGL::drawPixelLocalStorageEXTDisable(gl::Context *context,
-                                                         const gl::PixelLocalStoragePlane planes[],
-                                                         const GLenum storeops[])
+void ContextGL::tickGC()
 {
-    ASSERT(getNativePixelLocalStorageOptions().type ==
-           ShPixelLocalStorageType::PixelLocalStorageEXT);
-
-    GLsizei n = context->getState().getPixelLocalStorageActivePlanes();
-
-    PLSProgramKeyBuilder b;
-    for (GLsizei i = n - 1; i >= 0; --i)
+    for (auto iter = mDepthInitPBOs.begin(); iter != mDepthInitPBOs.end();)
     {
-        const gl::PixelLocalStoragePlane &plane = planes[i];
-        bool preserved =
-            plane.isActive() && !plane.isMemoryless() && storeops[i] == GL_STORE_OP_STORE_ANGLE;
-        b.prependPlane(plane.isActive() ? plane.getInternalformat() : GL_NONE, preserved);
-        if (preserved)
+        PixelBufferGL &pbo = iter->second;
+        if (pbo.lifetimeCounter > 0)
         {
-            const gl::ImageIndex &idx = plane.getTextureImageIndex();
-            getStateManager()->bindImageTexture(i, plane.getBackingTexture(context)->getNativeID(),
-                                                idx.getLevelIndex(), GL_FALSE, idx.getLayerIndex(),
-                                                GL_WRITE_ONLY, plane.getInternalformat());
+            --pbo.lifetimeCounter;
+            if (pbo.lifetimeCounter == 0)
+            {
+                iter = mDepthInitPBOs.Erase(iter);
+                continue;
+            }
         }
+        ++iter;
     }
-    PLSProgramKey key = b.finish(PLSProgramType::Store);
-
-    if (key.areAnyPreserved())
-    {
-        PLSProgramCache *cache       = mRenderer->getPLSProgramCache();
-        const PLSProgram *plsProgram = cache->getProgram(key);
-        getStateManager()->forceUseProgram(plsProgram->getProgramID());
-        getStateManager()->bindVertexArray(cache->getEmptyVAO(), cache->getEmptyVAOState());
-        resetDrawStateForPixelLocalStorageEXT(context);
-
-        ANGLE_GL_TRY(context, getFunctions()->drawArrays(GL_TRIANGLE_STRIP, 0, 4));
-        mRenderer->markWorkSubmitted();
-    }
-
-    getFunctions()->disable(GL_SHADER_PIXEL_LOCAL_STORAGE_EXT);
-
-    return angle::Result::Continue;
 }
 
 }  // namespace rx

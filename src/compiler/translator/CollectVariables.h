@@ -17,6 +17,7 @@ namespace sh
 
 class TIntermBlock;
 class TSymbolTable;
+class NameMap;
 
 void CollectVariables(TIntermBlock *root,
                       std::vector<ShaderVariable> *attributes,
@@ -27,12 +28,14 @@ void CollectVariables(TIntermBlock *root,
                       std::vector<ShaderVariable> *sharedVariables,
                       std::vector<InterfaceBlock> *uniformBlocks,
                       std::vector<InterfaceBlock> *shaderStorageBlocks,
+                      char userVariablePrefix,
+                      char userBlockPrefix,
                       ShHashFunction64 hashFunction,
+                      NameMap *nameMap,
                       TSymbolTable *symbolTable,
                       GLenum shaderType,
                       const TExtensionBehavior &extensionBehavior,
-                      const ShBuiltInResources &resources,
-                      int tessControlShaderOutputVertices);
+                      bool transformFloatUniformToFP16);
 }  // namespace sh
 
 #endif  // COMPILER_TRANSLATOR_COLLECTVARIABLES_H_

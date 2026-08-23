@@ -11,9 +11,11 @@
 #include <iostream>
 #include <memory>
 #include <unordered_map>
+#include "common/unsafe_buffers.h"
 
 #include "angle_gl.h"
 #include "anglebase/no_destructor.h"
+#include "common/hash_containers.h"
 #include "compiler/translator/Compiler.h"
 #include "compiler/translator/util.h"
 
@@ -62,18 +64,19 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     }
 
     // Make sure the rest of data will be a valid C string so that we don't have to copy it.
-    if (data[size - 1] != 0)
+    if (ANGLE_UNSAFE_TODO(data[size - 1]) != 0)
     {
         return 0;
     }
 
-    memcpy(&header, data, sizeof(header));
+    ANGLE_UNSAFE_TODO(memcpy(&header, data, sizeof(header)));
     ShCompileOptions options{};
-    memcpy(&options, &header.basicCompileOptions, offsetof(ShCompileOptions, metal));
-    memcpy(&options.metal, &header.metalCompileOptions, sizeof(options.metal));
-    memcpy(&options.pls, &header.plsCompileOptions, sizeof(options.pls));
+    ANGLE_UNSAFE_TODO(
+        memcpy(&options, &header.basicCompileOptions, offsetof(ShCompileOptions, metal)));
+    ANGLE_UNSAFE_TODO(memcpy(&options.metal, &header.metalCompileOptions, sizeof(options.metal)));
+    ANGLE_UNSAFE_TODO(memcpy(&options.pls, &header.plsCompileOptions, sizeof(options.pls)));
     size -= sizeof(header);
-    data += sizeof(header);
+    ANGLE_UNSAFE_TODO(data += sizeof(header));
     uint32_t type = header.type;
     uint32_t spec = header.spec;
 
@@ -82,7 +85,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         return 0;
     }
 
-    if (spec != SH_GLES2_SPEC && type != SH_WEBGL_SPEC && spec != SH_GLES3_SPEC &&
+    if (spec != SH_GLES2_SPEC && spec != SH_WEBGL_SPEC && spec != SH_GLES3_SPEC &&
         spec != SH_WEBGL2_SPEC)
     {
         return 0;
@@ -92,17 +95,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
     bool hasUnsupportedOptions = false;
 
-    const bool hasMacGLSLOptions = options.rewriteFloatUnaryMinusOperator ||
-                                   options.addAndTrueToLoopCondition ||
-                                   options.rewriteDoWhileLoops || options.unfoldShortCircuit ||
-                                   options.rewriteRowMajorMatrices;
+    const bool hasMacGLSLOptions = options.addAndTrueToLoopCondition ||
+                                   options.unfoldShortCircuit || options.rewriteRowMajorMatrices;
 
     if (!IsOutputGLSL(shaderOutput) && !IsOutputESSL(shaderOutput))
     {
-        hasUnsupportedOptions =
-            hasUnsupportedOptions || options.emulateAtan2FloatFunction || options.clampFragDepth ||
-            options.regenerateStructNames || options.rewriteRepeatedAssignToSwizzled ||
-            options.useUnusedStandardSharedBlocks || options.selectViewInNvGLSLVertexShader;
+        hasUnsupportedOptions = hasUnsupportedOptions || options.emulateAtan2FloatFunction ||
+                                options.clampFragDepth || options.rewriteRepeatedAssignToSwizzled ||
+                                options.useUnusedStandardSharedBlocks ||
+                                options.selectViewInNvGLSLVertexShader;
 
         hasUnsupportedOptions = hasUnsupportedOptions || hasMacGLSLOptions;
     }
@@ -112,12 +113,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         hasUnsupportedOptions = hasUnsupportedOptions || hasMacGLSLOptions;
 #endif
     }
+    if (!IsOutputESSL(shaderOutput))
+    {
+        hasUnsupportedOptions = hasUnsupportedOptions || options.skipAllValidationAndTransforms;
+    }
     if (!IsOutputSPIRV(shaderOutput))
     {
-        hasUnsupportedOptions =
-            hasUnsupportedOptions || options.emulateSeamfulCubeMapSampling ||
-            options.useSpecializationConstant || options.addVulkanXfbEmulationSupportCode ||
-            options.roundOutputAfterDithering || options.addAdvancedBlendEquationsEmulation;
+        hasUnsupportedOptions = hasUnsupportedOptions || options.addVulkanXfbEmulationSupportCode ||
+                                options.addAdvancedBlendEquationsEmulation;
     }
     if (!IsOutputHLSL(shaderOutput))
     {
@@ -125,6 +128,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
                                 options.expandSelectHLSLIntegerPowExpressions ||
                                 options.allowTranslateUniformBlockToStructuredBuffer ||
                                 options.rewriteIntegerUnaryMinusOperator;
+    }
+    if (!IsOutputMSL(shaderOutput))
+    {
+        hasUnsupportedOptions = hasUnsupportedOptions || options.ensureLoopForwardProgress;
     }
 
     // If there are any options not supported with this output, don't attempt to run the translator.
@@ -138,11 +145,20 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         static_cast<uint32_t>(options.pls.fragmentSyncType) %
         static_cast<uint32_t>(ShFragmentSynchronizationType::InvalidEnum));
 
+    // Force enable options that are required by the output generators.
+    if (IsOutputSPIRV(shaderOutput))
+    {
+        options.removeInactiveVariables = true;
+        options.retainInactiveFragmentOutputs = false;
+    }
+    if (IsOutputMSL(shaderOutput))
+    {
+        options.removeInactiveVariables = true;
+        options.retainInactiveFragmentOutputs = true;
+    }
+
     std::vector<uint32_t> validOutputs;
     validOutputs.push_back(SH_ESSL_OUTPUT);
-    validOutputs.push_back(SH_GLSL_COMPATIBILITY_OUTPUT);
-    validOutputs.push_back(SH_GLSL_130_OUTPUT);
-    validOutputs.push_back(SH_GLSL_140_OUTPUT);
     validOutputs.push_back(SH_GLSL_150_CORE_OUTPUT);
     validOutputs.push_back(SH_GLSL_330_CORE_OUTPUT);
     validOutputs.push_back(SH_GLSL_400_CORE_OUTPUT);
@@ -152,9 +168,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     validOutputs.push_back(SH_GLSL_440_CORE_OUTPUT);
     validOutputs.push_back(SH_GLSL_450_CORE_OUTPUT);
     validOutputs.push_back(SH_SPIRV_VULKAN_OUTPUT);
-    validOutputs.push_back(SH_HLSL_3_0_OUTPUT);
     validOutputs.push_back(SH_HLSL_4_1_OUTPUT);
-    validOutputs.push_back(SH_HLSL_4_0_FL9_3_OUTPUT);
     bool found = false;
     for (auto valid : validOutputs)
     {
@@ -200,12 +214,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         resources.ARB_texture_rectangle           = 1;
         resources.EXT_blend_func_extended         = 1;
         resources.EXT_conservative_depth          = 1;
-        resources.EXT_draw_buffers                = 1;
-        resources.EXT_frag_depth                  = 1;
-        resources.EXT_shader_texture_lod          = 1;
         resources.EXT_shader_framebuffer_fetch    = 1;
-        resources.NV_shader_framebuffer_fetch     = 1;
         resources.ARM_shader_framebuffer_fetch    = 1;
+        resources.ARM_shader_framebuffer_fetch_depth_stencil = 1;
         resources.EXT_YUV_target                  = 1;
         resources.APPLE_clip_distance             = 1;
         resources.MaxDualSourceDrawBuffers        = 1;
@@ -217,6 +228,20 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         resources.EXT_primitive_bounding_box      = 1;
         resources.OES_primitive_bounding_box      = 1;
 
+        // Some extensions are not allowed in WebGL2
+        if (spec == SH_WEBGL2_SPEC)
+        {
+            resources.EXT_frag_depth         = 0;
+            resources.EXT_shader_texture_lod = 0;
+            resources.EXT_draw_buffers       = 0;
+        }
+        else
+        {
+            resources.EXT_frag_depth         = 1;
+            resources.EXT_shader_texture_lod = 1;
+            resources.EXT_draw_buffers       = 1;
+        }
+
         if (!translator->Init(resources))
         {
             return 0;
@@ -227,8 +252,32 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
     auto &translator = (*translators)[key];
 
-    const char *shaderStrings[] = {reinterpret_cast<const char *>(data)};
-    translator->compile(shaderStrings, 1, options);
+    // Enable options that any security-sensitive application should enable, otherwise it's easy to
+    // trigger various inactionable errors.
+    options.limitExpressionComplexity = true;
+    options.limitCallStackDepth                     = true;
+    options.rejectWebglShadersWithLargeVariables    = true;
+    options.rejectWebglShadersWithUndefinedBehavior = true;
+    const char *shaderStrings[]       = {reinterpret_cast<const char *>(data)};
+
+    // Dump the string being passed to the compiler to ease debugging.
+    // The string is written char-by-char and unwanted characters are replaced with whitespace.
+    // This is because characters such as \r can hide the shader contents.
+    std::cerr << "\nCompile input with unprintable characters turned to whitespace:\n";
+    for (const char *c = shaderStrings[0]; *c; ANGLE_UNSAFE_TODO(++c))
+    {
+        if (*c < ' ' && *c != '\n')
+        {
+            std::cerr << ' ';
+        }
+        else
+        {
+            std::cerr << *c;
+        }
+    }
+    std::cerr << "\nEnd of compile input.\n\n";
+
+    translator->compile(shaderStrings, options);
 
     return 0;
 }

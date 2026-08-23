@@ -62,7 +62,7 @@ Config::Config()
       optimalOrientation(0),
       colorComponentType(EGL_COLOR_COMPONENT_TYPE_FIXED_EXT),
       recordable(EGL_FALSE),
-      framebufferTarget(EGL_FALSE),  // TODO: http://anglebug.com/4208
+      framebufferTarget(EGL_FALSE),  // TODO: http://anglebug.com/42262839
       yInverted(EGL_FALSE)
 {}
 
@@ -229,6 +229,16 @@ class ConfigSorter
 std::vector<const Config *> ConfigSet::filter(const AttributeMap &attributeMap) const
 {
     std::vector<const Config *> result;
+
+    // If EGL_CONFIG_ID is included and is not EGL_DONT_CARE, all other attributes should be
+    // ignored.  EGL_DONT_CARE means the attribute should not be used for filtering, so fall
+    // through to the normal path where EGL_DONT_CARE values are properly skipped.
+    if (attributeMap.contains(EGL_CONFIG_ID) && attributeMap.get(EGL_CONFIG_ID) != EGL_DONT_CARE)
+    {
+        result.push_back(&ConfigSet::get(attributeMap.getAsInt(EGL_CONFIG_ID)));
+        return result;
+    }
+
     result.reserve(mConfigs.size());
 
     for (auto configIter = mConfigs.begin(); configIter != mConfigs.end(); configIter++)
@@ -271,9 +281,6 @@ std::vector<const Config *> ConfigSet::filter(const AttributeMap &attributeMap) 
                     break;
                 case EGL_CONFIG_CAVEAT:
                     match = config.configCaveat == static_cast<EGLenum>(attributeValue);
-                    break;
-                case EGL_CONFIG_ID:
-                    match = config.configID == attributeValue;
                     break;
                 case EGL_LEVEL:
                     match = config.level == attributeValue;

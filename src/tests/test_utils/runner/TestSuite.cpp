@@ -5,15 +5,19 @@
 //
 // TestSuite:
 //   Basic implementation of a test harness in ANGLE.
+//
 
 #include "TestSuite.h"
+#include "common/unsafe_buffers.h"
 
 #include "common/debug.h"
+#include "common/hash_containers.h"
 #include "common/platform.h"
 #include "common/string_utils.h"
 #include "common/system_utils.h"
 #include "util/Timer.h"
 
+#include <signal.h>
 #include <stdlib.h>
 #include <time.h>
 
@@ -71,6 +75,48 @@ constexpr int kDefaultBatchSize      = 256;
 constexpr double kIdleMessageTimeout = 15.0;
 constexpr int kDefaultMaxProcesses   = 16;
 constexpr int kDefaultMaxFailures    = 100;
+
+#if defined(ANGLE_PLATFORM_ANDROID)
+struct sigaction g_originalSigaction[NSIG];
+TestSuite *g_ThisTestSuite = nullptr;
+
+// This function runs in a compromised context. It should not allocate memory.
+void SignalHandler(int sig, siginfo_t *info, void *reserved)
+{
+    const char crashedMarker[] = "[ CRASHED      ]\n";
+
+    // Output the crash marker.
+    std::cerr << crashedMarker << std::endl;
+    if (g_ThisTestSuite != nullptr)
+    {
+        g_ThisTestSuite->onCrashOrTimeout(TestResultType::Crash);
+    }
+    else
+    {
+        std::cerr << "SignalHandler: TestSuite not initialized!" << std::endl;
+    }
+
+    ANGLE_UNSAFE_TODO(g_originalSigaction[sig].sa_sigaction(sig, info, reserved));
+}
+
+void InstallExceptionHandlers()
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+
+    sa.sa_sigaction = SignalHandler;
+    sa.sa_flags     = SA_SIGINFO;
+
+    // The list of signals which are considered to be crashes.
+    const int exceptionSignals[] = {SIGSEGV, SIGABRT, SIGFPE, SIGILL, SIGBUS, -1};
+
+    for (unsigned int i = 0; ANGLE_UNSAFE_TODO(exceptionSignals[i]) != -1; ++i)
+    {
+        ANGLE_UNSAFE_TODO(
+            sigaction(exceptionSignals[i], &sa, &g_originalSigaction[exceptionSignals[i]]));
+    }
+}
+#endif  // ANGLE_PLATFORM_ANDROID
 
 const char *ResultTypeToString(TestResultType type)
 {
@@ -321,7 +367,12 @@ void UpdateCurrentTestResult(const testing::TestResult &resultIn, TestResults *r
     }
     else
     {
-        resultOut.type = TestResultType::Pass;
+        // With --gtest_repeat the same test is seen multiple times, so resultOut.type may have been
+        // previously set to e.g. ::Fail. Only set to ::Pass if there was no other result yet.
+        if (resultOut.type == TestResultType::NoResult)
+        {
+            resultOut.type = TestResultType::Pass;
+        }
     }
 
     resultOut.elapsedTimeSeconds.back() = resultsOut->currentTestTimer.getElapsedWallClockTime();
@@ -334,7 +385,7 @@ TestIdentifier GetTestIdentifier(const testing::TestInfo &testInfo)
 
 bool IsTestDisabled(const testing::TestInfo &testInfo)
 {
-    return ::strstr(testInfo.name(), "DISABLED_") == testInfo.name();
+    return ANGLE_UNSAFE_TODO(::strstr(testInfo.name(), "DISABLED_")) == testInfo.name();
 }
 
 using TestIdentifierFilter = std::function<bool(const TestIdentifier &id)>;
@@ -719,19 +770,28 @@ std::string GetConfigNameFromTestIdentifier(const TestIdentifier &id)
 
 TestQueue BatchTests(const std::vector<TestIdentifier> &tests, int batchSize)
 {
-    // First sort tests by configuration.
-    angle::HashMap<std::string, std::vector<TestIdentifier>> testsSortedByConfig;
+    // First group tests by configuration.
+    angle::HashMap<std::string, std::vector<TestIdentifier>> testsGroupedByConfig;
     for (const TestIdentifier &id : tests)
     {
         std::string config = GetConfigNameFromTestIdentifier(id);
-        testsSortedByConfig[config].push_back(id);
+        testsGroupedByConfig[config].push_back(id);
     }
+
+    // Sort configs for consistent ordering.
+    std::vector<std::string> configs;
+    configs.reserve(testsGroupedByConfig.size());
+    for (const auto &configAndIds : testsGroupedByConfig)
+    {
+        configs.push_back(configAndIds.first);
+    }
+    std::sort(configs.begin(), configs.end());
 
     // Then group into batches by 'batchSize'.
     TestQueue testQueue;
-    for (const auto &configAndIds : testsSortedByConfig)
+    for (const auto &config : configs)
     {
-        const std::vector<TestIdentifier> &configTests = configAndIds.second;
+        const std::vector<TestIdentifier> &configTests = testsGroupedByConfig[config];
 
         // Count the number of batches needed for this config.
         int batchesForConfig = static_cast<int>(configTests.size() + batchSize - 1) / batchSize;
@@ -768,7 +828,7 @@ void ListTests(const std::map<TestIdentifier, TestResult> &resultsMap)
 
 // Prints the names of the tests matching the user-specified filter flag.
 // This matches the output from googletest/src/gtest.cc but is much much faster for large filters.
-// See http://anglebug.com/5164
+// See http://anglebug.com/42263725
 void GTestListTests(const std::map<TestIdentifier, TestResult> &resultsMap)
 {
     std::map<std::string, std::vector<std::string>> suites;
@@ -809,6 +869,91 @@ bool UsesExternalBatching()
 #endif
 }
 }  // namespace
+
+// Mimics GTest's PrintJsonTestList() to satisfy Chromium's ParseGTestListTestsJSON.
+// Simplifies the format by omitting counts and line numbers, providing only what Chromium needs.
+// Duplicated here because ANGLE bypasses GTest's slow test listing (see GTestListTests).
+// Needs update if GTest changes its schema and Chromium updates its parser.
+//
+// Generated on device at path specified by --gtest_output=json:<path>.
+// Example test command:
+//   out/Android/angle_end2end_tests --gtest_filter="GLSLTest_ES3.FragmentShaderOutputArray/*"
+//   --gtest_list_tests --gtest_output=json:/sdcard/Download/test_list.json --verbose --local-output
+//
+// Sample JSON output:
+// {
+//   "testsuites": [
+//     {
+//       "name": "GLSLTest_ES3",
+//       "testsuite": [
+//         {
+//           "name": "FragmentShaderOutputArray/ES3_OpenGLES",
+//           "file": "../../src/tests/gl_tests/GLSLTest.cpp"
+//         },
+//         ...
+//         {
+//           "name": "FragmentShaderOutputArray/ES3_Vulkan_NoSupportsSPIRV14",
+//           "file": "../../src/tests/gl_tests/GLSLTest.cpp"
+//         }
+//       ]
+//     }
+//   ]
+// }
+void TestSuite::WriteTestListJSON(const std::string &path) const
+{
+    FILE *file = fopen(path.c_str(), "w");
+    if (!file)
+    {
+        printf("Error opening file for JSON output: %s\n", path.c_str());
+        return;
+    }
+
+    fprintf(file, "{\n");
+    fprintf(file, "  \"testsuites\": [\n");
+
+    std::map<std::string, std::vector<std::pair<TestIdentifier, std::string>>> suites;
+    for (const auto &pair : mTestFileLines)
+    {
+        const TestIdentifier &id = pair.first;
+        suites[id.testSuiteName].push_back({id, pair.second.file});
+    }
+
+    bool firstSuite = true;
+    for (const auto &suiteIt : suites)
+    {
+        if (!firstSuite)
+        {
+            fprintf(file, ",\n");
+        }
+        firstSuite = false;
+
+        fprintf(file, "    {\n");
+        fprintf(file, "      \"name\": \"%s\",\n", suiteIt.first.c_str());
+        fprintf(file, "      \"testsuite\": [\n");
+
+        bool firstTest = true;
+        for (const auto &testPair : suiteIt.second)
+        {
+            if (!firstTest)
+            {
+                fprintf(file, ",\n");
+            }
+            firstTest = false;
+
+            fprintf(file, "        {\n");
+            fprintf(file, "          \"name\": \"%s\",\n", testPair.first.testName.c_str());
+            fprintf(file, "          \"file\": \"%s\"\n", testPair.second.c_str());
+            fprintf(file, "        }");
+        }
+        fprintf(file, "\n      ]\n");
+        fprintf(file, "    }");
+    }
+
+    fprintf(file, "\n  ]\n");
+    fprintf(file, "}\n");
+
+    fclose(file);
+}
 
 void MetricWriter::enable(const std::string &testArtifactDirectory)
 {
@@ -882,7 +1027,8 @@ TestIdentifier &TestIdentifier::operator=(const TestIdentifier &other) = default
 
 void TestIdentifier::snprintfName(char *outBuffer, size_t maxLen) const
 {
-    snprintf(outBuffer, maxLen, "%s.%s", testSuiteName.c_str(), testName.c_str());
+    ANGLE_UNSAFE_TODO(
+        snprintf(outBuffer, maxLen, "%s.%s", testSuiteName.c_str(), testName.c_str()));
 }
 
 // static
@@ -992,7 +1138,7 @@ TestSuite::TestSuite(int *argc, char **argv, std::function<void()> registerTests
 #endif
 
 #if defined(ANGLE_PLATFORM_WINDOWS)
-    testing::GTEST_FLAG(catch_exceptions) = false;
+    GTEST_FLAG_SET(catch_exceptions, false);
 #endif
 
     if (*argc <= 0)
@@ -1010,19 +1156,20 @@ TestSuite::TestSuite(int *argc, char **argv, std::function<void()> registerTests
             continue;
         }
 
-        if (strstr(argv[argIndex], "--gtest_filter=") == argv[argIndex])
+        if (ANGLE_UNSAFE_TODO(strstr(argv[argIndex], "--gtest_filter=")) ==
+            ANGLE_UNSAFE_TODO(argv[argIndex]))
         {
             filterArgIndex = argIndex;
         }
         else
         {
             // Don't include disabled tests in test lists unless the user asks for them.
-            if (strcmp("--gtest_also_run_disabled_tests", argv[argIndex]) == 0)
+            if (ANGLE_UNSAFE_TODO(strcmp("--gtest_also_run_disabled_tests", argv[argIndex])) == 0)
             {
                 alsoRunDisabledTests = true;
             }
 
-            mChildProcessArgs.push_back(argv[argIndex]);
+            mChildProcessArgs.push_back(ANGLE_UNSAFE_TODO(argv[argIndex]));
         }
         ++argIndex;
     }
@@ -1035,7 +1182,7 @@ TestSuite::TestSuite(int *argc, char **argv, std::function<void()> registerTests
 #if defined(ANGLE_PLATFORM_FUCHSIA)
     if (mBotMode)
     {
-        printf("Note: Bot mode is not available on Fuchsia. See http://anglebug.com/7312\n");
+        printf("Note: Bot mode is not available on Fuchsia. See http://anglebug.com/42265786\n");
         mBotMode = false;
     }
 #endif
@@ -1112,6 +1259,10 @@ TestSuite::TestSuite(int *argc, char **argv, std::function<void()> registerTests
         else if (conditions[GPUTestConfig::kConditionApple])
         {
             SetEnvironmentVar(kPreferredDeviceEnvVar, "apple");
+        }
+        else if (conditions[GPUTestConfig::kConditionQualcomm])
+        {
+            SetEnvironmentVar(kPreferredDeviceEnvVar, "qualcomm");
         }
     }
 
@@ -1308,6 +1459,8 @@ bool TestSuite::parseSingleArg(int *argc, char **argv, int argIndex)
            ParseStringArg("--render-test-output-dir", argc, argv, argIndex,
                           &mTestArtifactDirectory) ||
            ParseStringArg("--isolated-outdir", argc, argv, argIndex, &mTestArtifactDirectory) ||
+           ParseStringArgWithHandling("--gtest_output", argc, argv, argIndex, &mGTestOutput,
+                                      ArgHandling::Preserve) ||
            ParseFlag("--test-launcher-bot-mode", argc, argv, argIndex, &mBotMode) ||
            ParseFlag("--bot-mode", argc, argv, argIndex, &mBotMode) ||
            ParseFlag("--debug-test-groups", argc, argv, argIndex, &mDebugTestGroups) ||
@@ -1418,6 +1571,11 @@ bool TestSuite::launchChildTestProcess(uint32_t batchId,
 
     // Launch child process and wait for completion.
     processInfo.process = LaunchProcess(args, ProcessOutputCapture::StdoutAndStderrInterleaved);
+    if (!processInfo.process)
+    {
+        std::cerr << "Error creating child process.\n";
+        return false;
+    }
 
     if (!processInfo.process->started())
     {
@@ -1559,10 +1717,13 @@ bool TestSuite::finishProcess(ProcessInfo *processInfo)
         {
             printf(" (TIMEOUT in %0.1lf s)\n", result.elapsedTimeSeconds.back());
             mFailureCount++;
+
+            const std::string &batchStdout = processInfo->process->getStdout();
+            PrintTestOutputSnippet(id, result, batchStdout);
         }
         else
         {
-            printf(" (%s)\n", ResultTypeToString(result.type));
+            ANGLE_UNSAFE_TODO(printf(" (%s)\n", ResultTypeToString(result.type)));
             mFailureCount++;
 
             const std::string &batchStdout = processInfo->process->getStdout();
@@ -1636,15 +1797,26 @@ int TestSuite::run()
 [==========] 1 test from 1 test suite ran. (24 ms total)
 [  PASSED  ] 1 test.
 )";
-        printf(kPlaceholderTestTest);
+        ANGLE_UNSAFE_TODO(printf(kPlaceholderTestTest));
 #endif  // defined(ANGLE_PLATFORM_ANDROID)
 
         return EXIT_SUCCESS;
     }
 
+#if defined(ANGLE_PLATFORM_ANDROID)
+    g_ThisTestSuite = this;
+    InstallExceptionHandlers();
+#endif  // ANGLE_PLATFORM_ANDROID
+
     if (mGTestListTests)
     {
         GTestListTests(mTestResults.results);
+        const char kJsonPrefix[] = "json:";
+        if (!mGTestOutput.empty() && mGTestOutput.find(kJsonPrefix) == 0)
+        {
+            std::string path = mGTestOutput.substr(strlen(kJsonPrefix));
+            WriteTestListJSON(path);
+        }
         return EXIT_SUCCESS;
     }
 
@@ -1753,7 +1925,7 @@ int TestSuite::run()
 
         if (progress)
         {
-            messageTimer.start();
+            messageTimer.restart();
         }
         else if (messageTimer.getElapsedWallClockTime() > kIdleMessageTimeout)
         {
@@ -1761,7 +1933,7 @@ int TestSuite::run()
             double processTime             = processInfo.process->getElapsedTimeSeconds();
             printf("Running %d tests in %d processes, longest for %d seconds.\n", totalTestCount,
                    static_cast<int>(mCurrentProcesses.size()), static_cast<int>(processTime));
-            messageTimer.start();
+            messageTimer.restart();
         }
 
         // Early exit if we passed the maximum failure threshold. Still wait for current tests.
@@ -1959,7 +2131,7 @@ bool TestSuite::logAnyUnusedTestExpectations()
     }
     if (anyUnused)
     {
-        std::cerr << "Failed to validate test expectations." << unusedMsgStream.str() << std::endl;
+        std::cerr << "Found unused test expectations:" << unusedMsgStream.str() << std::endl;
         return true;
     }
     return false;

@@ -7,6 +7,7 @@
 //   Tests EXT_EGL_image_external_wrap_modes
 //
 
+#include "common/unsafe_buffers.h"
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
 #include "util/EGLWindow.h"
@@ -73,11 +74,12 @@ void main()
             {
                 float red = static_cast<float>(x) / texSize;
 
-                data[(y * texSize + x) * 4 + 0] = static_cast<GLubyte>(red * 255);
-                data[(y * texSize + x) * 4 + 1] = static_cast<GLubyte>(green * 255);
-
-                data[(y * texSize + x) * 4 + 2] = 0;
-                data[(y * texSize + x) * 4 + 3] = 255;
+                ANGLE_UNSAFE_TODO(data[(y * texSize + x) * 4 + 0]) =
+                    static_cast<GLubyte>(red * 255);
+                ANGLE_UNSAFE_TODO(data[(y * texSize + x) * 4 + 1]) =
+                    static_cast<GLubyte>(green * 255);
+                ANGLE_UNSAFE_TODO(data[(y * texSize + x) * 4 + 2]) = 0;
+                ANGLE_UNSAFE_TODO(data[(y * texSize + x) * 4 + 3]) = 255;
             }
         }
 

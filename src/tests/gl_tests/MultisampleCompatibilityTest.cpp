@@ -7,6 +7,7 @@
 //   Tests for the EXT_multisample_compatibility extension.
 //
 
+#include "common/unsafe_buffers.h"
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
 
@@ -172,9 +173,6 @@ TEST_P(EXTMultisampleCompatibilityTest, DrawAndResolve)
     if (!isApplicable())
         return;
 
-    // http://anglebug.com/5270
-    ANGLE_SKIP_TEST_IF(IsMac() && IsIntelUHD630Mobile() && IsDesktopOpenGL());
-
     static const float kBlue[]  = {0.0f, 0.0f, 1.0f, 1.0f};
     static const float kGreen[] = {0.0f, 1.0f, 0.0f, 1.0f};
     static const float kRed[]   = {1.0f, 0.0f, 0.0f, 1.0f};
@@ -208,16 +206,17 @@ TEST_P(EXTMultisampleCompatibilityTest, DrawAndResolve)
             glEnable(GL_MULTISAMPLE_EXT);
         }
         prepareForVerify();
-        results[pass].reset(new uint8_t[kResultSize]);
-        memset(results[pass].get(), 123u, kResultSize);
-        glReadPixels(0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE, results[pass].get());
+        ANGLE_UNSAFE_TODO(results[pass]).reset(new uint8_t[kResultSize]);
+        ANGLE_UNSAFE_TODO(memset(results[pass].get(), 123u, kResultSize));
+        glReadPixels(0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
+                     ANGLE_UNSAFE_TODO(results[pass]).get());
 
         cleanup();
     }
-    EXPECT_NE(0, memcmp(results[0].get(), results[1].get(), kResultSize));
+    ANGLE_UNSAFE_TODO(EXPECT_NE(0, memcmp(results[0].get(), results[1].get(), kResultSize)));
     // Verify that rendering is deterministic, so that the pass above does not
     // come from non-deterministic rendering.
-    EXPECT_EQ(0, memcmp(results[0].get(), results[2].get(), kResultSize));
+    ANGLE_UNSAFE_TODO(EXPECT_EQ(0, memcmp(results[0].get(), results[2].get(), kResultSize)));
 }
 
 // Test that enabling GL_SAMPLE_ALPHA_TO_ONE_EXT affects rendering.
@@ -261,9 +260,10 @@ TEST_P(EXTMultisampleCompatibilityTest, DrawAlphaOneAndResolve)
         glDrawArrays(GL_TRIANGLES, 6, 3);
 
         prepareForVerify();
-        results[pass].reset(new uint8_t[kResultSize]);
-        memset(results[pass].get(), 123u, kResultSize);
-        glReadPixels(0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE, results[pass].get());
+        ANGLE_UNSAFE_TODO(results[pass]).reset(new uint8_t[kResultSize]);
+        ANGLE_UNSAFE_TODO(memset(results[pass].get(), 123u, kResultSize));
+        glReadPixels(0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
+                     ANGLE_UNSAFE_TODO(results[pass]).get());
         if (pass == 1)
         {
             glDisable(GL_SAMPLE_ALPHA_TO_ONE_EXT);
@@ -271,10 +271,10 @@ TEST_P(EXTMultisampleCompatibilityTest, DrawAlphaOneAndResolve)
 
         cleanup();
     }
-    EXPECT_NE(0, memcmp(results[0].get(), results[1].get(), kResultSize));
+    ANGLE_UNSAFE_TODO(EXPECT_NE(0, memcmp(results[0].get(), results[1].get(), kResultSize)));
     // Verify that rendering is deterministic, so that the pass above does not
     // come from non-deterministic rendering.
-    EXPECT_EQ(0, memcmp(results[0].get(), results[2].get(), kResultSize));
+    ANGLE_UNSAFE_TODO(EXPECT_EQ(0, memcmp(results[0].get(), results[2].get(), kResultSize)));
 }
 
 ANGLE_INSTANTIATE_TEST_ES2_AND_ES3(EXTMultisampleCompatibilityTest);
@@ -383,7 +383,7 @@ TEST_P(MultisampleCompatibilityTest, DrawCoverageAndResolve)
         prepareForDraw(samples);
         glEnable(GL_SAMPLE_COVERAGE);
         glSampleCoverage(1.0, false);
-        drawQuad(drawRed.get(), essl1_shaders::PositionAttrib(), 0.5f);
+        drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.5f);
 
         prepareForVerify();
         GLsizei pixelCount = kWidth * kHeight;

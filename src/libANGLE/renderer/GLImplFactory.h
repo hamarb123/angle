@@ -14,7 +14,6 @@
 
 #include "angle_gl.h"
 #include "libANGLE/Framebuffer.h"
-#include "libANGLE/Overlay.h"
 #include "libANGLE/Program.h"
 #include "libANGLE/ProgramExecutable.h"
 #include "libANGLE/ProgramPipeline.h"
@@ -28,6 +27,7 @@
 namespace gl
 {
 class State;
+class Context;
 }  // namespace gl
 
 namespace rx
@@ -39,7 +39,6 @@ class FenceNVImpl;
 class SyncImpl;
 class FramebufferImpl;
 class MemoryObjectImpl;
-class OverlayImpl;
 class PathImpl;
 class ProgramExecutableImpl;
 class ProgramImpl;
@@ -79,7 +78,9 @@ class GLImplFactory : angle::NonCopyable
     virtual BufferImpl *createBuffer(const gl::BufferState &state) = 0;
 
     // Vertex Array creation
-    virtual VertexArrayImpl *createVertexArray(const gl::VertexArrayState &data) = 0;
+    virtual VertexArrayImpl *createVertexArray(
+        const gl::VertexArrayState &data,
+        const gl::VertexArrayBuffers &vertexArrayBuffers) = 0;
 
     // Query and Fence creation
     virtual QueryImpl *createQuery(gl::QueryType type) = 0;
@@ -101,9 +102,6 @@ class GLImplFactory : angle::NonCopyable
 
     // Semaphore creation
     virtual SemaphoreImpl *createSemaphore() = 0;
-
-    // Overlay creation
-    virtual OverlayImpl *createOverlay(const gl::OverlayState &state) = 0;
 
     rx::UniqueSerial generateSerial() { return mSerialFactory.generate(); }
 

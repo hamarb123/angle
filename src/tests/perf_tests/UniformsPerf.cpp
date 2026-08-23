@@ -8,6 +8,7 @@
 //
 
 #include "ANGLEPerfTest.h"
+#include "common/unsafe_buffers.h"
 
 #include <array>
 #include <iostream>
@@ -150,6 +151,7 @@ class UniformsBenchmark : public ANGLERenderTest,
 std::vector<Matrix4> GenMatrixData(size_t count, int parity)
 {
     std::vector<Matrix4> data;
+    data.reserve(count);
 
     // Very simple matrix data allocation scheme.
     for (size_t index = 0; index < count; ++index)
@@ -159,7 +161,8 @@ std::vector<Matrix4> GenMatrixData(size_t count, int parity)
         {
             for (int col = 0; col < 4; ++col)
             {
-                mat.data[row * 4 + col] = (row * col + parity) % 2 == 0 ? 1.0f : -1.0f;
+                ANGLE_UNSAFE_TODO(mat.data[row * 4 + col]) =
+                    (row * col + parity) % 2 == 0 ? 1.0f : -1.0f;
             }
         }
 
@@ -516,7 +519,6 @@ ANGLE_INSTANTIATE_TEST(
     VectorUniforms(METAL(), DataMode::REPEAT),
     VectorUniforms(OPENGL_OR_GLES(), DataMode::UPDATE),
     VectorUniforms(OPENGL_OR_GLES(), DataMode::REPEAT),
-    VectorUniforms(OPENGL_OR_GLES_NULL(), DataMode::UPDATE),
     MatrixUniforms(D3D11(), DataMode::UPDATE, DataType::MAT4x4, MatrixLayout::NO_TRANSPOSE),
     MatrixUniforms(METAL(), DataMode::UPDATE, DataType::MAT4x4, MatrixLayout::NO_TRANSPOSE),
     MatrixUniforms(OPENGL_OR_GLES(),

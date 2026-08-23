@@ -40,6 +40,9 @@ const char *GetPathSeparatorForEnvironmentVar();
 bool PrependPathToEnvironmentVar(const char *variableName, const char *path);
 bool IsDirectory(const char *filename);
 bool IsFullPath(std::string dirName);
+bool CreateDirectories(const std::string &path);
+void MakeForwardSlashThePathSeparator(std::string &path);
+bool IsSameFileDescriptor(int fd1, int fd2);
 std::string GetRootDirectory();
 std::string ConcatenatePath(std::string first, std::string second);
 
@@ -55,6 +58,8 @@ Optional<std::string> CreateTemporaryFileInDirectoryWithExtension(const std::str
 
 // Get absolute time in seconds.  Use this function to get an absolute time with an unknown origin.
 double GetCurrentSystemTime();
+// Get absolute time in nanoseconds.
+uint64_t GetCurrentSystemTimeNs();
 // Get CPU time for current process in seconds.
 double GetCurrentProcessCpuTime();
 
@@ -231,19 +236,6 @@ std::wstring Widen(const std::string_view &utf8);
 
 std::string StripFilenameFromPath(const std::string &path);
 
-#if defined(ANGLE_PLATFORM_LINUX) || defined(ANGLE_PLATFORM_WINDOWS)
-// Use C++ thread_local which is about 2x faster than std::this_thread::get_id()
-ANGLE_INLINE ThreadId GetCurrentThreadId()
-{
-    thread_local int tls;
-    return static_cast<ThreadId>(reinterpret_cast<uintptr_t>(&tls));
-}
-ANGLE_INLINE ThreadId InvalidThreadId()
-{
-    return -1;
-}
-#else
-// Default. Fastest on Android (about the same as `pthread_self` and a bit faster then `gettid`).
 ANGLE_INLINE ThreadId GetCurrentThreadId()
 {
     return std::this_thread::get_id();
@@ -252,7 +244,6 @@ ANGLE_INLINE ThreadId InvalidThreadId()
 {
     return ThreadId();
 }
-#endif
 
 void SetCurrentThreadName(const char *name);
 }  // namespace angle

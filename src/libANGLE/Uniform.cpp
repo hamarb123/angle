@@ -6,6 +6,7 @@
 
 #include "libANGLE/Uniform.h"
 #include "common/BinaryStream.h"
+#include "common/unsafe_buffers.h"
 #include "libANGLE/ProgramLinkedResources.h"
 
 #include <cstring>
@@ -25,8 +26,8 @@ LinkedUniform::LinkedUniform(GLenum typeIn,
     // arrays are always flattened, which means at most 1D array
     ASSERT(arraySizesIn.size() <= 1);
 
-    memset(this, 0, sizeof(*this));
-    SetBitField(pod.type, typeIn);
+    ANGLE_UNSAFE_TODO(memset(this, 0, sizeof(*this)));
+    pod.typeIndex = GetUniformTypeIndex(typeIn);
     SetBitField(pod.precision, precisionIn);
     pod.location = locationIn;
     SetBitField(pod.binding, bindingIn);
@@ -54,7 +55,7 @@ LinkedUniform::LinkedUniform(const UsedUniform &usedUniform)
 
     // Note: Ensure every data member is initialized.
     pod.flagBitsAsUByte = 0;
-    SetBitField(pod.type, usedUniform.type);
+    pod.typeIndex       = GetUniformTypeIndex(usedUniform.type);
     SetBitField(pod.precision, usedUniform.precision);
     SetBitField(pod.imageUnitFormat, usedUniform.imageUnitFormat);
     pod.location          = usedUniform.location;
@@ -77,12 +78,13 @@ LinkedUniform::LinkedUniform(const UsedUniform &usedUniform)
 
     SetBitField(pod.flagBits.isFragmentInOut, usedUniform.isFragmentInOut);
     SetBitField(pod.flagBits.texelFetchStaticUse, usedUniform.texelFetchStaticUse);
+    SetBitField(pod.flagBits.isFloat16, usedUniform.isFloat16);
     ASSERT(!usedUniform.isArray() || pod.arraySize == usedUniform.getArraySizeProduct());
 }
 
 BufferVariable::BufferVariable()
 {
-    memset(&pod, 0, sizeof(pod));
+    ANGLE_UNSAFE_TODO(memset(&pod, 0, sizeof(pod)));
     pod.bufferIndex       = -1;
     pod.blockInfo         = sh::kDefaultBlockMemberInfo;
     pod.topLevelArraySize = -1;
@@ -97,7 +99,7 @@ BufferVariable::BufferVariable(GLenum type,
                                const sh::BlockMemberInfo &blockInfo)
     : name(name)
 {
-    memset(&pod, 0, sizeof(pod));
+    ANGLE_UNSAFE_TODO(memset(&pod, 0, sizeof(pod)));
     SetBitField(pod.type, type);
     SetBitField(pod.precision, precision);
     SetBitField(pod.bufferIndex, bufferIndex);
@@ -107,12 +109,12 @@ BufferVariable::BufferVariable(GLenum type,
     SetBitField(pod.basicTypeElementCount, arraySizes.empty() ? 1u : arraySizes.back());
 }
 
-ShaderVariableBuffer::ShaderVariableBuffer()
+AtomicCounterBuffer::AtomicCounterBuffer()
 {
-    memset(&pod, 0, sizeof(pod));
+    ANGLE_UNSAFE_TODO(memset(&pod, 0, sizeof(pod)));
 }
 
-void ShaderVariableBuffer::unionReferencesWith(const LinkedUniform &other)
+void AtomicCounterBuffer::unionReferencesWith(const LinkedUniform &other)
 {
     pod.activeUseBits |= other.pod.activeUseBits;
     for (const ShaderType shaderType : AllShaderTypes())
@@ -128,7 +130,7 @@ void ShaderVariableBuffer::unionReferencesWith(const LinkedUniform &other)
 
 InterfaceBlock::InterfaceBlock()
 {
-    memset(&pod, 0, sizeof(pod));
+    ANGLE_UNSAFE_TODO(memset(&pod, 0, sizeof(pod)));
 }
 
 InterfaceBlock::InterfaceBlock(const std::string &name,
@@ -140,11 +142,11 @@ InterfaceBlock::InterfaceBlock(const std::string &name,
                                int binding)
     : name(name), mappedName(mappedName)
 {
-    memset(&pod, 0, sizeof(pod));
+    ANGLE_UNSAFE_TODO(memset(&pod, 0, sizeof(pod)));
 
     SetBitField(pod.isArray, isArray);
     SetBitField(pod.isReadOnly, isReadOnly);
-    SetBitField(pod.binding, binding);
+    SetBitField(pod.inShaderBinding, binding);
     pod.arrayElement        = arrayElementIn;
     pod.firstFieldArraySize = firstFieldArraySizeIn;
 }

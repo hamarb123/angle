@@ -11,6 +11,7 @@
 #define ANGLE_TRACE_INTERPRETER_H_
 
 #include "common/frame_capture_utils.h"
+#include "common/unsafe_buffers.h"
 #include "frame_capture_test_utils.h"
 #include "traces_export.h"
 
@@ -180,6 +181,16 @@ void PackParameter<const uint64_t *>(ParamBuffer &params,
                                      const Token &token,
                                      const TraceStringMap &strings);
 
+template <>
+void PackParameter<GLGETBLOBPROCANGLE>(ParamBuffer &params,
+                                       const Token &token,
+                                       const TraceStringMap &strings);
+
+template <>
+void PackParameter<GLSETBLOBPROCANGLE>(ParamBuffer &params,
+                                       const Token &token,
+                                       const TraceStringMap &strings);
+
 #if defined(ANGLE_PLATFORM_WINDOWS)
 
 template <>
@@ -248,7 +259,7 @@ struct ParameterPacker<Ret(Arg, Args...)>
     static void Pack(ParamBuffer &params, const Token *tokens, const TraceStringMap &strings)
     {
         PackParameter<Arg>(params, tokens[0], strings);
-        ParameterPacker<Ret(Args...)>::Pack(params, &tokens[1], strings);
+        ParameterPacker<Ret(Args...)>::Pack(params, &ANGLE_UNSAFE_TODO(tokens[1]), strings);
     }
 };
 
@@ -290,6 +301,7 @@ extern "C" {
 void SetupReplay();
 void ReplayFrame(uint32_t frameIndex);
 void ResetReplay();
+void SetupFirstFrame();
 ANGLE_REPLAY_EXPORT const char *GetSerializedContextState(uint32_t frameIndex);
 }  // extern "C"
 

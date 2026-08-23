@@ -9,6 +9,7 @@
 
 // Include zlib first, otherwise FAR gets defined elsewhere.
 #define USE_SYSTEM_ZLIB
+#include "common/unsafe_buffers.h"
 #include "compression_utils_portable.h"
 
 #include "libANGLE/MemoryProgramCache.h"
@@ -38,21 +39,22 @@ namespace
 // we believe is compressed data.
 static constexpr size_t kMaxUncompressedProgramSize = 10 * 1024 * 1024;
 
-void WriteProgramBindings(BinaryOutputStream *stream, const ProgramBindings &bindings)
+void AppendProgramBindings(angle::BlobCacheHasher &hasher, const ProgramBindings &bindings)
 {
     for (const auto &binding : bindings.getStableIterationMap())
     {
-        stream->writeString(binding.first);
-        stream->writeInt(binding.second);
+        hasher.Update(binding.first.data(), binding.first.size());
+        angle::UpdateHashWithValue(hasher, binding.second);
     }
 }
 
-void WriteProgramAliasedBindings(BinaryOutputStream *stream, const ProgramAliasedBindings &bindings)
+void AppendProgramAliasedBindings(angle::BlobCacheHasher &hasher,
+                                  const ProgramAliasedBindings &bindings)
 {
     for (const auto &binding : bindings.getStableIterationMap())
     {
-        stream->writeString(binding.first);
-        stream->writeInt(binding.second.location);
+        hasher.Update(binding.first.data(), binding.first.size());
+        angle::UpdateHashWithValue(hasher, binding.second.location);
     }
 }
 
@@ -66,8 +68,11 @@ void MemoryProgramCache::ComputeHash(const Context *context,
                                      const Program *program,
                                      egl::BlobCache::Key *hashOut)
 {
-    // Compute the program hash. Start with the shader hashes.
-    BinaryOutputStream hashStream;
+    // Compute the program hash.
+    angle::BlobCacheHasher hasher;
+    hasher.Init();
+
+    // Start with the shader hashes.
     ShaderBitSet shaders;
     for (ShaderType shaderType : AllShaderTypes())
     {
@@ -75,46 +80,52 @@ void MemoryProgramCache::ComputeHash(const Context *context,
         if (shader)
         {
             shaders.set(shaderType);
-            shader->writeShaderKey(&hashStream);
+            hasher.Update(&shader->getShaderHash(), sizeof(egl::BlobCache::Key));
         }
     }
-
-    hashStream.writeInt(shaders.bits());
+    angle::UpdateHashWithValue(hasher, shaders.bits());
 
     // Add some ANGLE metadata and Context properties, such as version and back-end.
-    hashStream.writeString(angle::GetANGLEShaderProgramVersion());
-    hashStream.writeInt(angle::GetANGLESHVersion());
-    hashStream.writeInt(context->getClientMajorVersion());
-    hashStream.writeInt(context->getClientMinorVersion());
-    hashStream.writeString(reinterpret_cast<const char *>(context->getString(GL_RENDERER)));
+    hasher.Update(angle::GetANGLEShaderProgramVersion(),
+                  angle::GetANGLEShaderProgramVersionHashSize());
+    angle::UpdateHashWithValue(hasher, angle::GetANGLESHVersion());
+    angle::UpdateHashWithValue(hasher, context->getClientVersion().getMajor());
+    angle::UpdateHashWithValue(hasher, context->getClientVersion().getMinor());
+    const char *rendererString = reinterpret_cast<const char *>(context->getString(GL_RENDERER));
+    ASSERT(rendererString != nullptr);
+    hasher.Update(rendererString, strlen(rendererString));
 
     // Hash pre-link program properties.
-    WriteProgramBindings(&hashStream, program->getAttributeBindings());
-    WriteProgramAliasedBindings(&hashStream, program->getUniformLocationBindings());
-    WriteProgramAliasedBindings(&hashStream, program->getFragmentOutputLocations());
-    WriteProgramAliasedBindings(&hashStream, program->getFragmentOutputIndexes());
+    AppendProgramBindings(hasher, program->getAttributeBindings());
+    AppendProgramAliasedBindings(hasher, program->getUniformLocationBindings());
+    AppendProgramAliasedBindings(hasher, program->getFragmentOutputLocations());
+    AppendProgramAliasedBindings(hasher, program->getFragmentOutputIndexes());
     for (const std::string &transformFeedbackVaryingName :
          program->getState().getTransformFeedbackVaryingNames())
     {
-        hashStream.writeString(transformFeedbackVaryingName);
+        hasher.Update(transformFeedbackVaryingName.data(), transformFeedbackVaryingName.size());
     }
-    hashStream.writeInt(program->getTransformFeedbackBufferMode());
+    angle::UpdateHashWithValue(hasher, program->getTransformFeedbackBufferMode());
 
     // Include the status of FrameCapture, which adds source strings to the binary
-    hashStream.writeBool(context->getShareGroup()->getFrameCaptureShared()->enabled());
+    angle::UpdateHashWithValue(hasher,
+                               context->getShareGroup()->getFrameCaptureShared()->enabled());
 
-    // Call the secure SHA hashing function.
-    const std::vector<uint8_t> &programKey = hashStream.getData();
-    angle::base::SHA1HashBytes(programKey.data(), programKey.size(), hashOut->data());
+    // Get the hash
+    ASSERT(hashOut);
+    hasher.Final();
+    ANGLE_UNSAFE_TODO(memcpy(hashOut->data(), hasher.Digest(), angle::kBlobCacheKeyLength));
 }
 
 angle::Result MemoryProgramCache::getProgram(const Context *context,
                                              Program *program,
                                              egl::BlobCache::Key *hashOut,
-                                             bool *successOut)
+                                             egl::CacheGetResult *resultOut)
 {
+    *resultOut = egl::CacheGetResult::NotFound;
+
     // If caching is effectively disabled, don't bother calculating the hash.
-    if (!mBlobCache.isCachingEnabled())
+    if (!mBlobCache.isCachingEnabled(context))
     {
         return angle::Result::Continue;
     }
@@ -122,7 +133,7 @@ angle::Result MemoryProgramCache::getProgram(const Context *context,
     ComputeHash(context, program, hashOut);
 
     angle::MemoryBuffer uncompressedData;
-    switch (mBlobCache.getAndDecompress(context->getScratchBuffer(), *hashOut,
+    switch (mBlobCache.getAndDecompress(context, context->getScratchBuffer(), *hashOut,
                                         kMaxUncompressedProgramSize, &uncompressedData))
     {
         case egl::BlobCache::GetAndDecompressResult::NotFound:
@@ -131,14 +142,20 @@ angle::Result MemoryProgramCache::getProgram(const Context *context,
         case egl::BlobCache::GetAndDecompressResult::DecompressFailure:
             ANGLE_PERF_WARNING(context->getState().getDebug(), GL_DEBUG_SEVERITY_LOW,
                                "Error decompressing program binary data fetched from cache.");
+            remove(*hashOut);
+            // Consider this blob "not found".  As far as the rest of the code is considered,
+            // corrupted cache might as well not have existed.
             return angle::Result::Continue;
 
-        case egl::BlobCache::GetAndDecompressResult::GetSuccess:
+        case egl::BlobCache::GetAndDecompressResult::Success:
             ANGLE_TRY(program->loadBinary(context, uncompressedData.data(),
-                                          static_cast<int>(uncompressedData.size()), successOut));
+                                          static_cast<int>(uncompressedData.size()), resultOut));
+
+            // Result is either Success or Rejected
+            ASSERT(*resultOut != egl::CacheGetResult::NotFound);
 
             // If cache load failed, evict the entry
-            if (!*successOut)
+            if (*resultOut == egl::CacheGetResult::Rejected)
             {
                 ANGLE_PERF_WARNING(context->getState().getDebug(), GL_DEBUG_SEVERITY_LOW,
                                    "Failed to load program binary from cache.");
@@ -169,17 +186,27 @@ angle::Result MemoryProgramCache::putProgram(const egl::BlobCache::Key &programH
                                              Program *program)
 {
     // If caching is effectively disabled, don't bother serializing the program.
-    if (!mBlobCache.isCachingEnabled())
+    if (!mBlobCache.isCachingEnabled(context))
     {
         return angle::Result::Continue;
     }
 
-    angle::MemoryBuffer serializedProgram;
-    ANGLE_TRY(program->serialize(context, &serializedProgram));
+    ANGLE_TRY(program->serialize(context));
+    const angle::MemoryBuffer &serializedProgram = program->getSerializedBinary();
+
+    if (serializedProgram.size() > kMaxUncompressedProgramSize)
+    {
+        std::ostringstream warningMessage;
+        warningMessage << "Program is too large to cache: ";
+        warningMessage << "program size: " << serializedProgram.size()
+                       << ", max size: " << kMaxUncompressedProgramSize;
+        ANGLE_PERF_WARNING(context->getState().getDebug(), GL_DEBUG_SEVERITY_LOW, "%s",
+                           warningMessage.str().c_str());
+        return angle::Result::Continue;
+    }
 
     angle::MemoryBuffer compressedData;
-    if (!egl::CompressBlobCacheData(serializedProgram.size(), serializedProgram.data(),
-                                    &compressedData))
+    if (!angle::CompressBlob(serializedProgram.size(), serializedProgram.data(), &compressedData))
     {
         ANGLE_PERF_WARNING(context->getState().getDebug(), GL_DEBUG_SEVERITY_LOW,
                            "Error compressing binary data.");
@@ -187,16 +214,18 @@ angle::Result MemoryProgramCache::putProgram(const egl::BlobCache::Key &programH
     }
 
     {
-        std::scoped_lock<std::mutex> lock(mBlobCache.getMutex());
-        // TODO: http://anglebug.com/7568
+        std::scoped_lock<angle::SimpleMutex> lock(mBlobCache.getMutex());
+        // TODO: http://anglebug.com/42266037
         // This was a workaround for Chrome until it added support for EGL_ANDROID_blob_cache,
-        // tracked by http://anglebug.com/2516. This issue has since been closed, but removing this
-        // still causes a test failure.
+        // tracked by http://anglebug.com/42261225. This issue has since been closed, but removing
+        // this still causes a test failure.
         auto *platform = ANGLEPlatformCurrent();
-        platform->cacheProgram(platform, programHash, compressedData.size(), compressedData.data());
+        angle::ProgramKeyType key = {};
+        ANGLE_UNSAFE_TODO(memcpy(key.data(), programHash.data(), angle::kBlobCacheKeyLength));
+        platform->cacheProgram(platform, key, compressedData.size(), compressedData.data());
     }
 
-    mBlobCache.put(programHash, std::move(compressedData));
+    mBlobCache.put(context, programHash, std::move(compressedData));
     return angle::Result::Continue;
 }
 
@@ -217,7 +246,7 @@ bool MemoryProgramCache::putBinary(const egl::BlobCache::Key &programHash,
     {
         return false;
     }
-    memcpy(newEntry.data(), binary, length);
+    ANGLE_UNSAFE_TODO(memcpy(newEntry.data(), binary, length));
 
     // Store the binary.
     mBlobCache.populate(programHash, std::move(newEntry));

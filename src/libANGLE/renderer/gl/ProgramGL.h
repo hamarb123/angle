@@ -42,12 +42,14 @@ class ProgramGL : public ProgramImpl
     angle::Result load(const gl::Context *context,
                        gl::BinaryInputStream *stream,
                        std::shared_ptr<LinkTask> *loadTaskOut,
-                       bool *successOut) override;
+                       egl::CacheGetResult *resultOut) override;
     void save(const gl::Context *context, gl::BinaryOutputStream *stream) override;
     void setBinaryRetrievableHint(bool retrievable) override;
     void setSeparable(bool separable) override;
 
     void prepareForLink(const gl::ShaderMap<ShaderImpl *> &shaders) override;
+    void prepareForPassthroughLink(
+        gl::ShaderMap<gl::SharedCompiledShaderState> *outAttachedShaders) override;
     angle::Result link(const gl::Context *contextImpl,
                        std::shared_ptr<LinkTask> *linkTaskOut) override;
     GLboolean validate(const gl::Caps &caps) override;
@@ -58,7 +60,7 @@ class ProgramGL : public ProgramImpl
 
     ANGLE_INLINE GLuint getProgramID() const { return mProgramID; }
 
-    angle::Result syncState(const gl::Context *context) override;
+    void onUniformBlockBinding(gl::UniformBlockIndex uniformBlockIndex) override;
 
     const ProgramExecutableGL *getExecutable() const
     {
@@ -76,12 +78,14 @@ class ProgramGL : public ProgramImpl
     friend class LinkTaskGL;
     friend class PostLinkGL;
 
-    void linkJobImpl(const gl::Extensions &extensions);
+    angle::Result passthroughLinkJobImpl(const gl::Extensions &extensions);
+    angle::Result linkJobImpl(const gl::Extensions &extensions);
     angle::Result postLinkJobImpl(const gl::ProgramLinkedResources &resources);
 
-    bool checkLinkStatus();
+    void attachShaders();
+    void applyTransformFeedbackState();
 
-    void reapplyUBOBindingsIfNeeded(const gl::Context *context);
+    bool checkLinkStatus();
 
     bool getUniformBlockSize(const std::string &blockName,
                              const std::string &blockMappedName,
@@ -98,7 +102,6 @@ class ProgramGL : public ProgramImpl
     void getAtomicCounterBufferSizeMap(std::map<int, unsigned int> *sizeMapOut) const;
 
     void linkResources(const gl::ProgramLinkedResources &resources);
-    void setUniformBlockBinding(GLuint uniformBlockIndex, GLuint uniformBlockBinding);
 
     const FunctionsGL *mFunctions;
     const angle::FeaturesGL &mFeatures;

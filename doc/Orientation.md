@@ -66,8 +66,8 @@ A basic guide to get up and running fixing bugs and performance issues in ANGLE.
 - Read up on testing with
   [dEQP on the ANGLE Wiki](https://chromium.googlesource.com/angle/angle/+/main/doc/dEQP.md).
 
-- Try running `angle_deqp_gles2_tests_no_gtest` with the flag
-  `--deqp-case=dEQP-GLES2.functional.negative_api.*` and load a test report in Cherry.
+- Try running `angle_deqp_gles2_tests` with the flag
+  `--gtest_filter=dEQP-GLES2.functional.negative_api.*` and load a test report in Cherry.
 
 - To use Cherry, browse to [http://localhost:8080/#/results](http://localhost:8080/#/results) and
   click '**Import existing batch**', loading `TestResults.qpa`.  Look for the qpa file in the
@@ -85,7 +85,7 @@ A basic guide to get up and running fixing bugs and performance issues in ANGLE.
   Right-click "Targets" and add `angle_perftests` as a Target Project.
 
 - Run `angle_perftests` with the flag `--gtest_filter=DrawCallPerfBenchmark.Run/d3d11_null` for
-  D3D11, `.../d3d9_null` for D3D9, `.../gl_null` for OpenGL and `.../vulkan_null` for Vulkan.
+  D3D11, `.../d3d9_null` for D3D9, and `.../vulkan_null` for Vulkan.
 
 - Make sure you close all open instances of Chrome, they use a lot of background CPU and GPU. In
   fact, close every process and application you can.

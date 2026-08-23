@@ -8,6 +8,7 @@
 // sampler object. Sampler objects store some state needed to sample textures.
 
 #include "libANGLE/Sampler.h"
+#include "libANGLE/Context.h"
 #include "libANGLE/angletypes.h"
 #include "libANGLE/renderer/GLImplFactory.h"
 #include "libANGLE/renderer/SamplerImpl.h"
@@ -30,6 +31,11 @@ Sampler::~Sampler()
 
 void Sampler::onDestroy(const Context *context)
 {
+    if (context && context->retainIdUntilObjectDestroyed())
+    {
+        context->onSamplerDestroy(this);
+    }
+
     if (mSampler)
     {
         mSampler->onDestroy(context);
@@ -140,6 +146,17 @@ GLfloat Sampler::getMaxLod() const
     return mState.getMaxLod();
 }
 
+void Sampler::setLodBias(const Context *context, GLfloat lodBias)
+{
+    mState.setLodBias(lodBias);
+    signalDirtyState();
+}
+
+GLfloat Sampler::getLodBias() const
+{
+    return mState.getLodBias();
+}
+
 void Sampler::setCompareMode(const Context *context, GLenum compareMode)
 {
     mState.setCompareMode(compareMode);
@@ -182,11 +199,6 @@ void Sampler::setBorderColor(const Context *context, const ColorGeneric &color)
 const ColorGeneric &Sampler::getBorderColor() const
 {
     return mState.getBorderColor();
-}
-
-const SamplerState &Sampler::getSamplerState() const
-{
-    return mState;
 }
 
 rx::SamplerImpl *Sampler::getImplementation() const

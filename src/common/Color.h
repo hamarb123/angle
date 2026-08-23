@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include "common/unsafe_buffers.h"
 
 #include "common/debug.h"
 
@@ -26,13 +27,18 @@ struct Color
     const T *data() const { return &red; }
     T *ptr() { return &red; }
 
-    static Color fromData(const T *data) { return Color(data[0], data[1], data[2], data[3]); }
+    static Color fromData(const T *data)
+    {
+        return ANGLE_UNSAFE_TODO(Color(data[0], data[1], data[2], data[3]));
+    }
     void writeData(T *data) const
     {
         data[0] = red;
-        data[1] = green;
-        data[2] = blue;
-        data[3] = alpha;
+        ANGLE_UNSAFE_TODO({
+            data[1] = green;
+            data[2] = blue;
+            data[3] = alpha;
+        })
     }
 
     T red;
@@ -46,6 +52,9 @@ bool operator==(const Color<T> &a, const Color<T> &b);
 
 template <typename T>
 bool operator!=(const Color<T> &a, const Color<T> &b);
+
+template <typename T>
+std::ostream &operator<<(std::ostream &os, const Color<T> &rect);
 
 typedef Color<float> ColorF;
 typedef Color<int> ColorI;

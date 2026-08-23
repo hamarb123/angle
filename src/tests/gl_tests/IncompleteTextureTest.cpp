@@ -295,9 +295,6 @@ TEST_P(IncompleteTextureTestES3, IntegerType)
     // through the routine which creates a incomplete texture in the ANGLE driver.
     ANGLE_SKIP_TEST_IF(IsAdreno() && IsAndroid() && IsOpenGLES());
 
-    // http://crbug.com/1168370
-    ANGLE_SKIP_TEST_IF(IsMac() && IsARM64() && IsOpenGL());
-
     constexpr char kVS[] = R"(#version 300 es
 in highp vec2 position;
 out highp vec2 texCoord;
@@ -348,9 +345,6 @@ TEST_P(IncompleteTextureTestES3, UnsignedIntegerType)
     // GLES backend on Adreno has a problem to create a incomplete texture, although it doesn't go
     // through the routine which creates a incomplete texture in the ANGLE driver.
     ANGLE_SKIP_TEST_IF(IsAdreno() && IsAndroid() && IsOpenGLES());
-
-    // http://crbug.com/1168370
-    ANGLE_SKIP_TEST_IF(IsMac() && IsARM64() && IsOpenGL());
 
     constexpr char kVS[] = R"(#version 300 es
 in highp vec2 position;
@@ -404,11 +398,8 @@ TEST_P(IncompleteTextureTestES3, ShadowType)
     // through the routine which creates a incomplete texture in the ANGLE driver.
     ANGLE_SKIP_TEST_IF(IsAdreno() && IsAndroid() && IsOpenGLES());
 
-    // http://crbug.com/1168370
-    ANGLE_SKIP_TEST_IF(IsMac() && IsARM64() && IsOpenGL());
-
-    // http://anglebug.com/5594
-    ANGLE_SKIP_TEST_IF(IsD3D11() || IsMac());
+    // http://anglebug.com/42264125
+    ANGLE_SKIP_TEST_IF(IsD3D11());
 
     constexpr char kVS[] = R"(#version 300 es
 in highp vec2 position;

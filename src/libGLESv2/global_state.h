@@ -9,6 +9,10 @@
 #ifndef LIBGLESV2_GLOBALSTATE_H_
 #define LIBGLESV2_GLOBALSTATE_H_
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "libANGLE/Context.h"
 #include "libANGLE/Debug.h"
 #include "libANGLE/Display.h"
@@ -17,7 +21,7 @@
 #include "libANGLE/features.h"
 #include "libANGLE/validationEGL.h"
 
-#if defined(ANGLE_PLATFORM_APPLE) || (ANGLE_PLATFORM_ANDROID)
+#if defined(ANGLE_PLATFORM_APPLE) || (ANGLE_PLATFORM_ANDROID) || defined(ANGLE_USE_ANDROID_TLS_SLOT)
 #    include "common/tls.h"
 #endif
 
@@ -40,6 +44,9 @@ void SetGlobalLastContext(gl::Context *context);
 Thread *GetCurrentThread();
 Debug *GetDebug();
 
+void SetEGLValidationEnabled(bool enabled);
+bool IsEGLValidationEnabled();
+
 // Sync the current context from Thread to global state.
 class [[nodiscard]] ScopedSyncCurrentContextFromThread
 {
@@ -61,10 +68,10 @@ ANGLE_INLINE ScopedContextMutexLock TryLockCurrentContext(Thread *thread)
 }
 
 // Tries to lock "ContextMutex" of the Context with "contextID" if it is valid.
-ANGLE_INLINE ScopedContextMutexLock TryLockContext(Display *display, gl::ContextID contextID)
+ANGLE_INLINE ScopedContextMutexLock TryLockContext(const Display *display, gl::ContextID contextID)
 {
     ASSERT(kIsContextMutexEnabled);
-    gl::Context *context = GetContextIfValid(display, contextID);
+    const gl::Context *context = GetContextIfValid(display, contextID);
     return context != nullptr ? ScopedContextMutexLock(context->getContextMutex())
                               : ScopedContextMutexLock();
 }
@@ -91,14 +98,33 @@ ANGLE_INLINE ScopedContextMutexLock LockAndTryMergeContextMutexes(gl::Context *c
 
 #if !defined(ANGLE_ENABLE_CONTEXT_MUTEX)
 #    define ANGLE_EGL_SCOPED_CONTEXT_LOCK(EP, THREAD, ...)
+#    define ANGLE_EGL_SCOPED_CONTEXT_LOCK_DPY(EP, THREAD, DPY, ...)
 #else
 #    define ANGLE_EGL_SCOPED_CONTEXT_LOCK(EP, THREAD, ...) \
         egl::ScopedContextMutexLock shareContextLock = GetContextLock_##EP(THREAD, ##__VA_ARGS__)
+#    define ANGLE_EGL_SCOPED_CONTEXT_LOCK_DPY(EP, THREAD, DPY, ...) \
+        egl::ScopedContextMutexLock shareContextLock =              \
+            GetContextLock_##EP(THREAD, DPY, ##__VA_ARGS__)
 #endif
 
 }  // namespace egl
 
-#define ANGLE_SCOPED_GLOBAL_LOCK() egl::ScopedGlobalMutexLock globalMutexLock
+#define ANGLE_SCOPED_GLOBAL_LOCK() egl::ScopedGlobalEGLMutexLock globalMutexLock
+#if ANGLE_CAPTURE_ENABLED
+#    define ANGLE_SCOPED_GLOBAL_EGL_AND_EGL_SYNC_LOCK() \
+        egl::ScopedGlobalEGLMutexLock globalMutexLock
+#else
+#    define ANGLE_SCOPED_GLOBAL_EGL_AND_EGL_SYNC_LOCK() \
+        egl::ScopedGlobalEGLMutexLock globalMutexLock;  \
+        egl::ScopedGlobalEGLSyncObjectMutexLock globalEGLSyncObjectMutexLock
+#endif
+
+#if ANGLE_CAPTURE_ENABLED
+#    define ANGLE_SCOPED_GLOBAL_EGL_SYNC_LOCK() egl::ScopedGlobalEGLMutexLock globalMutexLock
+#else
+#    define ANGLE_SCOPED_GLOBAL_EGL_SYNC_LOCK() \
+        egl::ScopedGlobalEGLSyncObjectMutexLock globalEGLSyncObjectMutexLock
+#endif
 
 namespace gl
 {
@@ -116,7 +142,7 @@ ANGLE_INLINE Context *GetGlobalContext()
 ANGLE_INLINE Context *GetValidGlobalContext()
 {
 #if defined(ANGLE_USE_ANDROID_TLS_SLOT)
-    // TODO: Replace this branch with a compile time flag (http://anglebug.com/4764)
+    // TODO: Replace this branch with a compile time flag (http://anglebug.com/42263361)
     if (angle::gUseAndroidOpenGLTlsSlot)
     {
         return static_cast<gl::Context *>(ANGLE_ANDROID_GET_GL_TLS()[angle::kAndroidOpenGLTlsSlot]);
@@ -130,9 +156,22 @@ ANGLE_INLINE Context *GetValidGlobalContext()
 #endif
 }
 
+ANGLE_INLINE Context *GetContext(GLeglDisplayANGLE dpy, GLeglContextANGLE ctx)
+{
+    egl::Display *dpyPacked = egl::PackParam<egl::Display *>(static_cast<EGLDisplay>(dpy));
+    ASSERT(dpyPacked);
+    ContextID ctxPacked = egl::PackParam<ContextID>(static_cast<EGLContext>(ctx));
+    return dpyPacked->getContext(ctxPacked);
+}
+
+ANGLE_INLINE Context *GetValidContext(GLeglDisplayANGLE dpy, GLeglContextANGLE ctx)
+{
+    Context *context = GetContext(dpy, ctx);
+    return (context && !context->isContextLost()) ? context : nullptr;
+}
+
 // Generate a context lost error on the context if it is non-null and lost.
-void GenerateContextLostErrorOnContext(Context *context);
-void GenerateContextLostErrorOnCurrentGlobalContext();
+void GenerateContextLostErrorOnCurrentGlobalContext(angle::EntryPoint entryPoint);
 
 #if defined(ANGLE_FORCE_CONTEXT_CHECK_EVERY_CALL)
 // TODO(b/177574181): This should be handled in a backend-specific way.
@@ -153,8 +192,8 @@ static ANGLE_INLINE void DirtyContextIfNeeded(Context *context)
 #    define SCOPED_EGL_IMAGE_SHARE_CONTEXT_LOCK(context, imageID) ANGLE_SCOPED_GLOBAL_LOCK()
 #else
 #    if defined(ANGLE_FORCE_CONTEXT_CHECK_EVERY_CALL)
-#        define SCOPED_SHARE_CONTEXT_LOCK(context)       \
-            egl::ScopedGlobalMutexLock shareContextLock; \
+#        define SCOPED_SHARE_CONTEXT_LOCK(context)          \
+            egl::ScopedGlobalEGLMutexLock shareContextLock; \
             DirtyContextIfNeeded(context)
 #        define SCOPED_EGL_IMAGE_SHARE_CONTEXT_LOCK(context, imageID) \
             SCOPED_SHARE_CONTEXT_LOCK(context)

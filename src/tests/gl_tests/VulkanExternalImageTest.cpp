@@ -51,7 +51,8 @@ const struct ImageFormatPair
     {VK_FORMAT_R8_UNORM, GL_ALPHA8_EXT},                         // ALPHA_8
     {VK_FORMAT_R8_UNORM, GL_LUMINANCE8_EXT},                     // LUMINANCE_8
     {VK_FORMAT_R8G8_UNORM, GL_RG8_EXT},                          // RG_88
-    {VK_FORMAT_R8G8B8A8_UNORM, GL_RGB8_OES},                     // RGBX_8888
+    {VK_FORMAT_R8G8B8_UNORM, GL_RGB8_OES},                       // RGB_888
+    {VK_FORMAT_R8G8B8A8_UNORM, GL_RGBX8_ANGLE},                  // RGBX_8888
 };
 
 struct OpaqueFdTraits
@@ -184,6 +185,48 @@ struct FuchsiaTraits
     }
 };
 
+VkImageLayout GetPostReleaseVulkanLayout(GLenum glLayout)
+{
+    switch (glLayout)
+    {
+        case GL_NONE:
+        case GL_LAYOUT_GENERAL_EXT:
+        default:
+            return VK_IMAGE_LAYOUT_GENERAL;
+        case GL_LAYOUT_COLOR_ATTACHMENT_EXT:
+            return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        case GL_LAYOUT_DEPTH_STENCIL_ATTACHMENT_EXT:
+            return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        case GL_LAYOUT_DEPTH_STENCIL_READ_ONLY_EXT:
+            return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        case GL_LAYOUT_SHADER_READ_ONLY_EXT:
+            return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        case GL_LAYOUT_TRANSFER_SRC_EXT:
+            return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        case GL_LAYOUT_TRANSFER_DST_EXT:
+            return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        case GL_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_EXT:
+            return VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL_KHR;
+        case GL_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_EXT:
+            return VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL_KHR;
+    }
+}
+
+void AdjustCreateFlags(bool useMemoryObjectFlags, VkImageCreateFlags *createFlags)
+{
+    // If the GL_ANGLE_memory_object_flags extension is not supported, GL assumes that the mutable
+    // create flag is specified.
+    if (!useMemoryObjectFlags)
+    {
+        *createFlags |= VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+    }
+
+    // The spec is not clear about the other create flags.
+}
+
+constexpr uint32_t kWidth  = 64;
+constexpr uint32_t kHeight = 64;
+
 }  // namespace
 
 class VulkanExternalImageTest : public ANGLETest<>
@@ -205,6 +248,12 @@ class VulkanExternalImageTest : public ANGLETest<>
     template <typename Traits>
     void runWaitSemaphoresRetainsContentTest(bool isSwiftshader, bool enableDebugLayers);
 };
+
+class VulkanExternalRGB565ImageTest : public VulkanExternalImageTest
+{};
+
+class VulkanExternalImageTestES31 : public VulkanExternalImageTest
+{};
 
 template <typename Traits>
 void RunShouldImportMemoryTest(VkImageCreateFlags createFlags,
@@ -327,6 +376,8 @@ void RunShouldClearTest(bool useMemoryObjectFlags,
     VulkanHelper helper;
     helper.initialize(isSwiftshader, enableDebugLayers);
 
+    AdjustCreateFlags(useMemoryObjectFlags, &createFlags);
+
     VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
     ANGLE_SKIP_TEST_IF(!Traits::CanCreateImage(helper, format, VK_IMAGE_TYPE_2D,
                                                VK_IMAGE_TILING_OPTIMAL, createFlags, usageFlags));
@@ -380,11 +431,92 @@ void RunShouldClearTest(bool useMemoryObjectFlags,
     vkFreeMemory(helper.getDevice(), deviceMemory, nullptr);
 }
 
+template <typename Traits>
+void RunShouldClearTestRGB565(bool useMemoryObjectFlags,
+                              VkImageCreateFlags createFlags,
+                              bool isSwiftshader,
+                              bool enableDebugLayers)
+{
+    ASSERT(EnsureGLExtensionEnabled(Traits::MemoryObjectExtension()));
+
+    VulkanHelper helper;
+    helper.initialize(isSwiftshader, enableDebugLayers);
+
+    VkImageUsageFlags usageFlags = kNoStorageImageUsageFlags;
+
+    AdjustCreateFlags(useMemoryObjectFlags, &createFlags);
+
+    VkFormat format = VK_FORMAT_R5G6B5_UNORM_PACK16;
+    ANGLE_SKIP_TEST_IF(!Traits::CanCreateImage(helper, format, VK_IMAGE_TYPE_2D,
+                                               VK_IMAGE_TILING_OPTIMAL, createFlags, usageFlags));
+
+    VkImage image                 = VK_NULL_HANDLE;
+    VkDeviceMemory deviceMemory   = VK_NULL_HANDLE;
+    VkDeviceSize deviceMemorySize = 0;
+
+    VkExtent3D extent = {1, 1, 1};
+    VkResult result   = Traits::CreateImage2D(&helper, format, createFlags, usageFlags, nullptr,
+                                              extent, &image, &deviceMemory, &deviceMemorySize);
+    EXPECT_EQ(result, VK_SUCCESS);
+
+    typename Traits::Handle memoryHandle = Traits::InvalidHandle();
+    result = Traits::ExportMemory(&helper, deviceMemory, &memoryHandle);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_NE(memoryHandle, Traits::InvalidHandle());
+
+    {
+        GLMemoryObject memoryObject;
+        GLint dedicatedMemory = GL_TRUE;
+        glMemoryObjectParameterivEXT(memoryObject, GL_DEDICATED_MEMORY_OBJECT_EXT,
+                                     &dedicatedMemory);
+        Traits::ImportMemory(memoryObject, deviceMemorySize, memoryHandle);
+
+        GLTexture texture;
+        glBindTexture(GL_TEXTURE_2D, texture);
+        if (useMemoryObjectFlags)
+        {
+            glTexStorageMemFlags2DANGLE(GL_TEXTURE_2D, 1, GL_RGB565, 1, 1, memoryObject, 0,
+                                        createFlags, usageFlags, nullptr);
+        }
+        else
+        {
+            glTexStorageMem2DEXT(GL_TEXTURE_2D, 1, GL_RGB565, 1, 1, memoryObject, 0);
+        }
+
+        GLFramebuffer framebuffer;
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+
+        glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
+        ASSERT_GL_NO_ERROR();
+
+        const uint16_t rgb565Cyan = 0x7FF;
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, &rgb565Cyan);
+        EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::cyan);
+        ASSERT_GL_NO_ERROR();
+
+        // Updating an RGB565 texture with unsigned byte is not supported in ES2 without the
+        // required extension.
+        if (EnsureGLExtensionEnabled("GL_OES_required_internalformat"))
+        {
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGB, GL_UNSIGNED_BYTE,
+                            &GLColorRGB::yellow);
+            EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::yellow);
+            ASSERT_GL_NO_ERROR();
+        }
+    }
+
+    vkDestroyImage(helper.getDevice(), image, nullptr);
+    vkFreeMemory(helper.getDevice(), deviceMemory, nullptr);
+}
+
 // Test creating and clearing a simple RGBA8 texture in an opaque fd.
 TEST_P(VulkanExternalImageTest, ShouldClearOpaqueFdRGBA8)
 {
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
-    // http://anglebug.com/4630
+    // http://anglebug.com/42263236
     ANGLE_SKIP_TEST_IF(IsAndroid() && IsOpenGL() && (IsPixel2() || IsPixel2XL()));
     RunShouldClearTest<OpaqueFdTraits>(false, kDefaultImageCreateFlags, kDefaultImageUsageFlags,
                                        isSwiftshader(), enableDebugLayers());
@@ -417,6 +549,26 @@ TEST_P(VulkanExternalImageTest, ShouldClearMutableNoStorageUsageOpaqueFdRGBA8)
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_memory_object_flags"));
     RunShouldClearTest<OpaqueFdTraits>(true, kMutableImageCreateFlags, kNoStorageImageUsageFlags,
                                        isSwiftshader(), enableDebugLayers());
+}
+
+// Test creating, clearing, and updating an RGB565 texture without STORAGE in an opaque fd.
+TEST_P(VulkanExternalRGB565ImageTest, ShouldClearOpaqueFdNoStorage)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
+    // http://anglebug.com/42263236
+    ANGLE_SKIP_TEST_IF(IsAndroid() && IsOpenGL() && (IsPixel2() || IsPixel2XL()));
+    RunShouldClearTestRGB565<OpaqueFdTraits>(false, kDefaultImageCreateFlags, isSwiftshader(),
+                                             enableDebugLayers());
+}
+
+// Test creating, clearing, and updating an RGB565 texture without STORAGE in an opaque fd using
+// GL_ANGLE_memory_object_flags.
+TEST_P(VulkanExternalRGB565ImageTest, ShouldClearOpaqueWithFlagsFdNoStorage)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_memory_object_flags"));
+    RunShouldClearTestRGB565<OpaqueFdTraits>(true, kDefaultImageCreateFlags, isSwiftshader(),
+                                             enableDebugLayers());
 }
 
 // Test creating and clearing a simple RGBA8 texture in a zircon vmo.
@@ -466,16 +618,12 @@ void RunTextureFormatCompatChromiumTest(bool useMemoryObjectFlags,
 {
     ASSERT(EnsureGLExtensionEnabled(Traits::MemoryObjectExtension()));
 
+    AdjustCreateFlags(useMemoryObjectFlags, &createFlags);
+
     VulkanHelper helper;
     helper.initialize(isSwiftshader, enableDebugLayers);
     for (const ImageFormatPair &format : kChromeFormats)
     {
-        // https://crbug.com/angleproject/5046
-        if ((format.vkFormat == VK_FORMAT_R4G4B4A4_UNORM_PACK16) && IsIntel())
-        {
-            continue;
-        }
-
         if (!Traits::CanCreateImage(helper, format.vkFormat, VK_IMAGE_TYPE_2D,
                                     VK_IMAGE_TILING_OPTIMAL, createFlags, usageFlags))
         {
@@ -489,6 +637,12 @@ void RunTextureFormatCompatChromiumTest(bool useMemoryObjectFlags,
 
         if (format.internalFormat == GL_RGB10_A2_EXT && !isES3 &&
             !IsGLExtensionEnabled("GL_EXT_texture_type_2_10_10_10_REV"))
+        {
+            continue;
+        }
+
+        if (format.internalFormat == GL_RGBX8_ANGLE &&
+            !IsGLExtensionEnabled("GL_ANGLE_rgbx_internal_format"))
         {
             continue;
         }
@@ -575,7 +729,7 @@ TEST_P(VulkanExternalImageTest, TextureFormatCompatChromiumMutableNoStorageFd)
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_memory_object_flags"));
 
-    // http://anglebug.com/5682
+    // http://anglebug.com/42264218
     ANGLE_SKIP_TEST_IF(IsLinux() && IsAMD() && IsVulkan());
 
     RunTextureFormatCompatChromiumTest<OpaqueFdTraits>(
@@ -633,6 +787,8 @@ void RunShouldClearWithSemaphoresTest(bool useMemoryObjectFlags,
 {
     ASSERT(EnsureGLExtensionEnabled(Traits::MemoryObjectExtension()));
     ASSERT(EnsureGLExtensionEnabled(Traits::SemaphoreExtension()));
+
+    AdjustCreateFlags(useMemoryObjectFlags, &createFlags);
 
     VulkanHelper helper;
     helper.initialize(isSwiftshader, enableDebugLayers);
@@ -706,7 +862,7 @@ void RunShouldClearWithSemaphoresTest(bool useMemoryObjectFlags,
         };
         constexpr uint32_t textureBarriersCount = std::extent<decltype(barrierTextures)>();
         const GLenum textureSrcLayouts[]        = {
-                   GL_LAYOUT_GENERAL_EXT,
+            GL_LAYOUT_GENERAL_EXT,
         };
         constexpr uint32_t textureSrcLayoutsCount = std::extent<decltype(textureSrcLayouts)>();
         static_assert(textureBarriersCount == textureSrcLayoutsCount,
@@ -762,10 +918,7 @@ TEST_P(VulkanExternalImageTest, ShouldClearOpaqueFdWithSemaphores)
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
 
-    // http://issuetracker.google.com/173004081
-    ANGLE_SKIP_TEST_IF(IsVulkan() && IsIntel() && IsLinux() &&
-                       getEGLWindow()->isFeatureEnabled(Feature::AsyncCommandQueue));
-    // http://anglebug.com/5383
+    // http://anglebug.com/42263923
     ANGLE_SKIP_TEST_IF(IsLinux() && IsAMD() && IsDesktopOpenGL());
 
     RunShouldClearWithSemaphoresTest<OpaqueFdTraits>(false, kDefaultImageCreateFlags,
@@ -781,10 +934,6 @@ TEST_P(VulkanExternalImageTest, ShouldClearOpaqueFdWithSemaphoresWithFlags)
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_memory_object_flags"));
 
-    // http://issuetracker.google.com/173004081
-    ANGLE_SKIP_TEST_IF(IsVulkan() && IsIntel() && IsLinux() &&
-                       getEGLWindow()->isFeatureEnabled(Feature::AsyncCommandQueue));
-
     RunShouldClearWithSemaphoresTest<OpaqueFdTraits>(true, kDefaultImageCreateFlags,
                                                      kDefaultImageUsageFlags, isSwiftshader(),
                                                      enableDebugLayers());
@@ -796,10 +945,6 @@ TEST_P(VulkanExternalImageTest, ShouldClearOpaqueFdWithSemaphoresNoStorage)
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_memory_object_flags"));
-
-    // http://issuetracker.google.com/173004081
-    ANGLE_SKIP_TEST_IF(IsVulkan() && IsIntel() && IsLinux() &&
-                       getEGLWindow()->isFeatureEnabled(Feature::AsyncCommandQueue));
 
     RunShouldClearWithSemaphoresTest<OpaqueFdTraits>(true, kDefaultImageCreateFlags,
                                                      kNoStorageImageUsageFlags, isSwiftshader(),
@@ -813,10 +958,6 @@ TEST_P(VulkanExternalImageTest, ShouldClearOpaqueFdWithSemaphoresMutableNoStorag
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_memory_object_flags"));
-
-    // http://issuetracker.google.com/173004081
-    ANGLE_SKIP_TEST_IF(IsVulkan() && IsIntel() && IsLinux() &&
-                       getEGLWindow()->isFeatureEnabled(Feature::AsyncCommandQueue));
 
     RunShouldClearWithSemaphoresTest<OpaqueFdTraits>(true, kMutableImageCreateFlags,
                                                      kNoStorageImageUsageFlags, isSwiftshader(),
@@ -942,7 +1083,7 @@ void VulkanExternalImageTest::runShouldDrawTest(bool isSwiftshader, bool enableD
         };
         constexpr uint32_t textureBarriersCount = std::extent<decltype(barrierTextures)>();
         const GLenum textureSrcLayouts[]        = {
-                   GL_LAYOUT_GENERAL_EXT,
+            GL_LAYOUT_GENERAL_EXT,
         };
         constexpr uint32_t textureSrcLayoutsCount = std::extent<decltype(textureSrcLayouts)>();
         static_assert(textureBarriersCount == textureSrcLayoutsCount,
@@ -1003,10 +1144,7 @@ TEST_P(VulkanExternalImageTest, ShouldDrawOpaqueFdWithSemaphores)
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
 
-    // http://issuetracker.google.com/173004081
-    ANGLE_SKIP_TEST_IF(IsVulkan() && IsIntel() && IsLinux() &&
-                       getEGLWindow()->isFeatureEnabled(Feature::AsyncCommandQueue));
-    // http://anglebug.com/5383
+    // http://anglebug.com/42263923
     ANGLE_SKIP_TEST_IF(IsLinux() && IsAMD() && IsDesktopOpenGL());
 
     runShouldDrawTest<OpaqueFdTraits>(isSwiftshader(), enableDebugLayers());
@@ -1060,7 +1198,7 @@ void VulkanExternalImageTest::runWaitSemaphoresRetainsContentTest(bool isSwiftsh
     VkDeviceMemory deviceMemory   = VK_NULL_HANDLE;
     VkDeviceSize deviceMemorySize = 0;
 
-    VkExtent3D extent = {1, 1, 1};
+    VkExtent3D extent = {kWidth, kHeight, 1};
     result =
         Traits::CreateImage2D(&helper, format, kDefaultImageCreateFlags, kDefaultImageUsageFlags,
                               nullptr, extent, &image, &deviceMemory, &deviceMemorySize);
@@ -1080,7 +1218,7 @@ void VulkanExternalImageTest::runWaitSemaphoresRetainsContentTest(bool isSwiftsh
 
         GLTexture texture;
         glBindTexture(GL_TEXTURE_2D, texture);
-        glTexStorageMem2DEXT(GL_TEXTURE_2D, 1, GL_RGBA8, 1, 1, memoryObject, 0);
+        glTexStorageMem2DEXT(GL_TEXTURE_2D, 1, GL_RGBA8, kWidth, kHeight, memoryObject, 0);
 
         GLSemaphore glAcquireSemaphore;
         Traits::ImportSemaphore(glAcquireSemaphore, acquireSemaphoreHandle);
@@ -1094,7 +1232,7 @@ void VulkanExternalImageTest::runWaitSemaphoresRetainsContentTest(bool isSwiftsh
         };
         constexpr uint32_t textureBarriersCount = std::extent<decltype(barrierTextures)>();
         const GLenum textureSrcLayouts[]        = {
-                   GL_LAYOUT_GENERAL_EXT,
+            GL_LAYOUT_GENERAL_EXT,
         };
         constexpr uint32_t textureSrcLayoutsCount = std::extent<decltype(textureSrcLayouts)>();
         static_assert(textureBarriersCount == textureSrcLayoutsCount,
@@ -1109,6 +1247,7 @@ void VulkanExternalImageTest::runWaitSemaphoresRetainsContentTest(bool isSwiftsh
 
         // Make the texture red.
         ANGLE_GL_PROGRAM(drawRed, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+        glViewport(0, 0, kWidth, kHeight);
         drawQuad(drawRed, essl1_shaders::PositionAttrib(), 0.0f);
         EXPECT_GL_NO_ERROR();
 
@@ -1148,7 +1287,7 @@ void VulkanExternalImageTest::runWaitSemaphoresRetainsContentTest(bool isSwiftsh
                                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                             vkReleaseSemaphore);
 
-        uint8_t pixels[4];
+        uint8_t pixels[4 * kWidth * kHeight];
         VkOffset3D offset = {};
         helper.readPixels(image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, format, offset, extent,
                           pixels, sizeof(pixels));
@@ -1157,6 +1296,11 @@ void VulkanExternalImageTest::runWaitSemaphoresRetainsContentTest(bool isSwiftsh
         EXPECT_EQ(0xFF, pixels[1]);
         EXPECT_EQ(0x00, pixels[2]);
         EXPECT_EQ(0xFF, pixels[3]);
+
+        EXPECT_EQ(0xFF, pixels[4]);
+        EXPECT_EQ(0xFF, pixels[5]);
+        EXPECT_EQ(0x00, pixels[6]);
+        EXPECT_EQ(0xFF, pixels[7]);
     }
 
     EXPECT_GL_NO_ERROR();
@@ -1174,10 +1318,7 @@ TEST_P(VulkanExternalImageTest, WaitSemaphoresRetainsContentOpaqueFd)
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
 
-    // http://issuetracker.google.com/173004081
-    ANGLE_SKIP_TEST_IF(IsVulkan() && IsIntel() && IsLinux() &&
-                       getEGLWindow()->isFeatureEnabled(Feature::AsyncCommandQueue));
-    // http://anglebug.com/5383
+    // http://anglebug.com/42263923
     ANGLE_SKIP_TEST_IF(IsLinux() && IsAMD() && IsDesktopOpenGL());
 
     runWaitSemaphoresRetainsContentTest<OpaqueFdTraits>(isSwiftshader(), enableDebugLayers());
@@ -1205,8 +1346,573 @@ TEST_P(VulkanExternalImageTest, ShouldSupportExternalHandlesFuchsia)
                                                kDefaultImageUsageFlags));
 }
 
-// Use this to select which configurations (e.g. which renderer, which GLES major version) these
-// tests should be run against.
-ANGLE_INSTANTIATE_TEST_ES2_AND_ES3(VulkanExternalImageTest);
+template <typename Traits>
+void RunPreInitializedOnGLImportTest(bool useMemoryObjectFlags,
+                                     VkImageTiling tiling,
+                                     bool isSwiftshader,
+                                     bool enableDebugLayers)
+{
+    ASSERT(EnsureGLExtensionEnabled(Traits::MemoryObjectExtension()));
+    ASSERT(EnsureGLExtensionEnabled(Traits::SemaphoreExtension()));
 
+    VkImageCreateFlags createFlags = kDefaultImageCreateFlags;
+    VkImageUsageFlags usageFlags   = kDefaultImageUsageFlags;
+
+    AdjustCreateFlags(useMemoryObjectFlags, &createFlags);
+
+    VulkanHelper helper;
+    helper.initialize(isSwiftshader, enableDebugLayers);
+
+    VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+    ANGLE_SKIP_TEST_IF(
+        !Traits::CanCreateImage(helper, format, VK_IMAGE_TYPE_2D, tiling, createFlags, usageFlags));
+    ANGLE_SKIP_TEST_IF(!Traits::CanCreateSemaphore(helper));
+
+    VkSemaphore vkAcquireSemaphore = VK_NULL_HANDLE;
+    VkResult result                = Traits::CreateSemaphore(&helper, &vkAcquireSemaphore);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_TRUE(vkAcquireSemaphore != VK_NULL_HANDLE);
+
+    VkSemaphore vkReleaseSemaphore = VK_NULL_HANDLE;
+    result                         = Traits::CreateSemaphore(&helper, &vkReleaseSemaphore);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_TRUE(vkReleaseSemaphore != VK_NULL_HANDLE);
+
+    typename Traits::Handle acquireSemaphoreHandle = Traits::InvalidHandle();
+    result = Traits::ExportSemaphore(&helper, vkAcquireSemaphore, &acquireSemaphoreHandle);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_NE(acquireSemaphoreHandle, Traits::InvalidHandle());
+
+    typename Traits::Handle releaseSemaphoreHandle = Traits::InvalidHandle();
+    result = Traits::ExportSemaphore(&helper, vkReleaseSemaphore, &releaseSemaphoreHandle);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_NE(releaseSemaphoreHandle, Traits::InvalidHandle());
+
+    VkImage image                 = VK_NULL_HANDLE;
+    VkDeviceMemory deviceMemory   = VK_NULL_HANDLE;
+    VkDeviceSize deviceMemorySize = 0;
+
+    VkExtent3D extent = {kWidth, kHeight, 1};
+    result = Traits::CreateImage2D(&helper, format, createFlags, usageFlags, nullptr, extent,
+                                   &image, &deviceMemory, &deviceMemorySize);
+    EXPECT_EQ(result, VK_SUCCESS);
+
+    // Initialize a pixel in the image
+    constexpr uint32_t kPixel = 0x12345678;
+    helper.writePixels(image, VK_IMAGE_LAYOUT_UNDEFINED, VK_FORMAT_R8G8B8A8_UNORM, {0, 0, 0},
+                       {1, 1, 1}, static_cast<const void *>(&kPixel), sizeof(kPixel));
+
+    typename Traits::Handle memoryHandle = Traits::InvalidHandle();
+    result = Traits::ExportMemory(&helper, deviceMemory, &memoryHandle);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_NE(memoryHandle, Traits::InvalidHandle());
+
+    {
+        GLMemoryObject memoryObject;
+        GLint dedicatedMemory = GL_TRUE;
+        glMemoryObjectParameterivEXT(memoryObject, GL_DEDICATED_MEMORY_OBJECT_EXT,
+                                     &dedicatedMemory);
+        Traits::ImportMemory(memoryObject, deviceMemorySize, memoryHandle);
+
+        GLTexture texture;
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        if (tiling == VK_IMAGE_TILING_LINEAR)
+        {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_TILING_EXT, GL_LINEAR_TILING_EXT);
+        }
+        if (useMemoryObjectFlags)
+        {
+            glTexStorageMemFlags2DANGLE(GL_TEXTURE_2D, 1, GL_RGBA8, kWidth, kHeight, memoryObject,
+                                        0, createFlags, usageFlags, nullptr);
+        }
+        else
+        {
+            glTexStorageMem2DEXT(GL_TEXTURE_2D, 1, GL_RGBA8, kWidth, kHeight, memoryObject, 0);
+        }
+
+        GLSemaphore glAcquireSemaphore;
+        Traits::ImportSemaphore(glAcquireSemaphore, acquireSemaphoreHandle);
+
+        // Note: writePixels leaves the image in TRANSFER_DST_OPTIMAL layout.
+        helper.releaseImageAndSignalSemaphore(image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                              vkAcquireSemaphore);
+
+        const GLuint barrierTexture   = texture;
+        const GLenum textureSrcLayout = GL_LAYOUT_COLOR_ATTACHMENT_EXT;
+        glWaitSemaphoreEXT(glAcquireSemaphore, 0, nullptr, 1, &barrierTexture, &textureSrcLayout);
+
+        GLFramebuffer framebuffer;
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+
+        // Readback the initialized pixel, ensure it contains the value written to it.
+        uint32_t pixel = 0u;
+        glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, &pixel);
+        EXPECT_EQ(pixel, kPixel);
+        EXPECT_GL_NO_ERROR();
+
+        GLSemaphore glReleaseSemaphore;
+        Traits::ImportSemaphore(glReleaseSemaphore, releaseSemaphoreHandle);
+
+        const GLenum textureDstLayout = GL_LAYOUT_TRANSFER_SRC_EXT;
+        glSignalSemaphoreEXT(glReleaseSemaphore, 0, nullptr, 1, &barrierTexture, &textureDstLayout);
+
+        helper.waitSemaphoreAndAcquireImage(image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                            vkReleaseSemaphore);
+    }
+
+    EXPECT_GL_NO_ERROR();
+
+    vkDeviceWaitIdle(helper.getDevice());
+    vkDestroyImage(helper.getDevice(), image, nullptr);
+    vkDestroySemaphore(helper.getDevice(), vkAcquireSemaphore, nullptr);
+    vkDestroySemaphore(helper.getDevice(), vkReleaseSemaphore, nullptr);
+    vkFreeMemory(helper.getDevice(), deviceMemory, nullptr);
+}
+
+// Test that texture storage created from VkImage memory can be considered pre-initialized in GL.
+TEST_P(VulkanExternalImageTest, PreInitializedOnGLImport)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
+
+    RunPreInitializedOnGLImportTest<OpaqueFdTraits>(false, VK_IMAGE_TILING_OPTIMAL, isSwiftshader(),
+                                                    enableDebugLayers());
+}
+
+// Test that texture storage created from VkImage memory can be considered pre-initialized in GL.
+// Uses linear tiling.
+TEST_P(VulkanExternalImageTest, PreInitializedOnGLImportLinear)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
+
+    RunPreInitializedOnGLImportTest<OpaqueFdTraits>(false, VK_IMAGE_TILING_LINEAR, isSwiftshader(),
+                                                    enableDebugLayers());
+}
+
+// Test that texture storage created from VkImage memory can be considered pre-initialized in GL,
+// using GL_ANGLE_memory_object_flags.
+TEST_P(VulkanExternalImageTest, PreInitializedOnGLImportWithFlags)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_memory_object_flags"));
+
+    RunPreInitializedOnGLImportTest<OpaqueFdTraits>(true, VK_IMAGE_TILING_OPTIMAL, isSwiftshader(),
+                                                    enableDebugLayers());
+}
+
+// Test that texture storage created from VkImage memory can be considered pre-initialized in GL,
+// using GL_ANGLE_memory_object_flags.  Uses linear tiling.
+TEST_P(VulkanExternalImageTest, PreInitializedOnGLImportLinearWithFlags)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_memory_object_flags"));
+
+    RunPreInitializedOnGLImportTest<OpaqueFdTraits>(true, VK_IMAGE_TILING_LINEAR, isSwiftshader(),
+                                                    enableDebugLayers());
+}
+
+// Test importing a non-renderable texture, using GL_ANGLE_memory_object_flags.
+TEST_P(VulkanExternalImageTest, NonRenderableWithFlags)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_ANGLE_memory_object_flags"));
+
+    using Traits = OpaqueFdTraits;
+
+    ASSERT(EnsureGLExtensionEnabled(Traits::MemoryObjectExtension()));
+    ASSERT(EnsureGLExtensionEnabled(Traits::SemaphoreExtension()));
+
+    // The format that is used by this test, RGBA4, is not necessarily renderable.  This test
+    // ensures ANGLE does not attempt to fall back to RGBA8.
+    VkImageCreateFlags createFlags = kDefaultImageCreateFlags;
+    VkImageUsageFlags usageFlags   = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+    AdjustCreateFlags(true, &createFlags);
+
+    VulkanHelper helper;
+    helper.initialize(isSwiftshader(), enableDebugLayers());
+
+    const VkFormat format = VK_FORMAT_R4G4B4A4_UNORM_PACK16;
+    ANGLE_SKIP_TEST_IF(!Traits::CanCreateImage(helper, format, VK_IMAGE_TYPE_2D,
+                                               VK_IMAGE_TILING_OPTIMAL, createFlags, usageFlags));
+    ANGLE_SKIP_TEST_IF(!Traits::CanCreateSemaphore(helper));
+
+    VkSemaphore vkAcquireSemaphore = VK_NULL_HANDLE;
+    VkResult result                = Traits::CreateSemaphore(&helper, &vkAcquireSemaphore);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_TRUE(vkAcquireSemaphore != VK_NULL_HANDLE);
+
+    VkSemaphore vkReleaseSemaphore = VK_NULL_HANDLE;
+    result                         = Traits::CreateSemaphore(&helper, &vkReleaseSemaphore);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_TRUE(vkReleaseSemaphore != VK_NULL_HANDLE);
+
+    typename Traits::Handle acquireSemaphoreHandle = Traits::InvalidHandle();
+    result = Traits::ExportSemaphore(&helper, vkAcquireSemaphore, &acquireSemaphoreHandle);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_NE(acquireSemaphoreHandle, Traits::InvalidHandle());
+
+    typename Traits::Handle releaseSemaphoreHandle = Traits::InvalidHandle();
+    result = Traits::ExportSemaphore(&helper, vkReleaseSemaphore, &releaseSemaphoreHandle);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_NE(releaseSemaphoreHandle, Traits::InvalidHandle());
+
+    VkImage image                 = VK_NULL_HANDLE;
+    VkDeviceMemory deviceMemory   = VK_NULL_HANDLE;
+    VkDeviceSize deviceMemorySize = 0;
+
+    VkExtent3D extent = {kWidth, kHeight, 1};
+    result = Traits::CreateImage2D(&helper, format, createFlags, usageFlags, nullptr, extent,
+                                   &image, &deviceMemory, &deviceMemorySize);
+    EXPECT_EQ(result, VK_SUCCESS);
+
+    // Initialize the image
+    const std::vector<uint16_t> kPixels(kWidth * kHeight, 0x730F);
+    helper.writePixels(image, VK_IMAGE_LAYOUT_UNDEFINED, VK_FORMAT_R4G4B4A4_UNORM_PACK16, {0, 0, 0},
+                       extent, kPixels.data(), kWidth * kHeight * sizeof(uint16_t));
+
+    typename Traits::Handle memoryHandle = Traits::InvalidHandle();
+    result = Traits::ExportMemory(&helper, deviceMemory, &memoryHandle);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_NE(memoryHandle, Traits::InvalidHandle());
+
+    {
+        GLMemoryObject memoryObject;
+        GLint dedicatedMemory = GL_TRUE;
+        glMemoryObjectParameterivEXT(memoryObject, GL_DEDICATED_MEMORY_OBJECT_EXT,
+                                     &dedicatedMemory);
+        Traits::ImportMemory(memoryObject, deviceMemorySize, memoryHandle);
+
+        GLTexture texture;
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexStorageMemFlags2DANGLE(GL_TEXTURE_2D, 1, GL_RGBA4, kWidth, kHeight, memoryObject, 0,
+                                    createFlags, usageFlags, nullptr);
+
+        GLSemaphore glAcquireSemaphore;
+        Traits::ImportSemaphore(glAcquireSemaphore, acquireSemaphoreHandle);
+
+        // Note: writePixels leaves the image in TRANSFER_DST_OPTIMAL layout.
+        helper.releaseImageAndSignalSemaphore(image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                              vkAcquireSemaphore);
+
+        const GLuint barrierTexture   = texture;
+        const GLenum textureSrcLayout = GL_LAYOUT_SHADER_READ_ONLY_EXT;
+        glWaitSemaphoreEXT(glAcquireSemaphore, 0, nullptr, 1, &barrierTexture, &textureSrcLayout);
+
+        // Sample from the texture and verify color.
+        ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Texture2D(), essl1_shaders::fs::Texture2D());
+        drawQuad(program, std::string(essl1_shaders::PositionAttrib()), 0.0f);
+        EXPECT_PIXEL_COLOR_NEAR(0, 0, GLColor(127, 63, 0, 255), 16);
+        EXPECT_GL_NO_ERROR();
+
+        GLSemaphore glReleaseSemaphore;
+        Traits::ImportSemaphore(glReleaseSemaphore, releaseSemaphoreHandle);
+
+        const GLenum textureDstLayout = GL_LAYOUT_TRANSFER_SRC_EXT;
+        glSignalSemaphoreEXT(glReleaseSemaphore, 0, nullptr, 1, &barrierTexture, &textureDstLayout);
+
+        helper.waitSemaphoreAndAcquireImage(image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                            vkReleaseSemaphore);
+    }
+
+    EXPECT_GL_NO_ERROR();
+
+    vkDeviceWaitIdle(helper.getDevice());
+    vkDestroyImage(helper.getDevice(), image, nullptr);
+    vkDestroySemaphore(helper.getDevice(), vkAcquireSemaphore, nullptr);
+    vkDestroySemaphore(helper.getDevice(), vkReleaseSemaphore, nullptr);
+    vkFreeMemory(helper.getDevice(), deviceMemory, nullptr);
+}
+
+template <typename Traits>
+void RunUninitializedOnGLImportTest(bool useMemoryObjectFlags,
+                                    std::function<GLenum(GLuint)> useTexture,
+                                    const uint32_t *expectInVulkan,
+                                    bool isSwiftshader,
+                                    bool enableDebugLayers)
+{
+    ASSERT(EnsureGLExtensionEnabled(Traits::MemoryObjectExtension()));
+    ASSERT(EnsureGLExtensionEnabled(Traits::SemaphoreExtension()));
+
+    VkImageCreateFlags createFlags = kDefaultImageCreateFlags;
+    VkImageUsageFlags usageFlags   = kDefaultImageUsageFlags;
+
+    AdjustCreateFlags(useMemoryObjectFlags, &createFlags);
+
+    VulkanHelper helper;
+    helper.initialize(isSwiftshader, enableDebugLayers);
+
+    VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+    ANGLE_SKIP_TEST_IF(!Traits::CanCreateImage(helper, format, VK_IMAGE_TYPE_2D,
+                                               VK_IMAGE_TILING_OPTIMAL, createFlags, usageFlags));
+    ANGLE_SKIP_TEST_IF(!Traits::CanCreateSemaphore(helper));
+
+    VkSemaphore vkAcquireSemaphore = VK_NULL_HANDLE;
+    VkResult result                = Traits::CreateSemaphore(&helper, &vkAcquireSemaphore);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_TRUE(vkAcquireSemaphore != VK_NULL_HANDLE);
+
+    VkSemaphore vkReleaseSemaphore = VK_NULL_HANDLE;
+    result                         = Traits::CreateSemaphore(&helper, &vkReleaseSemaphore);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_TRUE(vkReleaseSemaphore != VK_NULL_HANDLE);
+
+    typename Traits::Handle acquireSemaphoreHandle = Traits::InvalidHandle();
+    result = Traits::ExportSemaphore(&helper, vkAcquireSemaphore, &acquireSemaphoreHandle);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_NE(acquireSemaphoreHandle, Traits::InvalidHandle());
+
+    typename Traits::Handle releaseSemaphoreHandle = Traits::InvalidHandle();
+    result = Traits::ExportSemaphore(&helper, vkReleaseSemaphore, &releaseSemaphoreHandle);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_NE(releaseSemaphoreHandle, Traits::InvalidHandle());
+
+    VkImage image                 = VK_NULL_HANDLE;
+    VkDeviceMemory deviceMemory   = VK_NULL_HANDLE;
+    VkDeviceSize deviceMemorySize = 0;
+
+    VkExtent3D extent = {kWidth, kHeight, 1};
+    result = Traits::CreateImage2D(&helper, format, createFlags, usageFlags, nullptr, extent,
+                                   &image, &deviceMemory, &deviceMemorySize);
+    EXPECT_EQ(result, VK_SUCCESS);
+
+    typename Traits::Handle memoryHandle = Traits::InvalidHandle();
+    result = Traits::ExportMemory(&helper, deviceMemory, &memoryHandle);
+    EXPECT_EQ(result, VK_SUCCESS);
+    EXPECT_NE(memoryHandle, Traits::InvalidHandle());
+
+    {
+        GLMemoryObject memoryObject;
+        GLint dedicatedMemory = GL_TRUE;
+        glMemoryObjectParameterivEXT(memoryObject, GL_DEDICATED_MEMORY_OBJECT_EXT,
+                                     &dedicatedMemory);
+        Traits::ImportMemory(memoryObject, deviceMemorySize, memoryHandle);
+
+        GLTexture texture;
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        if (useMemoryObjectFlags)
+        {
+            glTexStorageMemFlags2DANGLE(GL_TEXTURE_2D, 1, GL_RGBA8, kWidth, kHeight, memoryObject,
+                                        0, createFlags, usageFlags, nullptr);
+        }
+        else
+        {
+            glTexStorageMem2DEXT(GL_TEXTURE_2D, 1, GL_RGBA8, kWidth, kHeight, memoryObject, 0);
+        }
+
+        GLSemaphore glAcquireSemaphore;
+        Traits::ImportSemaphore(glAcquireSemaphore, acquireSemaphoreHandle);
+
+        // Submit the semaphore without touching the image
+        helper.signalSemaphore(vkAcquireSemaphore);
+
+        const GLuint barrierTexture   = texture;
+        const GLenum textureSrcLayout = GL_NONE;
+        glWaitSemaphoreEXT(glAcquireSemaphore, 0, nullptr, 1, &barrierTexture, &textureSrcLayout);
+
+        GLSemaphore glReleaseSemaphore;
+        Traits::ImportSemaphore(glReleaseSemaphore, releaseSemaphoreHandle);
+
+        const GLenum textureDstLayout = useTexture(texture);
+        glSignalSemaphoreEXT(glReleaseSemaphore, 0, nullptr, 1, &barrierTexture, &textureDstLayout);
+
+        const VkImageLayout imageLayout = GetPostReleaseVulkanLayout(textureDstLayout);
+        helper.waitSemaphoreAndAcquireImage(
+            image, imageLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, vkReleaseSemaphore);
+    }
+
+    EXPECT_GL_NO_ERROR();
+
+    // Verify the contents of the image from the Vulkan side too if needed
+    if (expectInVulkan != nullptr)
+    {
+        uint8_t pixels[4];
+        const VkOffset3D offset     = {};
+        const VkExtent3D readExtent = {1, 1, 1};
+        helper.readPixels(image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_FORMAT_R8G8B8A8_UNORM,
+                          offset, readExtent, pixels, sizeof(pixels));
+
+        const uint32_t pixel = pixels[0] | pixels[1] << 8 | pixels[2] << 16 | pixels[3] << 24;
+
+        EXPECT_EQ(pixel, *expectInVulkan);
+    }
+
+    vkDeviceWaitIdle(helper.getDevice());
+    vkDestroyImage(helper.getDevice(), image, nullptr);
+    vkDestroySemaphore(helper.getDevice(), vkAcquireSemaphore, nullptr);
+    vkDestroySemaphore(helper.getDevice(), vkReleaseSemaphore, nullptr);
+    vkFreeMemory(helper.getDevice(), deviceMemory, nullptr);
+}
+
+// Test that texture storage created from VkImage memory can be imported as uninitialized in GL.
+TEST_P(VulkanExternalImageTest, UninitializedOnGLImport)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
+
+    constexpr uint32_t kExpect = 0xFF0000FF;
+
+    auto render = [kExpect](GLuint texture) {
+        GLFramebuffer framebuffer;
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+
+        glClearColor(1, 0, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        uint32_t pixel = 0u;
+        glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, &pixel);
+        EXPECT_GL_NO_ERROR();
+
+        EXPECT_EQ(pixel, kExpect);
+        EXPECT_GL_NO_ERROR();
+
+        return GL_LAYOUT_TRANSFER_SRC_EXT;
+    };
+
+    RunUninitializedOnGLImportTest<OpaqueFdTraits>(false, render, &kExpect, isSwiftshader(),
+                                                   enableDebugLayers());
+}
+
+// Test that texture storage created from VkImage memory can be imported as uninitialized in GL and
+// released without being touched.
+TEST_P(VulkanExternalImageTest, UninitializedOnGLImportAndExport)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
+
+    auto doNothing = [](GLuint) { return GL_NONE; };
+
+    RunUninitializedOnGLImportTest<OpaqueFdTraits>(false, doNothing, nullptr, isSwiftshader(),
+                                                   enableDebugLayers());
+}
+
+// Test that texture storage created from VkImage memory can be imported as uninitialized in GL and
+// then used as the target of a copy.
+TEST_P(VulkanExternalImageTest, UninitializedOnGLImportAndCopy)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
+
+    constexpr uint32_t kExpect = 0xFF00FF00;
+
+    auto copy = [kExpect](GLuint texture) {
+        std::vector<GLColor> initData(kWidth * kHeight, GLColor::green);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
+                        initData.data());
+
+        GLFramebuffer framebuffer;
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+
+        uint32_t pixel = 0u;
+        glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, &pixel);
+        EXPECT_GL_NO_ERROR();
+
+        EXPECT_EQ(pixel, kExpect);
+        EXPECT_GL_NO_ERROR();
+
+        return GL_LAYOUT_TRANSFER_SRC_EXT;
+    };
+
+    RunUninitializedOnGLImportTest<OpaqueFdTraits>(false, copy, &kExpect, isSwiftshader(),
+                                                   enableDebugLayers());
+}
+
+// Test that texture storage created from VkImage memory can be imported as uninitialized in GL and
+// then used as sampler.  Because the image is uninitialized, sampled results would be garbage, so
+// this test is primarily ensuring no validation errors are generated.
+TEST_P(VulkanExternalImageTest, UninitializedOnGLImportAndSample)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
+
+    auto sample = [this](GLuint texture) {
+        GLProgram program;
+        program.makeRaster(essl1_shaders::vs::Texture2D(), essl1_shaders::fs::Texture2D());
+        drawQuad(program, std::string(essl1_shaders::PositionAttrib()), 0.0f);
+        EXPECT_GL_NO_ERROR();
+
+        return GL_LAYOUT_SHADER_READ_ONLY_EXT;
+    };
+
+    RunUninitializedOnGLImportTest<OpaqueFdTraits>(false, sample, nullptr, isSwiftshader(),
+                                                   enableDebugLayers());
+}
+
+// Test that texture storage created from VkImage memory can be imported as uninitialized in GL and
+// then used as storage image.
+TEST_P(VulkanExternalImageTestES31, UninitializedOnGLImportAndStorageWrite)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_memory_object_fd"));
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_EXT_semaphore_fd"));
+
+    constexpr uint32_t kExpect = 0xFF00FFFF;
+
+    auto storageWrite = [kExpect](GLuint texture) {
+        constexpr char kCS[] = R"(#version 310 es
+layout(local_size_x=8, local_size_y=8) in;
+layout(rgba8) uniform highp writeonly image2D img;
+void main()
+{
+    imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(1, 1, 0, 1));
+})";
+
+        GLProgram program;
+        program.makeCompute(kCS);
+        glUseProgram(program);
+
+        glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
+        glDispatchCompute(kWidth / 8, kHeight / 8, 1);
+        EXPECT_GL_NO_ERROR();
+
+        glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
+
+        GLFramebuffer framebuffer;
+        glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+
+        uint32_t pixel = 0u;
+        glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, &pixel);
+        EXPECT_GL_NO_ERROR();
+
+        EXPECT_EQ(pixel, kExpect);
+        EXPECT_GL_NO_ERROR();
+
+        return GL_LAYOUT_TRANSFER_SRC_EXT;
+    };
+
+    RunUninitializedOnGLImportTest<OpaqueFdTraits>(false, storageWrite, &kExpect, isSwiftshader(),
+                                                   enableDebugLayers());
+}
+
+ANGLE_INSTANTIATE_TEST_ES2_AND_ES3_AND(VulkanExternalImageTest,
+                                       ES3_VULKAN().enable(Feature::ForceRenderableFallbackFormat));
+ANGLE_INSTANTIATE_TEST_ES2_AND_ES3_AND(
+    VulkanExternalRGB565ImageTest,
+    ES3_VULKAN_SWIFTSHADER().enable(Feature::PreferBGR565ToRGB565));
+ANGLE_INSTANTIATE_TEST_ES31_AND(VulkanExternalImageTestES31,
+                                ES31_VULKAN().enable(Feature::ForceRenderableFallbackFormat));
 }  // namespace angle

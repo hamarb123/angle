@@ -8,9 +8,10 @@
 //
 
 #include "libANGLE/renderer/vulkan/MemoryTracking.h"
+#include "common/unsafe_buffers.h"
 
 #include "common/debug.h"
-#include "libANGLE/renderer/vulkan/RendererVk.h"
+#include "libANGLE/renderer/vulkan/vk_renderer.h"
 
 // Consts
 namespace
@@ -57,7 +58,7 @@ void OutputMemoryLogStream(std::stringstream &outStream, vk::MemoryLogSeverity s
 
 // Check for currently allocated memory. It is used at the end of the renderer object and when
 // there is an allocation error (from ANGLE_VK_TRY()).
-void CheckForCurrentMemoryAllocations(RendererVk *renderer, vk::MemoryLogSeverity severity)
+void CheckForCurrentMemoryAllocations(vk::Renderer *renderer, vk::MemoryLogSeverity severity)
 {
     if (kTrackMemoryAllocationSizes)
     {
@@ -71,7 +72,7 @@ void CheckForCurrentMemoryAllocations(RendererVk *renderer, vk::MemoryLogSeverit
             std::stringstream outStream;
 
             outStream << "Currently allocated size for memory allocation type ("
-                      << vk::kMemoryAllocationTypeMessage[i] << "): "
+                      << ANGLE_UNSAFE_TODO(vk::kMemoryAllocationTypeMessage[i]) << "): "
                       << renderer->getMemoryAllocationTracker()->getActiveMemoryAllocationsSize(i)
                       << " | Count: "
                       << renderer->getMemoryAllocationTracker()->getActiveMemoryAllocationsCount(i)
@@ -97,7 +98,7 @@ void CheckForCurrentMemoryAllocations(RendererVk *renderer, vk::MemoryLogSeverit
 }
 
 // In case of an allocation error, log pending memory allocation if the size in non-zero.
-void LogPendingMemoryAllocation(RendererVk *renderer, vk::MemoryLogSeverity severity)
+void LogPendingMemoryAllocation(vk::Renderer *renderer, vk::MemoryLogSeverity severity)
 {
     if (!kTrackMemoryAllocationSizes)
     {
@@ -117,7 +118,7 @@ void LogPendingMemoryAllocation(RendererVk *renderer, vk::MemoryLogSeverity seve
         std::stringstream outStream;
 
         outStream << "Pending allocation size for memory allocation type ("
-                  << vk::kMemoryAllocationTypeMessage[ToUnderlying(allocInfo)]
+                  << ANGLE_UNSAFE_TODO(vk::kMemoryAllocationTypeMessage[ToUnderlying(allocInfo)])
                   << ") for heap index " << memoryHeapIndex << " (type index " << memoryTypeIndex
                   << "): " << allocSize;
 
@@ -126,7 +127,7 @@ void LogPendingMemoryAllocation(RendererVk *renderer, vk::MemoryLogSeverity seve
     }
 }
 
-void LogMemoryHeapStats(RendererVk *renderer, vk::MemoryLogSeverity severity)
+void LogMemoryHeapStats(vk::Renderer *renderer, vk::MemoryLogSeverity severity)
 {
     if (!kTrackMemoryAllocationSizes)
     {
@@ -151,7 +152,7 @@ void LogMemoryHeapStats(RendererVk *renderer, vk::MemoryLogSeverity severity)
         vk::AddToPNextChain(&memoryProperties, &memoryBudgetProperties);
     }
 
-    vkGetPhysicalDeviceMemoryProperties2(renderer->getPhysicalDevice(), &memoryProperties);
+    VK_CALL(vkGetPhysicalDeviceMemoryProperties2, renderer->getPhysicalDevice(), &memoryProperties);
 
     // Add memory heap information to the stream.
     outStream << "Memory heap info" << std::endl;
@@ -159,10 +160,11 @@ void LogMemoryHeapStats(RendererVk *renderer, vk::MemoryLogSeverity severity)
     outStream << std::endl << "* Available memory heaps:" << std::endl;
     for (uint32_t i = 0; i < memoryProperties.memoryProperties.memoryHeapCount; i++)
     {
-        outStream << std::dec << i
-                  << " | Heap size: " << memoryProperties.memoryProperties.memoryHeaps[i].size
+        outStream << std::dec << i << " | Heap size: "
+                  << ANGLE_UNSAFE_TODO(memoryProperties.memoryProperties.memoryHeaps[i]).size
                   << " | Flags: 0x" << std::hex
-                  << memoryProperties.memoryProperties.memoryHeaps[i].flags << std::endl;
+                  << ANGLE_UNSAFE_TODO(memoryProperties.memoryProperties.memoryHeaps[i]).flags
+                  << std::endl;
     }
 
     if (renderer->getFeatures().supportsMemoryBudget.enabled)
@@ -170,18 +172,22 @@ void LogMemoryHeapStats(RendererVk *renderer, vk::MemoryLogSeverity severity)
         outStream << std::endl << "* Available memory budget and usage per heap:" << std::endl;
         for (uint32_t i = 0; i < memoryProperties.memoryProperties.memoryHeapCount; i++)
         {
-            outStream << std::dec << i << " | Heap budget: " << memoryBudgetProperties.heapBudget[i]
-                      << " | Heap usage: " << memoryBudgetProperties.heapUsage[i] << std::endl;
+            outStream << std::dec << i << " | Heap budget: "
+                      << ANGLE_UNSAFE_TODO(memoryBudgetProperties.heapBudget[i])
+                      << " | Heap usage: " << ANGLE_UNSAFE_TODO(memoryBudgetProperties.heapUsage[i])
+                      << std::endl;
         }
     }
 
     outStream << std::endl << "* Available memory types:" << std::endl;
     for (uint32_t i = 0; i < memoryProperties.memoryProperties.memoryTypeCount; i++)
     {
-        outStream << std::dec << i
-                  << " | Heap index: " << memoryProperties.memoryProperties.memoryTypes[i].heapIndex
-                  << " | Property flags: 0x" << std::hex
-                  << memoryProperties.memoryProperties.memoryTypes[i].propertyFlags << std::endl;
+        outStream
+            << std::dec << i << " | Heap index: "
+            << ANGLE_UNSAFE_TODO(memoryProperties.memoryProperties.memoryTypes[i]).heapIndex
+            << " | Property flags: 0x" << std::hex
+            << ANGLE_UNSAFE_TODO(memoryProperties.memoryProperties.memoryTypes[i]).propertyFlags
+            << std::endl;
     }
 
     // Output the log stream based on the level of severity.
@@ -189,7 +195,7 @@ void LogMemoryHeapStats(RendererVk *renderer, vk::MemoryLogSeverity severity)
 }
 }  // namespace
 
-MemoryAllocationTracker::MemoryAllocationTracker(RendererVk *renderer)
+MemoryAllocationTracker::MemoryAllocationTracker(vk::Renderer *renderer)
     : mRenderer(renderer), mMemoryAllocationID(0)
 {}
 
@@ -249,7 +255,7 @@ void MemoryAllocationTracker::onMemoryAllocImpl(vk::MemoryAllocationType allocTy
     {
         // If enabled (debug layers), we keep more details in the memory tracker, such as handle,
         // and log the action to the output.
-        std::unique_lock<std::mutex> lock(mMemoryAllocationMutex);
+        std::unique_lock<angle::SimpleMutex> lock(mMemoryAllocationMutex);
 
         uint32_t allocTypeIndex = ToUnderlying(allocType);
         uint32_t memoryHeapIndex =
@@ -273,7 +279,7 @@ void MemoryAllocationTracker::onMemoryAllocImpl(vk::MemoryAllocationType allocTy
 
         INFO() << "Memory allocation: (id " << memAllocLogInfo.id << ") for object "
                << memAllocLogInfo.handle << " | Size: " << memAllocLogInfo.size
-               << " | Type: " << vk::kMemoryAllocationTypeMessage[allocTypeIndex]
+               << " | Type: " << ANGLE_UNSAFE_TODO(vk::kMemoryAllocationTypeMessage[allocTypeIndex])
                << " | Memory type index: " << memoryTypeIndex
                << " | Heap index: " << memAllocLogInfo.memoryHeapIndex;
 
@@ -313,7 +319,7 @@ void MemoryAllocationTracker::onMemoryDeallocImpl(vk::MemoryAllocationType alloc
         {
             vk::MemoryAllocInfoMapKey memoryAllocInfoMapKey(handle);
             MemoryAllocInfoMap &memInfoMap = memInfoPerBacktrace.second;
-            std::unique_lock<std::mutex> lock(mMemoryAllocationMutex);
+            std::unique_lock<angle::SimpleMutex> lock(mMemoryAllocationMutex);
 
             if (memInfoMap.find(memoryAllocInfoMapKey) != memInfoMap.end())
             {
@@ -336,8 +342,8 @@ void MemoryAllocationTracker::onMemoryDeallocImpl(vk::MemoryAllocationType alloc
                 mActivePerHeapMemoryAllocationsSize[allocTypeIndex][memoryHeapIndex] -= size;
 
                 INFO() << "Memory deallocation: (id " << memInfoEntry->id << ") for object "
-                       << memInfoEntry->handle << " | Size: " << memInfoEntry->size
-                       << " | Type: " << vk::kMemoryAllocationTypeMessage[allocTypeIndex]
+                       << memInfoEntry->handle << " | Size: " << memInfoEntry->size << " | Type: "
+                       << ANGLE_UNSAFE_TODO(vk::kMemoryAllocationTypeMessage[allocTypeIndex])
                        << " | Memory type index: " << memoryTypeIndex
                        << " | Heap index: " << memInfoEntry->memoryHeapIndex;
 
@@ -436,6 +442,16 @@ void MemoryAllocationTracker::compareExpectedFlagsWithAllocatedFlags(
     }
 }
 
+void MemoryAllocationTracker::onExceedingMaxMemoryAllocationSize(VkDeviceSize size)
+{
+    VkDeviceSize maxAllocationSize = mRenderer->getMaxMemoryAllocationSize();
+    ASSERT(size > maxAllocationSize);
+
+    WARN() << "Attempted allocation size (" << size
+           << ") is greater than the maximum allocation size allowed (" << maxAllocationSize
+           << ").";
+}
+
 VkDeviceSize MemoryAllocationTracker::getPendingMemoryAllocationSize() const
 {
     if (!kTrackMemoryAllocationSizes)
@@ -505,7 +521,7 @@ MemoryReport::MemoryReport()
 void MemoryReport::processCallback(const VkDeviceMemoryReportCallbackDataEXT &callbackData,
                                    bool logCallback)
 {
-    std::unique_lock<std::mutex> lock(mMemoryReportMutex);
+    std::unique_lock<angle::SimpleMutex> lock(mMemoryReportMutex);
     VkDeviceSize size = 0;
     std::string reportType;
     switch (callbackData.type)
@@ -573,7 +589,7 @@ void MemoryReport::processCallback(const VkDeviceMemoryReportCallbackDataEXT &ca
     {
         INFO() << std::right << std::setw(9) << reportType << ": size=" << std::setw(10)
                << callbackData.size << "; type=" << std::setw(15) << std::left
-               << RendererVk::GetVulkanObjectTypeName(callbackData.objectType)
+               << Renderer::GetVulkanObjectTypeName(callbackData.objectType)
                << "; heapIdx=" << callbackData.heapIndex << "; id=" << std::hex
                << callbackData.memoryObjectId << "; handle=" << std::hex
                << callbackData.objectHandle << ": Total=" << std::right << std::setw(10) << std::dec
@@ -583,7 +599,7 @@ void MemoryReport::processCallback(const VkDeviceMemoryReportCallbackDataEXT &ca
 
 void MemoryReport::logMemoryReportStats() const
 {
-    std::unique_lock<std::mutex> lock(mMemoryReportMutex);
+    std::unique_lock<angle::SimpleMutex> lock(mMemoryReportMutex);
 
     INFO() << std::right << "GPU Memory Totals:       Allocated=" << std::setw(10)
            << mCurrentTotalAllocatedMemory << " (max=" << std::setw(10) << mMaxTotalAllocatedMemory
@@ -599,10 +615,10 @@ void MemoryReport::logMemoryReportStats() const
         VkDeviceSize importedMemory     = memorySizes.importedMemory;
         VkDeviceSize importedMemoryMax  = memorySizes.importedMemoryMax;
         INFO() << std::right << "- Type=" << std::setw(15)
-               << RendererVk::GetVulkanObjectTypeName(objectType)
-               << ":  Allocated=" << std::setw(10) << allocatedMemory << " (max=" << std::setw(10)
-               << allocatedMemoryMax << ");  Imported=" << std::setw(10) << importedMemory
-               << " (max=" << std::setw(10) << importedMemoryMax << ")";
+               << Renderer::GetVulkanObjectTypeName(objectType) << ":  Allocated=" << std::setw(10)
+               << allocatedMemory << " (max=" << std::setw(10) << allocatedMemoryMax
+               << ");  Imported=" << std::setw(10) << importedMemory << " (max=" << std::setw(10)
+               << importedMemoryMax << ")";
     }
 }
 }  // namespace vk

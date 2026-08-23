@@ -9,28 +9,28 @@
 #ifndef LIBANGLE_TRACE_H_
 #define LIBANGLE_TRACE_H_
 
-#include <platform/PlatformMethods.h>
-#include "common/base/anglebase/trace_event/trace_event.h"
+#if defined(ANGLE_USE_PERFETTO)
 
-// TODO: Pass platform directly to these methods. http://anglebug.com/1892
-#define ANGLE_TRACE_EVENT_BEGIN(CATEGORY, EVENT, ...) \
-    TRACE_EVENT_BEGIN(ANGLEPlatformCurrent(), CATEGORY, EVENT, ##__VA_ARGS__)
+#    include "common/base/anglebase/trace_event/trace_categories.h"
+#    include "perfetto/tracing/string_helpers.h"  // nogncheck
+#    include "perfetto/tracing/track_event.h"     // nogncheck
 
-#define ANGLE_TRACE_EVENT_END(CATEGORY, EVENT, ...) \
-    TRACE_EVENT_END(ANGLEPlatformCurrent(), CATEGORY, EVENT, ##__VA_ARGS__)
+#    define ANGLE_TRACE_EVENT_BEGIN(category, ...) TRACE_EVENT_BEGIN(category, ##__VA_ARGS__)
+#    define ANGLE_TRACE_EVENT_END(category, ...) TRACE_EVENT_END(category, ##__VA_ARGS__)
+#    define ANGLE_TRACE_EVENT_INSTANT(category, ...) TRACE_EVENT_INSTANT(category, ##__VA_ARGS__)
+#    define ANGLE_TRACE_EVENT(category, ...) TRACE_EVENT(category, ##__VA_ARGS__)
+#    define ANGLE_TRACE_COUNTER(category, ...) TRACE_COUNTER(category, ##__VA_ARGS__)
 
-#define ANGLE_TRACE_EVENT_INSTANT(CATEGORY, EVENT, ...) \
-    TRACE_EVENT_INSTANT(ANGLEPlatformCurrent(), CATEGORY, EVENT, ##__VA_ARGS__)
+#else  // !defined(ANGLE_USE_PERFETTO)
 
-#define ANGLE_TRACE_EVENT(CATEGORY, EVENT, ...) \
-    TRACE_EVENT(ANGLEPlatformCurrent(), CATEGORY, EVENT, ##__VA_ARGS__)
+#    define ANGLE_TRACE_EVENT_BEGIN(CATEGORY, ...) ((void)0)
+#    define ANGLE_TRACE_EVENT_END(CATEGORY, ...) ((void)0)
+#    define ANGLE_TRACE_EVENT_INSTANT(CATEGORY, ...) ((void)0)
+#    define ANGLE_TRACE_EVENT(CATEGORY, ...) ((void)0)
+#    define ANGLE_TRACE_COUNTER(CATEGORY, ...) ((void)0)
 
-// Deprecated, use ANGLE_TRACE_EVENT_BEGIN
-#define ANGLE_TRACE_EVENT_BEGIN0(CATEGORY, EVENT) ANGLE_TRACE_EVENT_BEGIN(CATEGORY, EVENT)
-// Deprecated, use ANGLE_TRACE_EVENT_END
-#define ANGLE_TRACE_EVENT_END0(CATEGORY, EVENT) ANGLE_TRACE_EVENT_END(CATEGORY, EVENT)
-// Deprecated, use ANGLE_TRACE_EVENT_INSTANT
-#define ANGLE_TRACE_EVENT_INSTANT0(CATEGORY, EVENT) ANGLE_TRACE_EVENT_INSTANT(CATEGORY, EVENT)
+#endif  // !defined(ANGLE_USE_PERFETTO)
+
 // Deprecated, use ANGLE_TRACE_EVENT
 #define ANGLE_TRACE_EVENT0(CATEGORY, EVENT) ANGLE_TRACE_EVENT(CATEGORY, EVENT)
 // Deprecated, use ANGLE_TRACE_EVENT

@@ -6,6 +6,7 @@
 
 // IndexBufferOffsetTest.cpp: Test glDrawElements with an offset and an index buffer
 
+#include "common/unsafe_buffers.h"
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
 #include "util/test_utils.h"
@@ -126,7 +127,7 @@ void main()
         size_t indexDataWidth = 6 * typeWidth;
 
         std::vector<GLubyte> indexData(6 * 3 * sizeof(GLuint), 0);
-        memcpy(indexData.data() + indexDataWidth, indexDataIn, indexDataWidth);
+        ANGLE_UNSAFE_TODO(memcpy(indexData.data() + indexDataWidth, indexDataIn, indexDataWidth));
 
         GLFramebuffer elementUpdateFbo;
         GLTexture elementUpdateTex;
@@ -145,21 +146,21 @@ void main()
         {
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, indexDataWidth, indexData.data());
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, indexDataWidth, indexDataWidth,
-                            indexData.data() + indexDataWidth);
+                            ANGLE_UNSAFE_TODO(indexData.data() + indexDataWidth));
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 2 * indexDataWidth, indexDataWidth,
-                            indexData.data() + 2 * indexDataWidth);
+                            ANGLE_UNSAFE_TODO(indexData.data() + 2 * indexDataWidth));
         }
         else if (updateType == UpdateType::SmallThenBigUpdate)
         {
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, 4, indexData.data());
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 4, 3 * indexDataWidth - 4,
-                            indexData.data() + 4);
+                            ANGLE_UNSAFE_TODO(indexData.data() + 4));
         }
         else if (updateType == UpdateType::BigThenSmallUpdate)
         {
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, 3 * indexDataWidth - 4, indexData.data());
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 3 * indexDataWidth - 4, 4,
-                            indexData.data() + 3 * indexDataWidth - 4);
+                            ANGLE_UNSAFE_TODO(indexData.data() + 3 * indexDataWidth - 4));
         }
         else
         {
@@ -186,20 +187,20 @@ void main()
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, indexDataWidth, indexDataWidth,
                             indexData.data());
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 2 * indexDataWidth, indexDataWidth,
-                            indexData.data() + indexDataWidth);
+                            ANGLE_UNSAFE_TODO(indexData.data() + indexDataWidth));
         }
         else if (updateType == UpdateType::SmallThenBigUpdate)
         {
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, indexDataWidth, 4, indexData.data());
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, indexDataWidth + 4, 2 * indexDataWidth - 4,
-                            indexData.data() + 4);
+                            ANGLE_UNSAFE_TODO(indexData.data() + 4));
         }
         else if (updateType == UpdateType::BigThenSmallUpdate)
         {
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, indexDataWidth, 2 * indexDataWidth - 4,
                             indexData.data());
             glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 3 * indexDataWidth - 4, 4,
-                            indexData.data() + 2 * indexDataWidth - 4);
+                            ANGLE_UNSAFE_TODO(indexData.data() + 2 * indexDataWidth - 4));
         }
         else
         {
@@ -282,10 +283,10 @@ TEST_P(IndexBufferOffsetTest, UInt32IndexSmallUpdates)
 // Test using an offset for an UInt8 index buffer after uploading data to a buffer that is in use
 TEST_P(IndexBufferOffsetTestES3, UseAsUBOThenUpdateThenUInt8Index)
 {
-    // http://anglebug.com/5950
+    // http://anglebug.com/42264483
     ANGLE_SKIP_TEST_IF(IsAMD() && IsVulkan() && IsWindows());
 
-    // http://anglebug.com/5957
+    // http://anglebug.com/42264490
     ANGLE_SKIP_TEST_IF(IsVulkan() && (IsPixel2() || IsPixel2XL()));
 
     GLubyte indexData[] = {0, 1, 2, 1, 2, 3};
@@ -295,7 +296,7 @@ TEST_P(IndexBufferOffsetTestES3, UseAsUBOThenUpdateThenUInt8Index)
 // Test using an offset for an UInt16 index buffer after uploading data to a buffer that is in use
 TEST_P(IndexBufferOffsetTestES3, UseAsUBOThenUpdateThenUInt16Index)
 {
-    // http://anglebug.com/5957
+    // http://anglebug.com/42264490
     ANGLE_SKIP_TEST_IF(IsVulkan() && (IsPixel2() || IsPixel2XL()));
 
     GLushort indexData[] = {0, 1, 2, 1, 2, 3};
@@ -308,7 +309,7 @@ TEST_P(IndexBufferOffsetTestES3, UseAsUBOThenUpdateThenUInt32Index)
     ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3 &&
                        !IsGLExtensionEnabled("GL_OES_element_index_uint"));
 
-    // http://anglebug.com/5957
+    // http://anglebug.com/42264490
     ANGLE_SKIP_TEST_IF(IsVulkan() && (IsPixel2() || IsPixel2XL()));
 
     GLuint indexData[] = {0, 1, 2, 1, 2, 3};
@@ -319,10 +320,10 @@ TEST_P(IndexBufferOffsetTestES3, UseAsUBOThenUpdateThenUInt32Index)
 // with small buffer updates
 TEST_P(IndexBufferOffsetTestES3, UseAsUBOThenUpdateThenUInt8IndexSmallUpdates)
 {
-    // http://anglebug.com/5950
+    // http://anglebug.com/42264483
     ANGLE_SKIP_TEST_IF(IsAMD() && IsVulkan() && IsWindows());
 
-    // http://anglebug.com/5957
+    // http://anglebug.com/42264490
     ANGLE_SKIP_TEST_IF(IsVulkan() && (IsPixel2() || IsPixel2XL()));
 
     GLubyte indexData[] = {0, 1, 2, 1, 2, 3};
@@ -333,7 +334,7 @@ TEST_P(IndexBufferOffsetTestES3, UseAsUBOThenUpdateThenUInt8IndexSmallUpdates)
 // with small buffer updates
 TEST_P(IndexBufferOffsetTestES3, UseAsUBOThenUpdateThenUInt16IndexSmallUpdates)
 {
-    // http://anglebug.com/5957
+    // http://anglebug.com/42264490
     ANGLE_SKIP_TEST_IF(IsVulkan() && (IsPixel2() || IsPixel2XL()));
 
     GLushort indexData[] = {0, 1, 2, 1, 2, 3};
@@ -347,7 +348,7 @@ TEST_P(IndexBufferOffsetTestES3, UseAsUBOThenUpdateThenUInt32IndexSmallUpdates)
     ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3 &&
                        !IsGLExtensionEnabled("GL_OES_element_index_uint"));
 
-    // http://anglebug.com/5957
+    // http://anglebug.com/42264490
     ANGLE_SKIP_TEST_IF(IsVulkan() && (IsPixel2() || IsPixel2XL()));
 
     GLuint indexData[] = {0, 1, 2, 1, 2, 3};
@@ -429,6 +430,43 @@ TEST_P(IndexBufferOffsetTest, DrawAtDifferentOffsetAlignments)
 
     // Check the down right triangle
     EXPECT_PIXEL_COLOR_EQ(getWindowWidth() - 1, getWindowHeight() - 1, GLColor::red);
+
+    EXPECT_GL_NO_ERROR();
+}
+
+// Uses un-aligned index buffer to draw, the draw call should be ignored
+TEST_P(IndexBufferOffsetTest, DrawAtUnAlignedIndexBuffer)
+{
+    constexpr GLushort indices[6] = {0, 1, 2, 2, 3, 0};
+    GLubyte indicesUnaligned[1 + sizeof(indices)];
+
+    /* unalign indices */
+    indicesUnaligned[0] = 0;
+    for (unsigned long i = 0; i < sizeof(indices); ++i)
+    {
+        ANGLE_UNSAFE_TODO(indicesUnaligned[i + 1] = ((GLubyte *)indices)[i]);
+    }
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glUseProgram(mProgram);
+    glUniform4f(mColorUniformLocation, 1.0f, 0.0f, 0.0f, 1.0f);
+
+    glBindBuffer(GL_ARRAY_BUFFER, mVertexBuffer);
+    glVertexAttribPointer(mPositionAttributeLocation, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(mPositionAttributeLocation);
+
+    GLBuffer buffer;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indicesUnaligned), indicesUnaligned,
+                 GL_DYNAMIC_DRAW);
+
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, reinterpret_cast<void *>(1));
+    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+    // The draw should be ignored, nothing should been drawn
+    EXPECT_PIXEL_RECT_EQ(0, 0, getWindowWidth(), getWindowHeight(), GLColor::black);
 
     EXPECT_GL_NO_ERROR();
 }
@@ -540,6 +578,37 @@ TEST_P(IndexBufferOffsetTest, DrawArraysLineLoopFollowedByDrawElementsTriangle)
     EXPECT_GL_NO_ERROR();
 }
 
+// Draw with an index buffer offset while sourcing vertex data from client memory.
+TEST_P(IndexBufferOffsetTest, DrawAtOffsetWithClientSideVertexData)
+{
+    constexpr size_t kIndexCount = 6;
+    constexpr size_t kBufferSize = 1024;
+    constexpr size_t kOffset     = kBufferSize - kIndexCount * sizeof(GLushort);
+
+    const GLushort indexData[kIndexCount] = {0, 1, 2, 1, 2, 3};
+    std::vector<GLubyte> bufferData(kBufferSize, 0);
+    ANGLE_UNSAFE_TODO(memcpy(&bufferData[kOffset], indexData, sizeof(indexData)));
+
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, kBufferSize, bufferData.data(), GL_STATIC_DRAW);
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glUseProgram(mProgram);
+    glUniform4f(mColorUniformLocation, 1.0f, 0.0f, 0.0f, 1.0f);
+
+    // Source vertex data from client memory so the backend must compute the index range.
+    const GLfloat vertices[] = {-1.0f, -1.0f, -1.0f, 1.0f, 1.0f, -1.0f, 1.0f, 1.0f};
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glVertexAttribPointer(mPositionAttributeLocation, 2, GL_FLOAT, GL_FALSE, 0, vertices);
+    glEnableVertexAttribArray(mPositionAttributeLocation);
+
+    glDrawElements(GL_TRIANGLES, kIndexCount, GL_UNSIGNED_SHORT, reinterpret_cast<void *>(kOffset));
+
+    EXPECT_PIXEL_COLOR_EQ(64, 64, GLColor::red);
+    EXPECT_GL_NO_ERROR();
+}
+
 // Uses index buffer offset and 2 drawElement calls one of the other with different counts,
 // makes sure the second drawElement call will have its data available.
 TEST_P(IndexBufferOffsetTest, DrawWithDifferentCountsSameOffset)
@@ -572,6 +641,8 @@ TEST_P(IndexBufferOffsetTest, DrawWithDifferentCountsSameOffset)
     EXPECT_GL_NO_ERROR();
 }
 
-ANGLE_INSTANTIATE_TEST_ES2_AND_ES3(IndexBufferOffsetTest);
+ANGLE_INSTANTIATE_TEST_ES2_AND_ES3_AND(IndexBufferOffsetTest,
+                                       ES3_VULKAN().disable(Feature::SupportsIndexTypeUint8));
 
-ANGLE_INSTANTIATE_TEST_ES3(IndexBufferOffsetTestES3);
+ANGLE_INSTANTIATE_TEST_ES3_AND(IndexBufferOffsetTestES3,
+                               ES3_VULKAN().disable(Feature::SupportsIndexTypeUint8));

@@ -5,6 +5,7 @@
 
 // system_utils_unittest.cpp: Unit tests for ANGLE's system utility functions
 
+#include "common/unsafe_buffers.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -27,7 +28,7 @@ namespace
 // Test getting the executable path
 TEST(SystemUtils, ExecutablePath)
 {
-    // TODO: fuchsia support. http://anglebug.com/3161
+    // TODO: fuchsia support. http://anglebug.com/42261836
 #if !defined(ANGLE_PLATFORM_FUCHSIA)
     std::string executablePath = GetExecutablePath();
     EXPECT_NE("", executablePath);
@@ -37,14 +38,15 @@ TEST(SystemUtils, ExecutablePath)
 // Test getting the executable directory
 TEST(SystemUtils, ExecutableDir)
 {
-    // TODO: fuchsia support. http://anglebug.com/3161
+    // TODO: fuchsia support. http://anglebug.com/42261836
 #if !defined(ANGLE_PLATFORM_FUCHSIA)
     std::string executableDir = GetExecutableDirectory();
     EXPECT_NE("", executableDir);
 
     std::string executablePath = GetExecutablePath();
     EXPECT_LT(executableDir.size(), executablePath.size());
-    EXPECT_EQ(0, strncmp(executableDir.c_str(), executablePath.c_str(), executableDir.size()));
+    ANGLE_UNSAFE_TODO(
+        EXPECT_EQ(0, strncmp(executableDir.c_str(), executablePath.c_str(), executableDir.size())));
 #endif
 }
 
@@ -91,7 +93,7 @@ TEST(SystemUtils, CpuTimeHeavyOp)
     constexpr size_t bufferSize = 1048576;
     std::vector<uint8_t> buffer(bufferSize, 1);
     double cpuTimeStart = GetCurrentProcessCpuTime();
-    memset(buffer.data(), 0, bufferSize);
+    ANGLE_UNSAFE_TODO(memset(buffer.data(), 0, bufferSize));
     double cpuTimeEnd = GetCurrentProcessCpuTime();
     EXPECT_GE(cpuTimeEnd, cpuTimeStart);
 }

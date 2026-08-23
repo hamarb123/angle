@@ -36,14 +36,26 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
+#include "angle_deqp_libtester.h"
+
+#if defined(ANGLE_USE_X11) || defined(ANGLE_USE_WAYLAND)
+#    include "util/linux/LinuxWindow.h"
+#endif
+
 #if (DE_OS == DE_OS_WIN32)
 #    include "tcuWGLContextFactory.hpp"
 #    include "tcuWin32EGLNativeDisplayFactory.hpp"
 #endif  // (DE_OS == DE_OS_WIN32)
 
 #if (DE_OS == DE_OS_UNIX)
-#    include "tcuLnxX11EglDisplayFactory.hpp"
-#endif  // (DE_OKS == DE_OS_UNIX)
+#    include "tcuLnxEglPlatform.hpp"
+#    if defined(DEQP_SUPPORT_X11)
+#        include "tcuLnxX11EglDisplayFactory.hpp"
+#    endif
+#    if defined(DEQP_SUPPORT_WAYLAND)
+#        include "tcuLnxWaylandEglDisplayFactory.hpp"
+#    endif
+#endif  // (DE_OS == DE_OS_UNIX)
 
 static_assert(EGL_DONT_CARE == -1, "Unexpected value for EGL_DONT_CARE");
 
@@ -52,7 +64,9 @@ namespace tcu
 class ANGLEPlatform : public tcu::Platform, private glu::Platform, private eglu::Platform
 {
   public:
-    ANGLEPlatform(angle::LogErrorFunc logErrorFunc, uint32_t preRotation);
+    ANGLEPlatform(angle::LogErrorFunc logErrorFunc,
+                  uint32_t preRotation,
+                  dEQPDriverOption driverOption);
     ~ANGLEPlatform();
 
     bool processEvents() override;
@@ -78,11 +92,18 @@ class ANGLEPlatform : public tcu::Platform, private glu::Platform, private eglu:
     std::vector<const char *> mEnableFeatureOverrides;
 
 #if (DE_OS == DE_OS_UNIX)
+#    if defined(DEQP_SUPPORT_X11) || defined(DEQP_SUPPORT_WAYLAND)
     lnx::EventState mLnxEventState;
+#    endif
+    // Native window-system platform (X11/Wayland) OSWindow::New() will select,
+    // so the display we create agrees with the window. 0 if unknown.
+    eglw::EGLAttrib mNativePlatformType = 0;
 #endif
 };
 
-ANGLEPlatform::ANGLEPlatform(angle::LogErrorFunc logErrorFunc, uint32_t preRotation)
+ANGLEPlatform::ANGLEPlatform(angle::LogErrorFunc logErrorFunc,
+                             uint32_t preRotation,
+                             dEQPDriverOption driverOption)
 {
     angle::SetLowPriorityProcess();
 
@@ -114,6 +135,13 @@ ANGLEPlatform::ANGLEPlatform(angle::LogErrorFunc logErrorFunc, uint32_t preRotat
 
     mEnableFeatureOverrides.push_back(nullptr);
 
+#if defined(ANGLE_USE_X11) || defined(ANGLE_USE_WAYLAND)
+    // Determine which native window system OSWindow::New() will select, so
+    // initAttribs() can pin the matching native platform type on the display.
+    // This is 0 when no window system is available at runtime.
+    mNativePlatformType = GetNativeDisplayPlatformType();
+#endif
+
 #if (DE_OS == DE_OS_WIN32)
     {
         std::vector<eglw::EGLAttrib> d3d11Attribs = initAttribs(
@@ -132,15 +160,6 @@ ANGLEPlatform::ANGLEPlatform(angle::LogErrorFunc logErrorFunc, uint32_t preRotat
         auto *d3d11Factory = new ANGLENativeDisplayFactory(
             "angle-d3d11-ref", "ANGLE D3D11 Reference Display", d3d11Attribs, &mEvents);
         m_nativeDisplayFactoryRegistry.registerFactory(d3d11Factory);
-    }
-
-    {
-        std::vector<eglw::EGLAttrib> d3d9Attribs = initAttribs(
-            EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE, EGL_PLATFORM_ANGLE_DEVICE_TYPE_HARDWARE_ANGLE);
-
-        auto *d3d9Factory = new ANGLENativeDisplayFactory("angle-d3d9", "ANGLE D3D9 Display",
-                                                          d3d9Attribs, &mEvents);
-        m_nativeDisplayFactoryRegistry.registerFactory(d3d9Factory);
     }
 
     m_nativeDisplayFactoryRegistry.registerFactory(
@@ -166,7 +185,29 @@ ANGLEPlatform::ANGLEPlatform(angle::LogErrorFunc logErrorFunc, uint32_t preRotat
         m_nativeDisplayFactoryRegistry.registerFactory(glFactory);
     }
 
-#if (DE_OS == DE_OS_ANDROID) || (DE_OS == DE_OS_WIN32) || (DE_OS == DE_OS_UNIX)
+#if (DE_OS == DE_OS_ANDROID)
+    {
+        if (driverOption == dEQPDriverOption::ANGLE)
+        {
+            std::vector<eglw::EGLAttrib> vkAttribs =
+                initAttribs(EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE);
+            auto *vkFactory =
+                new ANGLENativeDisplayFactory("angle-vulkan", "ANGLE Vulkan Display", vkAttribs,
+                                              &mEvents, EGL_PLATFORM_ANGLE_ANGLE);
+            m_nativeDisplayFactoryRegistry.registerFactory(vkFactory);
+        }
+        else
+        {
+            std::vector<eglw::EGLAttrib> nativeGlesAttribs = {EGL_NONE};
+            auto *nativeGLESFactory                        = new ANGLENativeDisplayFactory(
+                "native-gles", "Native GLES Display", nativeGlesAttribs, &mEvents,
+                EGL_PLATFORM_ANDROID_KHR);
+            m_nativeDisplayFactoryRegistry.registerFactory(nativeGLESFactory);
+        }
+    }
+#endif
+
+#if ((DE_OS == DE_OS_WIN32) || (DE_OS == DE_OS_UNIX))
     {
         std::vector<eglw::EGLAttrib> vkAttribs = initAttribs(EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE);
 
@@ -182,6 +223,17 @@ ANGLEPlatform::ANGLEPlatform(angle::LogErrorFunc logErrorFunc, uint32_t preRotat
             EGL_PLATFORM_ANGLE_TYPE_VULKAN_ANGLE, EGL_PLATFORM_ANGLE_DEVICE_TYPE_SWIFTSHADER_ANGLE);
         m_nativeDisplayFactoryRegistry.registerFactory(new ANGLENativeDisplayFactory(
             "angle-swiftshader", "ANGLE SwiftShader Display", swsAttribs, &mEvents));
+    }
+#endif
+
+#if (DE_OS == DE_OS_WIN32) || (DE_OS == DE_OS_UNIX) || (DE_OS == DE_OS_OSX)
+    {
+        std::vector<eglw::EGLAttrib> webgpuAttribs =
+            initAttribs(EGL_PLATFORM_ANGLE_TYPE_WEBGPU_ANGLE);
+
+        auto *webgpuFactory = new ANGLENativeDisplayFactory("angle-webgpu", "ANGLE WebGPU Display",
+                                                            webgpuAttribs, &mEvents);
+        m_nativeDisplayFactoryRegistry.registerFactory(webgpuFactory);
     }
 #endif
 
@@ -204,9 +256,15 @@ ANGLEPlatform::ANGLEPlatform(angle::LogErrorFunc logErrorFunc, uint32_t preRotat
     }
 
 #if (DE_OS == DE_OS_UNIX)
+#    if defined(DEQP_SUPPORT_X11)
     m_nativeDisplayFactoryRegistry.registerFactory(
         lnx::x11::egl::createDisplayFactory(mLnxEventState));
-#endif
+#    endif
+#    if defined(DEQP_SUPPORT_WAYLAND)
+    m_nativeDisplayFactoryRegistry.registerFactory(
+        lnx::wayland::egl::createDisplayFactory(mLnxEventState));
+#    endif
+#endif  // (DE_OS == DE_OS_UNIX)
 
     m_contextFactoryRegistry.registerFactory(
         new eglu::GLContextFactory(m_nativeDisplayFactoryRegistry));
@@ -242,6 +300,18 @@ std::vector<eglw::EGLAttrib> ANGLEPlatform::initAttribs(eglw::EGLAttrib type,
 
     attribs.push_back(EGL_PLATFORM_ANGLE_TYPE_ANGLE);
     attribs.push_back(type);
+
+#if (DE_OS == DE_OS_UNIX)
+    // Pin the native platform type to the window OSWindow::New() will create so
+    // the display matches it. If no window system is available (or none is
+    // compiled, e.g. Ozone), leave it unset and let ANGLE choose the native
+    // platform from the environment.
+    if (mNativePlatformType != 0)
+    {
+        attribs.push_back(EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE);
+        attribs.push_back(mNativePlatformType);
+    }
+#endif
 
     if (deviceType != EGL_DONT_CARE)
     {
@@ -281,12 +351,14 @@ std::vector<eglw::EGLAttrib> ANGLEPlatform::initAttribs(eglw::EGLAttrib type,
 }  // namespace tcu
 
 // Create platform
-tcu::Platform *CreateANGLEPlatform(angle::LogErrorFunc logErrorFunc, uint32_t preRotation)
+tcu::Platform *CreateANGLEPlatform(angle::LogErrorFunc logErrorFunc,
+                                   uint32_t preRotation,
+                                   dEQPDriverOption driverOption)
 {
-    return new tcu::ANGLEPlatform(logErrorFunc, preRotation);
+    return new tcu::ANGLEPlatform(logErrorFunc, preRotation, driverOption);
 }
 
 tcu::Platform *createPlatform()
 {
-    return CreateANGLEPlatform(nullptr, 0);
+    return CreateANGLEPlatform(nullptr, 0, dEQPDriverOption::ANGLE);
 }

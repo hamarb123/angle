@@ -9,13 +9,15 @@
 #ifndef LIBANGLE_CLDEVICE_H_
 #define LIBANGLE_CLDEVICE_H_
 
+#include <angle_cl.h>
+
+#include "libANGLE/CLBitField.h"
 #include "libANGLE/CLObject.h"
+#include "libANGLE/cl_types.h"
 #include "libANGLE/renderer/CLDeviceImpl.h"
 
-#include "common/Spinlock.h"
-#include "common/SynchronizedValue.h"
-
-#include <functional>
+#include <cstddef>
+#include <string>
 
 namespace cl
 {
@@ -25,12 +27,15 @@ class Device final : public _cl_device_id, public Object
   public:
     // Front end entry functions, only called from OpenCL entry points
 
-    cl_int getInfo(DeviceInfo name, size_t valueSize, void *value, size_t *valueSizeRet) const;
+    angle::Result getInfo(DeviceInfo name,
+                          size_t valueSize,
+                          void *value,
+                          size_t *valueSizeRet) const;
 
-    cl_int createSubDevices(const cl_device_partition_property *properties,
-                            cl_uint numDevices,
-                            cl_device_id *subDevices,
-                            cl_uint *numDevicesRet);
+    angle::Result createSubDevices(const cl_device_partition_property *properties,
+                                   cl_uint numDevices,
+                                   cl_device_id *subDevices,
+                                   cl_uint *numDevicesRet);
 
   public:
     ~Device() override;
@@ -48,6 +53,8 @@ class Device final : public _cl_device_id, public Object
     bool supportsBuiltInKernel(const std::string &name) const;
     bool supportsNativeImageDimensions(const cl_image_desc &desc) const;
     bool supportsImageDimensions(const ImageDescriptor &desc) const;
+    bool hasDeviceEnqueueCaps() const;
+    bool supportsNonUniformWorkGroups() const;
 
     static bool IsValidType(DeviceType type);
 
@@ -62,10 +69,11 @@ class Device final : public _cl_device_id, public Object
     const rx::CLDeviceImpl::Ptr mImpl;
     const rx::CLDeviceImpl::Info mInfo;
 
-    angle::SynchronizedValue<CommandQueue *, angle::Spinlock> mDefaultCommandQueue = nullptr;
+    angle::SynchronizedValue<CommandQueue *> mDefaultCommandQueue = nullptr;
 
     friend class CommandQueue;
     friend class Platform;
+    friend class Object;
 };
 
 inline Platform &Device::getPlatform() noexcept
@@ -106,7 +114,7 @@ inline T &Device::getImpl() const
 
 inline bool Device::IsValidType(DeviceType type)
 {
-    return type.get() <= CL_DEVICE_TYPE_CUSTOM || type == CL_DEVICE_TYPE_ALL;
+    return (0 < type.get() && type.get() <= CL_DEVICE_TYPE_CUSTOM) || type == CL_DEVICE_TYPE_ALL;
 }
 
 }  // namespace cl

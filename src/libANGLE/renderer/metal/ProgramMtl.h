@@ -38,7 +38,7 @@ class ProgramMtl : public ProgramImpl
     angle::Result load(const gl::Context *context,
                        gl::BinaryInputStream *stream,
                        std::shared_ptr<LinkTask> *loadTaskOut,
-                       bool *successOut) override;
+                       egl::CacheGetResult *resultOut) override;
     void save(const gl::Context *context, gl::BinaryOutputStream *stream) override;
     void setBinaryRetrievableHint(bool retrievable) override;
     void setSeparable(bool separable) override;
@@ -59,12 +59,12 @@ class ProgramMtl : public ProgramImpl
 
     friend class LinkTaskMtl;
 
-    angle::Result linkJobImpl(const gl::Context *context,
+    angle::Result linkJobImpl(mtl::Context *context,
                               const gl::ProgramLinkedResources &resources,
                               std::vector<std::shared_ptr<LinkSubTask>> *subTasksOut);
 
     void linkResources(const gl::ProgramLinkedResources &resources);
-    angle::Result compileMslShaderLibs(const gl::Context *context,
+    angle::Result compileMslShaderLibs(mtl::Context *context,
                                        std::vector<std::shared_ptr<LinkSubTask>> *subTasksOut);
 
     gl::ShaderMap<SharedCompiledShaderStateMtl> mAttachedShaders;

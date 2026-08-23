@@ -132,7 +132,8 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
         case angle::EntryPoint::GLBindUniformLocationCHROMIUM:
             glBindUniformLocationCHROMIUM(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLcharConstPointerVal);
             break;
         case angle::EntryPoint::GLBindVertexArray:
@@ -157,6 +158,9 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             break;
         case angle::EntryPoint::GLBlendEquation:
             glBlendEquation(captures[0].value.GLenumVal);
+            break;
+        case angle::EntryPoint::GLBlendEquationOES:
+            glBlendEquationOES(captures[0].value.GLenumVal);
             break;
         case angle::EntryPoint::GLBlendEquationSeparate:
             glBlendEquationSeparate(captures[0].value.GLenumVal, captures[1].value.GLenumVal);
@@ -237,6 +241,11 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                 captures[6].value.GLintVal, captures[7].value.GLintVal,
                                 captures[8].value.GLbitfieldVal, captures[9].value.GLenumVal);
             break;
+        case angle::EntryPoint::GLBlobCacheCallbacksANGLE:
+            glBlobCacheCallbacksANGLE(captures[0].value.GLSETBLOBPROCANGLEVal,
+                                      captures[1].value.GLGETBLOBPROCANGLEVal,
+                                      captures[2].value.voidConstPointerVal);
+            break;
         case angle::EntryPoint::GLBufferData:
             glBufferData(captures[0].value.GLenumVal, captures[1].value.GLsizeiptrVal,
                          captures[2].value.voidConstPointerVal, captures[3].value.GLenumVal);
@@ -303,6 +312,19 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
         case angle::EntryPoint::GLClearStencil:
             glClearStencil(captures[0].value.GLintVal);
             break;
+        case angle::EntryPoint::GLClearTexImageEXT:
+            glClearTexImageEXT(gTextureMap[captures[0].value.GLuintVal], captures[1].value.GLintVal,
+                               captures[2].value.GLenumVal, captures[3].value.GLenumVal,
+                               captures[4].value.voidConstPointerVal);
+            break;
+        case angle::EntryPoint::GLClearTexSubImageEXT:
+            glClearTexSubImageEXT(
+                gTextureMap[captures[0].value.GLuintVal], captures[1].value.GLintVal,
+                captures[2].value.GLintVal, captures[3].value.GLintVal, captures[4].value.GLintVal,
+                captures[5].value.GLsizeiVal, captures[6].value.GLsizeiVal,
+                captures[7].value.GLsizeiVal, captures[8].value.GLenumVal,
+                captures[9].value.GLenumVal, captures[10].value.voidConstPointerVal);
+            break;
         case angle::EntryPoint::GLClientActiveTexture:
             glClientActiveTexture(captures[0].value.GLenumVal);
             break;
@@ -368,14 +390,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                    captures[6].value.GLsizeiVal,
                                    captures[7].value.voidConstPointerVal);
             break;
-        case angle::EntryPoint::GLCompressedTexImage2DRobustANGLE:
-            glCompressedTexImage2DRobustANGLE(
-                captures[0].value.GLenumVal, captures[1].value.GLintVal,
-                captures[2].value.GLenumVal, captures[3].value.GLsizeiVal,
-                captures[4].value.GLsizeiVal, captures[5].value.GLintVal,
-                captures[6].value.GLsizeiVal, captures[7].value.GLsizeiVal,
-                captures[8].value.voidConstPointerVal);
-            break;
         case angle::EntryPoint::GLCompressedTexImage3D:
             glCompressedTexImage3D(captures[0].value.GLenumVal, captures[1].value.GLintVal,
                                    captures[2].value.GLenumVal, captures[3].value.GLsizeiVal,
@@ -390,28 +404,12 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                       captures[6].value.GLintVal, captures[7].value.GLsizeiVal,
                                       captures[8].value.voidConstPointerVal);
             break;
-        case angle::EntryPoint::GLCompressedTexImage3DRobustANGLE:
-            glCompressedTexImage3DRobustANGLE(
-                captures[0].value.GLenumVal, captures[1].value.GLintVal,
-                captures[2].value.GLenumVal, captures[3].value.GLsizeiVal,
-                captures[4].value.GLsizeiVal, captures[5].value.GLsizeiVal,
-                captures[6].value.GLintVal, captures[7].value.GLsizeiVal,
-                captures[8].value.GLsizeiVal, captures[9].value.voidConstPointerVal);
-            break;
         case angle::EntryPoint::GLCompressedTexSubImage2D:
             glCompressedTexSubImage2D(captures[0].value.GLenumVal, captures[1].value.GLintVal,
                                       captures[2].value.GLintVal, captures[3].value.GLintVal,
                                       captures[4].value.GLsizeiVal, captures[5].value.GLsizeiVal,
                                       captures[6].value.GLenumVal, captures[7].value.GLsizeiVal,
                                       captures[8].value.voidConstPointerVal);
-            break;
-        case angle::EntryPoint::GLCompressedTexSubImage2DRobustANGLE:
-            glCompressedTexSubImage2DRobustANGLE(
-                captures[0].value.GLenumVal, captures[1].value.GLintVal,
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiVal,
-                captures[4].value.GLsizeiVal, captures[5].value.GLsizeiVal,
-                captures[6].value.GLenumVal, captures[7].value.GLsizeiVal,
-                captures[8].value.GLsizeiVal, captures[9].value.voidConstPointerVal);
             break;
         case angle::EntryPoint::GLCompressedTexSubImage3D:
             glCompressedTexSubImage3D(captures[0].value.GLenumVal, captures[1].value.GLintVal,
@@ -428,15 +426,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                          captures[6].value.GLsizeiVal, captures[7].value.GLsizeiVal,
                                          captures[8].value.GLenumVal, captures[9].value.GLsizeiVal,
                                          captures[10].value.voidConstPointerVal);
-            break;
-        case angle::EntryPoint::GLCompressedTexSubImage3DRobustANGLE:
-            glCompressedTexSubImage3DRobustANGLE(
-                captures[0].value.GLenumVal, captures[1].value.GLintVal, captures[2].value.GLintVal,
-                captures[3].value.GLintVal, captures[4].value.GLintVal,
-                captures[5].value.GLsizeiVal, captures[6].value.GLsizeiVal,
-                captures[7].value.GLsizeiVal, captures[8].value.GLenumVal,
-                captures[9].value.GLsizeiVal, captures[10].value.GLsizeiVal,
-                captures[11].value.voidConstPointerVal);
             break;
         case angle::EntryPoint::GLCopyBufferSubData:
             glCopyBufferSubData(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
@@ -535,9 +524,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                   captures[6].value.GLenumVal, captures[7].value.GLbooleanVal,
                                   captures[8].value.GLbooleanVal, captures[9].value.GLbooleanVal);
             break;
-        case angle::EntryPoint::GLCoverageModulationCHROMIUM:
-            glCoverageModulationCHROMIUM(captures[0].value.GLenumVal);
-            break;
         case angle::EntryPoint::GLCreateMemoryObjectsEXT:
             glCreateMemoryObjectsEXT(captures[0].value.GLsizeiVal,
                                      captures[1].value.GLuintPointerVal);
@@ -553,9 +539,8 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                    captures[2].value.GLcharConstPointerPointerVal);
             break;
         case angle::EntryPoint::GLCreateShaderProgramvEXT:
-            glCreateShaderProgramvEXT(
-                captures[0].value.GLenumVal, captures[1].value.GLsizeiVal,
-                const_cast<const char **>(captures[2].value.GLcharConstPointerPointerVal));
+            glCreateShaderProgramvEXT(captures[0].value.GLenumVal, captures[1].value.GLsizeiVal,
+                                      captures[2].value.GLcharConstPointerPointerVal);
             break;
         case angle::EntryPoint::GLCullFace:
             glCullFace(captures[0].value.GLenumVal);
@@ -692,9 +677,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             break;
         case angle::EntryPoint::GLDisableClientState:
             glDisableClientState(captures[0].value.GLenumVal);
-            break;
-        case angle::EntryPoint::GLDisableExtensionANGLE:
-            glDisableExtensionANGLE(captures[0].value.GLcharConstPointerVal);
             break;
         case angle::EntryPoint::GLDisableVertexAttribArray:
             glDisableVertexAttribArray(captures[0].value.GLuintVal);
@@ -910,11 +892,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             glEGLImageTargetTexture2DOES(captures[0].value.GLenumVal,
                                          gEGLImageMap2[captures[1].value.GLuintVal]);
             break;
-        case angle::EntryPoint::GLEGLImageTargetTextureStorageEXT:
-            glEGLImageTargetTextureStorageEXT(captures[0].value.GLuintVal,
-                                              gEGLImageMap2[captures[1].value.GLuintVal],
-                                              captures[2].value.GLintConstPointerVal);
-            break;
         case angle::EntryPoint::GLEnable:
             glEnable(captures[0].value.GLenumVal);
             break;
@@ -940,11 +917,17 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             glEndPixelLocalStorageANGLE(captures[0].value.GLsizeiVal,
                                         captures[1].value.GLenumConstPointerVal);
             break;
+        case angle::EntryPoint::GLEndPixelLocalStorageImplicitANGLE:
+            glEndPixelLocalStorageImplicitANGLE();
+            break;
         case angle::EntryPoint::GLEndQuery:
             glEndQuery(captures[0].value.GLenumVal);
             break;
         case angle::EntryPoint::GLEndQueryEXT:
             glEndQueryEXT(captures[0].value.GLenumVal);
+            break;
+        case angle::EntryPoint::GLEndTilingQCOM:
+            glEndTilingQCOM(captures[0].value.GLbitfieldVal);
             break;
         case angle::EntryPoint::GLEndTransformFeedback:
             glEndTransformFeedback();
@@ -984,9 +967,23 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
         case angle::EntryPoint::GLFramebufferFetchBarrierEXT:
             glFramebufferFetchBarrierEXT();
             break;
+        case angle::EntryPoint::GLFramebufferFoveationConfigQCOM:
+            glFramebufferFoveationConfigQCOM(
+                gFramebufferMap[captures[0].value.GLuintVal], captures[1].value.GLuintVal,
+                captures[2].value.GLuintVal, captures[3].value.GLuintVal,
+                captures[4].value.GLuintPointerVal);
+            break;
+        case angle::EntryPoint::GLFramebufferFoveationParametersQCOM:
+            glFramebufferFoveationParametersQCOM(
+                gFramebufferMap[captures[0].value.GLuintVal], captures[1].value.GLuintVal,
+                captures[2].value.GLuintVal, captures[3].value.GLfloatVal,
+                captures[4].value.GLfloatVal, captures[5].value.GLfloatVal,
+                captures[6].value.GLfloatVal, captures[7].value.GLfloatVal);
+            break;
         case angle::EntryPoint::GLFramebufferMemorylessPixelLocalStorageANGLE:
             glFramebufferMemorylessPixelLocalStorageANGLE(captures[0].value.GLintVal,
-                                                          captures[1].value.GLenumVal);
+                                                          captures[1].value.GLenumVal,
+                                                          captures[2].value.GLbitfieldVal);
             break;
         case angle::EntryPoint::GLFramebufferParameteri:
             glFramebufferParameteri(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
@@ -1023,6 +1020,12 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             glFramebufferRenderbufferOES(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
                                          captures[2].value.GLenumVal,
                                          gRenderbufferMap[captures[3].value.GLuintVal]);
+            break;
+        case angle::EntryPoint::GLFramebufferShadingRateEXT:
+            glFramebufferShadingRateEXT(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
+                                        captures[2].value.GLuintVal, captures[3].value.GLintVal,
+                                        captures[4].value.GLsizeiVal, captures[5].value.GLsizeiVal,
+                                        captures[6].value.GLsizeiVal);
             break;
         case angle::EntryPoint::GLFramebufferTexture:
             glFramebufferTexture(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
@@ -1063,6 +1066,13 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                       gTextureMap[captures[2].value.GLuintVal],
                                       captures[3].value.GLintVal, captures[4].value.GLintVal);
             break;
+        case angle::EntryPoint::GLFramebufferTextureMultisampleMultiviewOVR:
+            glFramebufferTextureMultisampleMultiviewOVR(
+                captures[0].value.GLenumVal, captures[1].value.GLenumVal,
+                gTextureMap[captures[2].value.GLuintVal], captures[3].value.GLintVal,
+                captures[4].value.GLsizeiVal, captures[5].value.GLintVal,
+                captures[6].value.GLsizeiVal);
+            break;
         case angle::EntryPoint::GLFramebufferTextureMultiviewOVR:
             glFramebufferTextureMultiviewOVR(
                 captures[0].value.GLenumVal, captures[1].value.GLenumVal,
@@ -1077,7 +1087,8 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
         case angle::EntryPoint::GLFramebufferTexturePixelLocalStorageANGLE:
             glFramebufferTexturePixelLocalStorageANGLE(
                 captures[0].value.GLintVal, gTextureMap[captures[1].value.GLuintVal],
-                captures[2].value.GLintVal, captures[3].value.GLintVal);
+                captures[2].value.GLintVal, captures[3].value.GLintVal,
+                captures[4].value.GLbitfieldVal);
             break;
         case angle::EntryPoint::GLFrontFace:
             glFrontFace(captures[0].value.GLenumVal);
@@ -1201,12 +1212,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             glGetBooleani_v(captures[0].value.GLenumVal, captures[1].value.GLuintVal,
                             captures[2].value.GLbooleanPointerVal);
             break;
-        case angle::EntryPoint::GLGetBooleani_vRobustANGLE:
-            glGetBooleani_vRobustANGLE(captures[0].value.GLenumVal, captures[1].value.GLuintVal,
-                                       captures[2].value.GLsizeiVal,
-                                       captures[3].value.GLsizeiPointerVal,
-                                       captures[4].value.GLbooleanPointerVal);
-            break;
         case angle::EntryPoint::GLGetBooleanv:
             glGetBooleanv(captures[0].value.GLenumVal, captures[1].value.GLbooleanPointerVal);
             break;
@@ -1299,6 +1304,11 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             glGetFragDataLocation(gShaderProgramMap[captures[0].value.GLuintVal],
                                   captures[1].value.GLcharConstPointerVal);
             break;
+        case angle::EntryPoint::GLGetFragmentShadingRatesEXT:
+            glGetFragmentShadingRatesEXT(captures[0].value.GLsizeiVal, captures[1].value.GLsizeiVal,
+                                         captures[2].value.GLsizeiPointerVal,
+                                         captures[3].value.GLenumPointerVal);
+            break;
         case angle::EntryPoint::GLGetFramebufferAttachmentParameteriv:
             glGetFramebufferAttachmentParameteriv(
                 captures[0].value.GLenumVal, captures[1].value.GLenumVal,
@@ -1324,12 +1334,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                             captures[1].value.GLenumVal,
                                             captures[2].value.GLintPointerVal);
             break;
-        case angle::EntryPoint::GLGetFramebufferParameterivRobustANGLE:
-            glGetFramebufferParameterivRobustANGLE(
-                captures[0].value.GLenumVal, captures[1].value.GLenumVal,
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
-                captures[4].value.GLintPointerVal);
-            break;
         case angle::EntryPoint::GLGetFramebufferPixelLocalStorageParameterfvANGLE:
             glGetFramebufferPixelLocalStorageParameterfvANGLE(captures[0].value.GLintVal,
                                                               captures[1].value.GLenumVal,
@@ -1352,11 +1356,25 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                 captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
                 captures[4].value.GLintPointerVal);
             break;
+        case angle::EntryPoint::GLGetFramebufferPixelLocalStorageParameteruivANGLE:
+            glGetFramebufferPixelLocalStorageParameteruivANGLE(captures[0].value.GLintVal,
+                                                               captures[1].value.GLenumVal,
+                                                               captures[2].value.GLuintPointerVal);
+            break;
+        case angle::EntryPoint::GLGetFramebufferPixelLocalStorageParameteruivRobustANGLE:
+            glGetFramebufferPixelLocalStorageParameteruivRobustANGLE(
+                captures[0].value.GLintVal, captures[1].value.GLenumVal,
+                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
+                captures[4].value.GLuintPointerVal);
+            break;
         case angle::EntryPoint::GLGetGraphicsResetStatus:
             glGetGraphicsResetStatus();
             break;
         case angle::EntryPoint::GLGetGraphicsResetStatusEXT:
             glGetGraphicsResetStatusEXT();
+            break;
+        case angle::EntryPoint::GLGetGraphicsResetStatusKHR:
+            glGetGraphicsResetStatusKHR();
             break;
         case angle::EntryPoint::GLGetInteger64i_v:
             glGetInteger64i_v(captures[0].value.GLenumVal, captures[1].value.GLuintVal,
@@ -1504,13 +1522,12 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
         case angle::EntryPoint::GLGetPointerv:
             glGetPointerv(captures[0].value.GLenumVal, captures[1].value.voidPointerPointerVal);
             break;
+        case angle::EntryPoint::GLGetPointervANGLE:
+            glGetPointervANGLE(captures[0].value.GLenumVal,
+                               captures[1].value.voidPointerPointerVal);
+            break;
         case angle::EntryPoint::GLGetPointervKHR:
             glGetPointervKHR(captures[0].value.GLenumVal, captures[1].value.voidPointerPointerVal);
-            break;
-        case angle::EntryPoint::GLGetPointervRobustANGLERobustANGLE:
-            glGetPointervRobustANGLERobustANGLE(
-                captures[0].value.GLenumVal, captures[1].value.GLsizeiVal,
-                captures[2].value.GLsizeiPointerVal, captures[3].value.voidPointerPointerVal);
             break;
         case angle::EntryPoint::GLGetProgramBinary:
             glGetProgramBinary(gShaderProgramMap[captures[0].value.GLuintVal],
@@ -1533,12 +1550,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             glGetProgramInterfaceiv(gShaderProgramMap[captures[0].value.GLuintVal],
                                     captures[1].value.GLenumVal, captures[2].value.GLenumVal,
                                     captures[3].value.GLintPointerVal);
-            break;
-        case angle::EntryPoint::GLGetProgramInterfaceivRobustANGLE:
-            glGetProgramInterfaceivRobustANGLE(
-                gShaderProgramMap[captures[0].value.GLuintVal], captures[1].value.GLenumVal,
-                captures[2].value.GLenumVal, captures[3].value.GLsizeiVal,
-                captures[4].value.GLsizeiPointerVal, captures[5].value.GLintPointerVal);
             break;
         case angle::EntryPoint::GLGetProgramPipelineInfoLog:
             glGetProgramPipelineInfoLog(
@@ -1692,12 +1703,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                         captures[1].value.GLenumVal,
                                         captures[2].value.GLintPointerVal);
             break;
-        case angle::EntryPoint::GLGetSamplerParameterIivRobustANGLE:
-            glGetSamplerParameterIivRobustANGLE(
-                gSamplerMap[captures[0].value.GLuintVal], captures[1].value.GLenumVal,
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
-                captures[4].value.GLintPointerVal);
-            break;
         case angle::EntryPoint::GLGetSamplerParameterIuiv:
             glGetSamplerParameterIuiv(gSamplerMap[captures[0].value.GLuintVal],
                                       captures[1].value.GLenumVal,
@@ -1712,12 +1717,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             glGetSamplerParameterIuivOES(gSamplerMap[captures[0].value.GLuintVal],
                                          captures[1].value.GLenumVal,
                                          captures[2].value.GLuintPointerVal);
-            break;
-        case angle::EntryPoint::GLGetSamplerParameterIuivRobustANGLE:
-            glGetSamplerParameterIuivRobustANGLE(
-                gSamplerMap[captures[0].value.GLuintVal], captures[1].value.GLenumVal,
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
-                captures[4].value.GLuintPointerVal);
             break;
         case angle::EntryPoint::GLGetSamplerParameterfv:
             glGetSamplerParameterfv(gSamplerMap[captures[0].value.GLuintVal],
@@ -1854,12 +1853,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             glGetTexParameterIivOES(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
                                     captures[2].value.GLintPointerVal);
             break;
-        case angle::EntryPoint::GLGetTexParameterIivRobustANGLE:
-            glGetTexParameterIivRobustANGLE(
-                captures[0].value.GLenumVal, captures[1].value.GLenumVal,
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
-                captures[4].value.GLintPointerVal);
-            break;
         case angle::EntryPoint::GLGetTexParameterIuiv:
             glGetTexParameterIuiv(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
                                   captures[2].value.GLuintPointerVal);
@@ -1871,12 +1864,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
         case angle::EntryPoint::GLGetTexParameterIuivOES:
             glGetTexParameterIuivOES(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
                                      captures[2].value.GLuintPointerVal);
-            break;
-        case angle::EntryPoint::GLGetTexParameterIuivRobustANGLE:
-            glGetTexParameterIuivRobustANGLE(
-                captures[0].value.GLenumVal, captures[1].value.GLenumVal,
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
-                captures[4].value.GLuintPointerVal);
             break;
         case angle::EntryPoint::GLGetTexParameterfv:
             glGetTexParameterfv(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
@@ -1929,39 +1916,45 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             break;
         case angle::EntryPoint::GLGetUniformfv:
             glGetUniformfv(gShaderProgramMap[captures[0].value.GLuintVal],
-                           gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                           gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                            [captures[1].value.GLintVal],
                            captures[2].value.GLfloatPointerVal);
             break;
         case angle::EntryPoint::GLGetUniformfvRobustANGLE:
-            glGetUniformfvRobustANGLE(
-                gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
-                captures[4].value.GLfloatPointerVal);
+            glGetUniformfvRobustANGLE(gShaderProgramMap[captures[0].value.GLuintVal],
+                                      gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                       [captures[1].value.GLintVal],
+                                      captures[2].value.GLsizeiVal,
+                                      captures[3].value.GLsizeiPointerVal,
+                                      captures[4].value.GLfloatPointerVal);
             break;
         case angle::EntryPoint::GLGetUniformiv:
             glGetUniformiv(gShaderProgramMap[captures[0].value.GLuintVal],
-                           gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                           gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                            [captures[1].value.GLintVal],
                            captures[2].value.GLintPointerVal);
             break;
         case angle::EntryPoint::GLGetUniformivRobustANGLE:
-            glGetUniformivRobustANGLE(
-                gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
-                captures[4].value.GLintPointerVal);
+            glGetUniformivRobustANGLE(gShaderProgramMap[captures[0].value.GLuintVal],
+                                      gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                       [captures[1].value.GLintVal],
+                                      captures[2].value.GLsizeiVal,
+                                      captures[3].value.GLsizeiPointerVal,
+                                      captures[4].value.GLintPointerVal);
             break;
         case angle::EntryPoint::GLGetUniformuiv:
             glGetUniformuiv(gShaderProgramMap[captures[0].value.GLuintVal],
-                            gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                            gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                             [captures[1].value.GLintVal],
                             captures[2].value.GLuintPointerVal);
             break;
         case angle::EntryPoint::GLGetUniformuivRobustANGLE:
-            glGetUniformuivRobustANGLE(
-                gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
-                captures[4].value.GLuintPointerVal);
+            glGetUniformuivRobustANGLE(gShaderProgramMap[captures[0].value.GLuintVal],
+                                       gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                        [captures[1].value.GLintVal],
+                                       captures[2].value.GLsizeiVal,
+                                       captures[3].value.GLsizeiPointerVal,
+                                       captures[4].value.GLuintPointerVal);
             break;
         case angle::EntryPoint::GLGetUnsignedBytei_vEXT:
             glGetUnsignedBytei_vEXT(captures[0].value.GLenumVal, captures[1].value.GLuintVal,
@@ -2022,49 +2015,51 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             break;
         case angle::EntryPoint::GLGetnUniformfv:
             glGetnUniformfv(gShaderProgramMap[captures[0].value.GLuintVal],
-                            gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                            gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                             [captures[1].value.GLintVal],
                             captures[2].value.GLsizeiVal, captures[3].value.GLfloatPointerVal);
             break;
         case angle::EntryPoint::GLGetnUniformfvEXT:
             glGetnUniformfvEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                               gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                               gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[1].value.GLintVal],
                                captures[2].value.GLsizeiVal, captures[3].value.GLfloatPointerVal);
             break;
-        case angle::EntryPoint::GLGetnUniformfvRobustANGLE:
-            glGetnUniformfvRobustANGLE(
-                gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
-                captures[4].value.GLfloatPointerVal);
+        case angle::EntryPoint::GLGetnUniformfvKHR:
+            glGetnUniformfvKHR(gShaderProgramMap[captures[0].value.GLuintVal],
+                               gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[1].value.GLintVal],
+                               captures[2].value.GLsizeiVal, captures[3].value.GLfloatPointerVal);
             break;
         case angle::EntryPoint::GLGetnUniformiv:
             glGetnUniformiv(gShaderProgramMap[captures[0].value.GLuintVal],
-                            gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                            gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                             [captures[1].value.GLintVal],
                             captures[2].value.GLsizeiVal, captures[3].value.GLintPointerVal);
             break;
         case angle::EntryPoint::GLGetnUniformivEXT:
             glGetnUniformivEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                               gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                               gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[1].value.GLintVal],
                                captures[2].value.GLsizeiVal, captures[3].value.GLintPointerVal);
             break;
-        case angle::EntryPoint::GLGetnUniformivRobustANGLE:
-            glGetnUniformivRobustANGLE(
-                gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
-                captures[4].value.GLintPointerVal);
+        case angle::EntryPoint::GLGetnUniformivKHR:
+            glGetnUniformivKHR(gShaderProgramMap[captures[0].value.GLuintVal],
+                               gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[1].value.GLintVal],
+                               captures[2].value.GLsizeiVal, captures[3].value.GLintPointerVal);
             break;
         case angle::EntryPoint::GLGetnUniformuiv:
             glGetnUniformuiv(gShaderProgramMap[captures[0].value.GLuintVal],
-                             gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                             gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                              [captures[1].value.GLintVal],
                              captures[2].value.GLsizeiVal, captures[3].value.GLuintPointerVal);
             break;
-        case angle::EntryPoint::GLGetnUniformuivRobustANGLE:
-            glGetnUniformuivRobustANGLE(
-                gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiPointerVal,
-                captures[4].value.GLuintPointerVal);
+        case angle::EntryPoint::GLGetnUniformuivKHR:
+            glGetnUniformuivKHR(gShaderProgramMap[captures[0].value.GLuintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
+                                captures[2].value.GLsizeiVal, captures[3].value.GLuintPointerVal);
             break;
         case angle::EntryPoint::GLHint:
             glHint(captures[0].value.GLenumVal, captures[1].value.GLenumVal);
@@ -2101,9 +2096,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                        captures[2].value.GLenumConstPointerVal,
                                        captures[3].value.GLintVal, captures[4].value.GLintVal,
                                        captures[5].value.GLsizeiVal, captures[6].value.GLsizeiVal);
-            break;
-        case angle::EntryPoint::GLInvalidateTextureANGLE:
-            glInvalidateTextureANGLE(captures[0].value.GLenumVal);
             break;
         case angle::EntryPoint::GLIsBuffer:
             glIsBuffer(gBufferMap[captures[0].value.GLuintVal]);
@@ -2305,6 +2297,11 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                 captures[0].value.GLenumVal, captures[1].value.GLintConstPointerVal,
                 captures[2].value.GLsizeiConstPointerVal, captures[3].value.GLsizeiVal);
             break;
+        case angle::EntryPoint::GLMultiDrawArraysEXT:
+            glMultiDrawArraysEXT(
+                captures[0].value.GLenumVal, captures[1].value.GLintConstPointerVal,
+                captures[2].value.GLsizeiConstPointerVal, captures[3].value.GLsizeiVal);
+            break;
         case angle::EntryPoint::GLMultiDrawArraysIndirectEXT:
             glMultiDrawArraysIndirectEXT(
                 captures[0].value.GLenumVal, captures[1].value.voidConstPointerVal,
@@ -2334,6 +2331,12 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                 captures[2].value.GLenumVal, captures[3].value.voidConstPointerPointerVal,
                 captures[4].value.GLsizeiVal, captures[5].value.GLintConstPointerVal);
             break;
+        case angle::EntryPoint::GLMultiDrawElementsEXT:
+            glMultiDrawElementsEXT(
+                captures[0].value.GLenumVal, captures[1].value.GLsizeiConstPointerVal,
+                captures[2].value.GLenumVal, captures[3].value.voidConstPointerPointerVal,
+                captures[4].value.GLsizeiVal);
+            break;
         case angle::EntryPoint::GLMultiDrawElementsIndirectEXT:
             glMultiDrawElementsIndirectEXT(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
                                            captures[2].value.voidConstPointerVal,
@@ -2362,12 +2365,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             glMultiTexCoord4x(captures[0].value.GLenumVal, captures[1].value.GLfixedVal,
                               captures[2].value.GLfixedVal, captures[3].value.GLfixedVal,
                               captures[4].value.GLfixedVal);
-            break;
-        case angle::EntryPoint::GLNamedBufferStorageExternalEXT:
-            glNamedBufferStorageExternalEXT(
-                captures[0].value.GLuintVal, captures[1].value.GLintptrVal,
-                captures[2].value.GLsizeiptrVal, captures[3].value.GLeglClientBufferEXTVal,
-                captures[4].value.GLbitfieldVal);
             break;
         case angle::EntryPoint::GLNormal3f:
             glNormal3f(captures[0].value.GLfloatVal, captures[1].value.GLfloatVal,
@@ -2412,6 +2409,9 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             break;
         case angle::EntryPoint::GLPatchParameteriEXT:
             glPatchParameteriEXT(captures[0].value.GLenumVal, captures[1].value.GLintVal);
+            break;
+        case angle::EntryPoint::GLPatchParameteriOES:
+            glPatchParameteriOES(captures[0].value.GLenumVal, captures[1].value.GLintVal);
             break;
         case angle::EntryPoint::GLPauseTransformFeedback:
             glPauseTransformFeedback();
@@ -2512,403 +2512,466 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             break;
         case angle::EntryPoint::GLProgramUniform1f:
             glProgramUniform1f(gShaderProgramMap[captures[0].value.GLuintVal],
-                               gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                               gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[1].value.GLintVal],
                                captures[2].value.GLfloatVal);
             break;
         case angle::EntryPoint::GLProgramUniform1fEXT:
             glProgramUniform1fEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                  gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                  gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                   [captures[1].value.GLintVal],
                                   captures[2].value.GLfloatVal);
             break;
         case angle::EntryPoint::GLProgramUniform1fv:
             glProgramUniform1fv(gShaderProgramMap[captures[0].value.GLuintVal],
-                                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
                                 captures[2].value.GLsizeiVal,
                                 captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform1fvEXT:
             glProgramUniform1fvEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                   gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                   gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                    [captures[1].value.GLintVal],
                                    captures[2].value.GLsizeiVal,
                                    captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform1i:
             glProgramUniform1i(gShaderProgramMap[captures[0].value.GLuintVal],
-                               gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                               gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[1].value.GLintVal],
                                captures[2].value.GLintVal);
             break;
         case angle::EntryPoint::GLProgramUniform1iEXT:
             glProgramUniform1iEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                  gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                  gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                   [captures[1].value.GLintVal],
                                   captures[2].value.GLintVal);
             break;
         case angle::EntryPoint::GLProgramUniform1iv:
             glProgramUniform1iv(gShaderProgramMap[captures[0].value.GLuintVal],
-                                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
                                 captures[2].value.GLsizeiVal,
                                 captures[3].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform1ivEXT:
             glProgramUniform1ivEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                   gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                   gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                    [captures[1].value.GLintVal],
                                    captures[2].value.GLsizeiVal,
                                    captures[3].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform1ui:
             glProgramUniform1ui(gShaderProgramMap[captures[0].value.GLuintVal],
-                                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
                                 captures[2].value.GLuintVal);
             break;
         case angle::EntryPoint::GLProgramUniform1uiEXT:
             glProgramUniform1uiEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                   gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                   gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                    [captures[1].value.GLintVal],
                                    captures[2].value.GLuintVal);
             break;
         case angle::EntryPoint::GLProgramUniform1uiv:
             glProgramUniform1uiv(gShaderProgramMap[captures[0].value.GLuintVal],
-                                 gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                 gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                  [captures[1].value.GLintVal],
                                  captures[2].value.GLsizeiVal,
                                  captures[3].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform1uivEXT:
             glProgramUniform1uivEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                    gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                    gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                     [captures[1].value.GLintVal],
                                     captures[2].value.GLsizeiVal,
                                     captures[3].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform2f:
             glProgramUniform2f(gShaderProgramMap[captures[0].value.GLuintVal],
-                               gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                               gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[1].value.GLintVal],
                                captures[2].value.GLfloatVal, captures[3].value.GLfloatVal);
             break;
         case angle::EntryPoint::GLProgramUniform2fEXT:
             glProgramUniform2fEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                  gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                  gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                   [captures[1].value.GLintVal],
                                   captures[2].value.GLfloatVal, captures[3].value.GLfloatVal);
             break;
         case angle::EntryPoint::GLProgramUniform2fv:
             glProgramUniform2fv(gShaderProgramMap[captures[0].value.GLuintVal],
-                                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
                                 captures[2].value.GLsizeiVal,
                                 captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform2fvEXT:
             glProgramUniform2fvEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                   gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                   gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                    [captures[1].value.GLintVal],
                                    captures[2].value.GLsizeiVal,
                                    captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform2i:
             glProgramUniform2i(gShaderProgramMap[captures[0].value.GLuintVal],
-                               gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                               gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[1].value.GLintVal],
                                captures[2].value.GLintVal, captures[3].value.GLintVal);
             break;
         case angle::EntryPoint::GLProgramUniform2iEXT:
             glProgramUniform2iEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                  gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                  gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                   [captures[1].value.GLintVal],
                                   captures[2].value.GLintVal, captures[3].value.GLintVal);
             break;
         case angle::EntryPoint::GLProgramUniform2iv:
             glProgramUniform2iv(gShaderProgramMap[captures[0].value.GLuintVal],
-                                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
                                 captures[2].value.GLsizeiVal,
                                 captures[3].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform2ivEXT:
             glProgramUniform2ivEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                   gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                   gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                    [captures[1].value.GLintVal],
                                    captures[2].value.GLsizeiVal,
                                    captures[3].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform2ui:
             glProgramUniform2ui(gShaderProgramMap[captures[0].value.GLuintVal],
-                                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
                                 captures[2].value.GLuintVal, captures[3].value.GLuintVal);
             break;
         case angle::EntryPoint::GLProgramUniform2uiEXT:
             glProgramUniform2uiEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                   gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                   gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                    [captures[1].value.GLintVal],
                                    captures[2].value.GLuintVal, captures[3].value.GLuintVal);
             break;
         case angle::EntryPoint::GLProgramUniform2uiv:
             glProgramUniform2uiv(gShaderProgramMap[captures[0].value.GLuintVal],
-                                 gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                 gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                  [captures[1].value.GLintVal],
                                  captures[2].value.GLsizeiVal,
                                  captures[3].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform2uivEXT:
             glProgramUniform2uivEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                    gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                    gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                     [captures[1].value.GLintVal],
                                     captures[2].value.GLsizeiVal,
                                     captures[3].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform3f:
             glProgramUniform3f(gShaderProgramMap[captures[0].value.GLuintVal],
-                               gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                               gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[1].value.GLintVal],
                                captures[2].value.GLfloatVal, captures[3].value.GLfloatVal,
                                captures[4].value.GLfloatVal);
             break;
         case angle::EntryPoint::GLProgramUniform3fEXT:
             glProgramUniform3fEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                  gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                  gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                   [captures[1].value.GLintVal],
                                   captures[2].value.GLfloatVal, captures[3].value.GLfloatVal,
                                   captures[4].value.GLfloatVal);
             break;
         case angle::EntryPoint::GLProgramUniform3fv:
             glProgramUniform3fv(gShaderProgramMap[captures[0].value.GLuintVal],
-                                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
                                 captures[2].value.GLsizeiVal,
                                 captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform3fvEXT:
             glProgramUniform3fvEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                   gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                   gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                    [captures[1].value.GLintVal],
                                    captures[2].value.GLsizeiVal,
                                    captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform3i:
             glProgramUniform3i(gShaderProgramMap[captures[0].value.GLuintVal],
-                               gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                               gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[1].value.GLintVal],
                                captures[2].value.GLintVal, captures[3].value.GLintVal,
                                captures[4].value.GLintVal);
             break;
         case angle::EntryPoint::GLProgramUniform3iEXT:
             glProgramUniform3iEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                  gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                  gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                   [captures[1].value.GLintVal],
                                   captures[2].value.GLintVal, captures[3].value.GLintVal,
                                   captures[4].value.GLintVal);
             break;
         case angle::EntryPoint::GLProgramUniform3iv:
             glProgramUniform3iv(gShaderProgramMap[captures[0].value.GLuintVal],
-                                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
                                 captures[2].value.GLsizeiVal,
                                 captures[3].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform3ivEXT:
             glProgramUniform3ivEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                   gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                   gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                    [captures[1].value.GLintVal],
                                    captures[2].value.GLsizeiVal,
                                    captures[3].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform3ui:
             glProgramUniform3ui(gShaderProgramMap[captures[0].value.GLuintVal],
-                                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
                                 captures[2].value.GLuintVal, captures[3].value.GLuintVal,
                                 captures[4].value.GLuintVal);
             break;
         case angle::EntryPoint::GLProgramUniform3uiEXT:
             glProgramUniform3uiEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                   gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                   gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                    [captures[1].value.GLintVal],
                                    captures[2].value.GLuintVal, captures[3].value.GLuintVal,
                                    captures[4].value.GLuintVal);
             break;
         case angle::EntryPoint::GLProgramUniform3uiv:
             glProgramUniform3uiv(gShaderProgramMap[captures[0].value.GLuintVal],
-                                 gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                 gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                  [captures[1].value.GLintVal],
                                  captures[2].value.GLsizeiVal,
                                  captures[3].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform3uivEXT:
             glProgramUniform3uivEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                    gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                    gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                     [captures[1].value.GLintVal],
                                     captures[2].value.GLsizeiVal,
                                     captures[3].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform4f:
             glProgramUniform4f(gShaderProgramMap[captures[0].value.GLuintVal],
-                               gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                               gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[1].value.GLintVal],
                                captures[2].value.GLfloatVal, captures[3].value.GLfloatVal,
                                captures[4].value.GLfloatVal, captures[5].value.GLfloatVal);
             break;
         case angle::EntryPoint::GLProgramUniform4fEXT:
             glProgramUniform4fEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                  gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                  gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                   [captures[1].value.GLintVal],
                                   captures[2].value.GLfloatVal, captures[3].value.GLfloatVal,
                                   captures[4].value.GLfloatVal, captures[5].value.GLfloatVal);
             break;
         case angle::EntryPoint::GLProgramUniform4fv:
             glProgramUniform4fv(gShaderProgramMap[captures[0].value.GLuintVal],
-                                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
                                 captures[2].value.GLsizeiVal,
                                 captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform4fvEXT:
             glProgramUniform4fvEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                   gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                   gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                    [captures[1].value.GLintVal],
                                    captures[2].value.GLsizeiVal,
                                    captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform4i:
             glProgramUniform4i(gShaderProgramMap[captures[0].value.GLuintVal],
-                               gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                               gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[1].value.GLintVal],
                                captures[2].value.GLintVal, captures[3].value.GLintVal,
                                captures[4].value.GLintVal, captures[5].value.GLintVal);
             break;
         case angle::EntryPoint::GLProgramUniform4iEXT:
             glProgramUniform4iEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                  gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                  gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                   [captures[1].value.GLintVal],
                                   captures[2].value.GLintVal, captures[3].value.GLintVal,
                                   captures[4].value.GLintVal, captures[5].value.GLintVal);
             break;
         case angle::EntryPoint::GLProgramUniform4iv:
             glProgramUniform4iv(gShaderProgramMap[captures[0].value.GLuintVal],
-                                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
                                 captures[2].value.GLsizeiVal,
                                 captures[3].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform4ivEXT:
             glProgramUniform4ivEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                   gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                   gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                    [captures[1].value.GLintVal],
                                    captures[2].value.GLsizeiVal,
                                    captures[3].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform4ui:
             glProgramUniform4ui(gShaderProgramMap[captures[0].value.GLuintVal],
-                                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                 [captures[1].value.GLintVal],
                                 captures[2].value.GLuintVal, captures[3].value.GLuintVal,
                                 captures[4].value.GLuintVal, captures[5].value.GLuintVal);
             break;
         case angle::EntryPoint::GLProgramUniform4uiEXT:
             glProgramUniform4uiEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                   gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                   gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                    [captures[1].value.GLintVal],
                                    captures[2].value.GLuintVal, captures[3].value.GLuintVal,
                                    captures[4].value.GLuintVal, captures[5].value.GLuintVal);
             break;
         case angle::EntryPoint::GLProgramUniform4uiv:
             glProgramUniform4uiv(gShaderProgramMap[captures[0].value.GLuintVal],
-                                 gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                 gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                  [captures[1].value.GLintVal],
                                  captures[2].value.GLsizeiVal,
                                  captures[3].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniform4uivEXT:
             glProgramUniform4uivEXT(gShaderProgramMap[captures[0].value.GLuintVal],
-                                    gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                                    gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                     [captures[1].value.GLintVal],
                                     captures[2].value.GLsizeiVal,
                                     captures[3].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix2fv:
-            glProgramUniformMatrix2fv(
-                gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
-                captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
-                captures[4].value.GLfloatConstPointerVal);
+            glProgramUniformMatrix2fv(gShaderProgramMap[captures[0].value.GLuintVal],
+                                      gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                       [captures[1].value.GLintVal],
+                                      captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
+                                      captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix2fvEXT:
             glProgramUniformMatrix2fvEXT(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix2x3fv:
             glProgramUniformMatrix2x3fv(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix2x3fvEXT:
             glProgramUniformMatrix2x3fvEXT(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix2x4fv:
             glProgramUniformMatrix2x4fv(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix2x4fvEXT:
             glProgramUniformMatrix2x4fvEXT(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix3fv:
-            glProgramUniformMatrix3fv(
-                gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
-                captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
-                captures[4].value.GLfloatConstPointerVal);
+            glProgramUniformMatrix3fv(gShaderProgramMap[captures[0].value.GLuintVal],
+                                      gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                       [captures[1].value.GLintVal],
+                                      captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
+                                      captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix3fvEXT:
             glProgramUniformMatrix3fvEXT(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix3x2fv:
             glProgramUniformMatrix3x2fv(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix3x2fvEXT:
             glProgramUniformMatrix3x2fvEXT(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix3x4fv:
             glProgramUniformMatrix3x4fv(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix3x4fvEXT:
             glProgramUniformMatrix3x4fvEXT(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix4fv:
-            glProgramUniformMatrix4fv(
-                gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
-                captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
-                captures[4].value.GLfloatConstPointerVal);
+            glProgramUniformMatrix4fv(gShaderProgramMap[captures[0].value.GLuintVal],
+                                      gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                       [captures[1].value.GLintVal],
+                                      captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
+                                      captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix4fvEXT:
             glProgramUniformMatrix4fvEXT(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix4x2fv:
             glProgramUniformMatrix4x2fv(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix4x2fvEXT:
             glProgramUniformMatrix4x2fvEXT(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix4x3fv:
             glProgramUniformMatrix4x3fv(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLProgramUniformMatrix4x3fvEXT:
             glProgramUniformMatrix4x3fvEXT(
                 gShaderProgramMap[captures[0].value.GLuintVal],
-                gUniformLocations[gCurrentProgram][captures[1].value.GLintVal],
+                gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                 [captures[1].value.GLintVal],
                 captures[2].value.GLsizeiVal, captures[3].value.GLbooleanVal,
                 captures[4].value.GLfloatConstPointerVal);
             break;
@@ -2968,14 +3031,11 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                              captures[4].value.GLenumVal, captures[5].value.GLenumVal,
                              captures[6].value.GLsizeiVal, captures[7].value.voidPointerVal);
             break;
-        case angle::EntryPoint::GLReadnPixelsRobustANGLE:
-            glReadnPixelsRobustANGLE(
-                captures[0].value.GLintVal, captures[1].value.GLintVal,
-                captures[2].value.GLsizeiVal, captures[3].value.GLsizeiVal,
-                captures[4].value.GLenumVal, captures[5].value.GLenumVal,
-                captures[6].value.GLsizeiVal, captures[7].value.GLsizeiPointerVal,
-                captures[8].value.GLsizeiPointerVal, captures[9].value.GLsizeiPointerVal,
-                captures[10].value.voidPointerVal);
+        case angle::EntryPoint::GLReadnPixelsKHR:
+            glReadnPixelsKHR(captures[0].value.GLintVal, captures[1].value.GLintVal,
+                             captures[2].value.GLsizeiVal, captures[3].value.GLsizeiVal,
+                             captures[4].value.GLenumVal, captures[5].value.GLenumVal,
+                             captures[6].value.GLsizeiVal, captures[7].value.voidPointerVal);
             break;
         case angle::EntryPoint::GLReleaseShaderCompiler:
             glReleaseShaderCompiler();
@@ -3052,11 +3112,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                      captures[1].value.GLenumVal,
                                      captures[2].value.GLintConstPointerVal);
             break;
-        case angle::EntryPoint::GLSamplerParameterIivRobustANGLE:
-            glSamplerParameterIivRobustANGLE(
-                gSamplerMap[captures[0].value.GLuintVal], captures[1].value.GLenumVal,
-                captures[2].value.GLsizeiVal, captures[3].value.GLintConstPointerVal);
-            break;
         case angle::EntryPoint::GLSamplerParameterIuiv:
             glSamplerParameterIuiv(gSamplerMap[captures[0].value.GLuintVal],
                                    captures[1].value.GLenumVal,
@@ -3071,11 +3126,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             glSamplerParameterIuivOES(gSamplerMap[captures[0].value.GLuintVal],
                                       captures[1].value.GLenumVal,
                                       captures[2].value.GLuintConstPointerVal);
-            break;
-        case angle::EntryPoint::GLSamplerParameterIuivRobustANGLE:
-            glSamplerParameterIuivRobustANGLE(
-                gSamplerMap[captures[0].value.GLuintVal], captures[1].value.GLenumVal,
-                captures[2].value.GLsizeiVal, captures[3].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLSamplerParameterf:
             glSamplerParameterf(gSamplerMap[captures[0].value.GLuintVal],
@@ -3145,6 +3195,12 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                            captures[2].value.GLcharConstPointerPointerVal,
                            captures[3].value.GLintConstPointerVal);
             break;
+        case angle::EntryPoint::GLShadingRateCombinerOpsEXT:
+            glShadingRateCombinerOpsEXT(captures[0].value.GLenumVal, captures[1].value.GLenumVal);
+            break;
+        case angle::EntryPoint::GLShadingRateEXT:
+            glShadingRateEXT(captures[0].value.GLenumVal);
+            break;
         case angle::EntryPoint::GLShadingRateQCOM:
             glShadingRateQCOM(captures[0].value.GLenumVal);
             break;
@@ -3153,6 +3209,11 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                 gSemaphoreMap[captures[0].value.GLuintVal], captures[1].value.GLuintVal,
                 captures[2].value.GLuintConstPointerVal, captures[3].value.GLuintVal,
                 captures[4].value.GLuintConstPointerVal, captures[5].value.GLenumConstPointerVal);
+            break;
+        case angle::EntryPoint::GLStartTilingQCOM:
+            glStartTilingQCOM(captures[0].value.GLuintVal, captures[1].value.GLuintVal,
+                              captures[2].value.GLuintVal, captures[3].value.GLuintVal,
+                              captures[4].value.GLbitfieldVal);
             break;
         case angle::EntryPoint::GLStencilFunc:
             glStencilFunc(captures[0].value.GLenumVal, captures[1].value.GLintVal,
@@ -3265,12 +3326,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                          captures[6].value.GLenumVal, captures[7].value.GLenumVal,
                          captures[8].value.voidConstPointerVal);
             break;
-        case angle::EntryPoint::GLTexImage2DExternalANGLE:
-            glTexImage2DExternalANGLE(captures[0].value.GLenumVal, captures[1].value.GLintVal,
-                                      captures[2].value.GLintVal, captures[3].value.GLsizeiVal,
-                                      captures[4].value.GLsizeiVal, captures[5].value.GLintVal,
-                                      captures[6].value.GLenumVal, captures[7].value.GLenumVal);
-            break;
         case angle::EntryPoint::GLTexImage2DRobustANGLE:
             glTexImage2DRobustANGLE(captures[0].value.GLenumVal, captures[1].value.GLintVal,
                                     captures[2].value.GLintVal, captures[3].value.GLsizeiVal,
@@ -3313,11 +3368,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
             glTexParameterIivOES(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
                                  captures[2].value.GLintConstPointerVal);
             break;
-        case angle::EntryPoint::GLTexParameterIivRobustANGLE:
-            glTexParameterIivRobustANGLE(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
-                                         captures[2].value.GLsizeiVal,
-                                         captures[3].value.GLintConstPointerVal);
-            break;
         case angle::EntryPoint::GLTexParameterIuiv:
             glTexParameterIuiv(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
                                captures[2].value.GLuintConstPointerVal);
@@ -3329,11 +3379,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
         case angle::EntryPoint::GLTexParameterIuivOES:
             glTexParameterIuivOES(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
                                   captures[2].value.GLuintConstPointerVal);
-            break;
-        case angle::EntryPoint::GLTexParameterIuivRobustANGLE:
-            glTexParameterIuivRobustANGLE(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
-                                          captures[2].value.GLsizeiVal,
-                                          captures[3].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLTexParameterf:
             glTexParameterf(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
@@ -3368,10 +3413,6 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
         case angle::EntryPoint::GLTexParameterxv:
             glTexParameterxv(captures[0].value.GLenumVal, captures[1].value.GLenumVal,
                              captures[2].value.GLfixedConstPointerVal);
-            break;
-        case angle::EntryPoint::GLTexStorage1DEXT:
-            glTexStorage1DEXT(captures[0].value.GLenumVal, captures[1].value.GLsizeiVal,
-                              captures[2].value.GLenumVal, captures[3].value.GLsizeiVal);
             break;
         case angle::EntryPoint::GLTexStorage2D:
             glTexStorage2D(captures[0].value.GLenumVal, captures[1].value.GLsizeiVal,
@@ -3415,6 +3456,18 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                          captures[2].value.GLenumVal, captures[3].value.GLsizeiVal,
                                          captures[4].value.GLsizeiVal, captures[5].value.GLsizeiVal,
                                          captures[6].value.GLbooleanVal);
+            break;
+        case angle::EntryPoint::GLTexStorageAttribs2DEXT:
+            glTexStorageAttribs2DEXT(captures[0].value.GLenumVal, captures[1].value.GLsizeiVal,
+                                     captures[2].value.GLenumVal, captures[3].value.GLsizeiVal,
+                                     captures[4].value.GLsizeiVal,
+                                     captures[5].value.GLintConstPointerVal);
+            break;
+        case angle::EntryPoint::GLTexStorageAttribs3DEXT:
+            glTexStorageAttribs3DEXT(captures[0].value.GLenumVal, captures[1].value.GLsizeiVal,
+                                     captures[2].value.GLenumVal, captures[3].value.GLsizeiVal,
+                                     captures[4].value.GLsizeiVal, captures[5].value.GLsizeiVal,
+                                     captures[6].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLTexStorageMem2DEXT:
             glTexStorageMem2DEXT(captures[0].value.GLenumVal, captures[1].value.GLsizeiVal,
@@ -3520,6 +3573,13 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                        captures[10].value.GLsizeiVal,
                                        captures[11].value.voidConstPointerVal);
             break;
+        case angle::EntryPoint::GLTextureFoveationParametersQCOM:
+            glTextureFoveationParametersQCOM(
+                gTextureMap[captures[0].value.GLuintVal], captures[1].value.GLuintVal,
+                captures[2].value.GLuintVal, captures[3].value.GLfloatVal,
+                captures[4].value.GLfloatVal, captures[5].value.GLfloatVal,
+                captures[6].value.GLfloatVal, captures[7].value.GLfloatVal);
+            break;
         case angle::EntryPoint::GLTransformFeedbackVaryings:
             glTransformFeedbackVaryings(
                 gShaderProgramMap[captures[0].value.GLuintVal], captures[1].value.GLsizeiVal,
@@ -3534,105 +3594,129 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                          captures[2].value.GLfixedVal);
             break;
         case angle::EntryPoint::GLUniform1f:
-            glUniform1f(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform1f(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                         [captures[0].value.GLintVal],
                         captures[1].value.GLfloatVal);
             break;
         case angle::EntryPoint::GLUniform1fv:
-            glUniform1fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform1fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                          [captures[0].value.GLintVal],
                          captures[1].value.GLsizeiVal, captures[2].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLUniform1i:
-            glUniform1i(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform1i(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                         [captures[0].value.GLintVal],
                         captures[1].value.GLintVal);
             break;
         case angle::EntryPoint::GLUniform1iv:
-            glUniform1iv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform1iv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                          [captures[0].value.GLintVal],
                          captures[1].value.GLsizeiVal, captures[2].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLUniform1ui:
-            glUniform1ui(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform1ui(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                          [captures[0].value.GLintVal],
                          captures[1].value.GLuintVal);
             break;
         case angle::EntryPoint::GLUniform1uiv:
-            glUniform1uiv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform1uiv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                           [captures[0].value.GLintVal],
                           captures[1].value.GLsizeiVal, captures[2].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLUniform2f:
-            glUniform2f(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform2f(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                         [captures[0].value.GLintVal],
                         captures[1].value.GLfloatVal, captures[2].value.GLfloatVal);
             break;
         case angle::EntryPoint::GLUniform2fv:
-            glUniform2fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform2fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                          [captures[0].value.GLintVal],
                          captures[1].value.GLsizeiVal, captures[2].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLUniform2i:
-            glUniform2i(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform2i(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                         [captures[0].value.GLintVal],
                         captures[1].value.GLintVal, captures[2].value.GLintVal);
             break;
         case angle::EntryPoint::GLUniform2iv:
-            glUniform2iv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform2iv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                          [captures[0].value.GLintVal],
                          captures[1].value.GLsizeiVal, captures[2].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLUniform2ui:
-            glUniform2ui(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform2ui(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                          [captures[0].value.GLintVal],
                          captures[1].value.GLuintVal, captures[2].value.GLuintVal);
             break;
         case angle::EntryPoint::GLUniform2uiv:
-            glUniform2uiv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform2uiv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                           [captures[0].value.GLintVal],
                           captures[1].value.GLsizeiVal, captures[2].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLUniform3f:
-            glUniform3f(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform3f(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                         [captures[0].value.GLintVal],
                         captures[1].value.GLfloatVal, captures[2].value.GLfloatVal,
                         captures[3].value.GLfloatVal);
             break;
         case angle::EntryPoint::GLUniform3fv:
-            glUniform3fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform3fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                          [captures[0].value.GLintVal],
                          captures[1].value.GLsizeiVal, captures[2].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLUniform3i:
-            glUniform3i(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform3i(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                         [captures[0].value.GLintVal],
                         captures[1].value.GLintVal, captures[2].value.GLintVal,
                         captures[3].value.GLintVal);
             break;
         case angle::EntryPoint::GLUniform3iv:
-            glUniform3iv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform3iv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                          [captures[0].value.GLintVal],
                          captures[1].value.GLsizeiVal, captures[2].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLUniform3ui:
-            glUniform3ui(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform3ui(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                          [captures[0].value.GLintVal],
                          captures[1].value.GLuintVal, captures[2].value.GLuintVal,
                          captures[3].value.GLuintVal);
             break;
         case angle::EntryPoint::GLUniform3uiv:
-            glUniform3uiv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform3uiv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                           [captures[0].value.GLintVal],
                           captures[1].value.GLsizeiVal, captures[2].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLUniform4f:
-            glUniform4f(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform4f(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                         [captures[0].value.GLintVal],
                         captures[1].value.GLfloatVal, captures[2].value.GLfloatVal,
                         captures[3].value.GLfloatVal, captures[4].value.GLfloatVal);
             break;
         case angle::EntryPoint::GLUniform4fv:
-            glUniform4fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform4fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                          [captures[0].value.GLintVal],
                          captures[1].value.GLsizeiVal, captures[2].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLUniform4i:
-            glUniform4i(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform4i(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                         [captures[0].value.GLintVal],
                         captures[1].value.GLintVal, captures[2].value.GLintVal,
                         captures[3].value.GLintVal, captures[4].value.GLintVal);
             break;
         case angle::EntryPoint::GLUniform4iv:
-            glUniform4iv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform4iv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                          [captures[0].value.GLintVal],
                          captures[1].value.GLsizeiVal, captures[2].value.GLintConstPointerVal);
             break;
         case angle::EntryPoint::GLUniform4ui:
-            glUniform4ui(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform4ui(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                          [captures[0].value.GLintVal],
                          captures[1].value.GLuintVal, captures[2].value.GLuintVal,
                          captures[3].value.GLuintVal, captures[4].value.GLuintVal);
             break;
         case angle::EntryPoint::GLUniform4uiv:
-            glUniform4uiv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniform4uiv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                           [captures[0].value.GLintVal],
                           captures[1].value.GLsizeiVal, captures[2].value.GLuintConstPointerVal);
             break;
         case angle::EntryPoint::GLUniformBlockBinding:
@@ -3640,47 +3724,56 @@ void ReplayTraceFunctionCall(const CallCapture &call, const TraceFunctionMap &cu
                                   captures[1].value.GLuintVal, captures[2].value.GLuintVal);
             break;
         case angle::EntryPoint::GLUniformMatrix2fv:
-            glUniformMatrix2fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniformMatrix2fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[0].value.GLintVal],
                                captures[1].value.GLsizeiVal, captures[2].value.GLbooleanVal,
                                captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLUniformMatrix2x3fv:
-            glUniformMatrix2x3fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniformMatrix2x3fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                  [captures[0].value.GLintVal],
                                  captures[1].value.GLsizeiVal, captures[2].value.GLbooleanVal,
                                  captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLUniformMatrix2x4fv:
-            glUniformMatrix2x4fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniformMatrix2x4fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                  [captures[0].value.GLintVal],
                                  captures[1].value.GLsizeiVal, captures[2].value.GLbooleanVal,
                                  captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLUniformMatrix3fv:
-            glUniformMatrix3fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniformMatrix3fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[0].value.GLintVal],
                                captures[1].value.GLsizeiVal, captures[2].value.GLbooleanVal,
                                captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLUniformMatrix3x2fv:
-            glUniformMatrix3x2fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniformMatrix3x2fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                  [captures[0].value.GLintVal],
                                  captures[1].value.GLsizeiVal, captures[2].value.GLbooleanVal,
                                  captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLUniformMatrix3x4fv:
-            glUniformMatrix3x4fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniformMatrix3x4fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                  [captures[0].value.GLintVal],
                                  captures[1].value.GLsizeiVal, captures[2].value.GLbooleanVal,
                                  captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLUniformMatrix4fv:
-            glUniformMatrix4fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniformMatrix4fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                [captures[0].value.GLintVal],
                                captures[1].value.GLsizeiVal, captures[2].value.GLbooleanVal,
                                captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLUniformMatrix4x2fv:
-            glUniformMatrix4x2fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniformMatrix4x2fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                  [captures[0].value.GLintVal],
                                  captures[1].value.GLsizeiVal, captures[2].value.GLbooleanVal,
                                  captures[3].value.GLfloatConstPointerVal);
             break;
         case angle::EntryPoint::GLUniformMatrix4x3fv:
-            glUniformMatrix4x3fv(gUniformLocations[gCurrentProgram][captures[0].value.GLintVal],
+            glUniformMatrix4x3fv(gUniformLocations[gCurrentProgramPerContext[gCurrentContext]]
+                                                  [captures[0].value.GLintVal],
                                  captures[1].value.GLsizeiVal, captures[2].value.GLbooleanVal,
                                  captures[3].value.GLfloatConstPointerVal);
             break;

@@ -11,6 +11,7 @@
 #include "common/mathutil.h"
 #include "common/platform.h"
 #include "common/string_utils.h"
+#include "common/unsafe_buffers.h"
 
 #include <set>
 
@@ -27,68 +28,42 @@ namespace
 template <class IndexType>
 gl::IndexRange ComputeTypedIndexRange(const IndexType *indices,
                                       size_t count,
-                                      bool primitiveRestartEnabled,
-                                      GLuint primitiveRestartIndex)
+                                      bool primitiveRestartEnabled)
 {
-    ASSERT(count > 0);
-
-    IndexType minIndex                = 0;
-    IndexType maxIndex                = 0;
-    size_t nonPrimitiveRestartIndices = 0;
+    constexpr IndexType primitiveRestartIndex = std::numeric_limits<IndexType>::max();
+    IndexType minIndex                        = primitiveRestartIndex;
+    IndexType maxIndex                        = 0;
+    bool hasVertices                          = false;
 
     if (primitiveRestartEnabled)
     {
-        // Find the first non-primitive restart index to initialize the min and max values
-        size_t i = 0;
-        for (; i < count; i++)
+        for (size_t i = 0; i < count; i++)
         {
-            if (indices[i] != primitiveRestartIndex)
+            IndexType index = ANGLE_UNSAFE_TODO(indices[i]);
+            if (index == primitiveRestartIndex)
             {
-                minIndex = indices[i];
-                maxIndex = indices[i];
-                nonPrimitiveRestartIndices++;
-                break;
+                continue;
             }
-        }
-
-        // Loop over the rest of the indices
-        for (; i < count; i++)
-        {
-            if (indices[i] != primitiveRestartIndex)
-            {
-                if (minIndex > indices[i])
-                {
-                    minIndex = indices[i];
-                }
-                if (maxIndex < indices[i])
-                {
-                    maxIndex = indices[i];
-                }
-                nonPrimitiveRestartIndices++;
-            }
+            hasVertices = true;
+            minIndex    = std::min(minIndex, index);
+            maxIndex    = std::max(maxIndex, index);
         }
     }
     else
     {
-        minIndex                   = indices[0];
-        maxIndex                   = indices[0];
-        nonPrimitiveRestartIndices = count;
-
-        for (size_t i = 1; i < count; i++)
+        for (size_t i = 0; i < count; i++)
         {
-            if (minIndex > indices[i])
-            {
-                minIndex = indices[i];
-            }
-            if (maxIndex < indices[i])
-            {
-                maxIndex = indices[i];
-            }
+            IndexType index = ANGLE_UNSAFE_TODO(indices[i]);
+            minIndex        = std::min(minIndex, index);
+            maxIndex        = std::max(maxIndex, index);
         }
+        hasVertices = count > 0;
     }
-
-    return gl::IndexRange(static_cast<size_t>(minIndex), static_cast<size_t>(maxIndex),
-                          nonPrimitiveRestartIndices);
+    if (!hasVertices)
+    {
+        return gl::IndexRange();
+    }
+    return gl::IndexRange(minIndex, maxIndex);
 }
 
 }  // anonymous namespace
@@ -176,7 +151,6 @@ GLenum VariableComponentType(GLenum type)
         case GL_UNSIGNED_INT_SAMPLER_BUFFER:
         case GL_UNSIGNED_INT_IMAGE_BUFFER:
         case GL_UNSIGNED_INT_ATOMIC_COUNTER:
-        case GL_SAMPLER_VIDEO_IMAGE_WEBGL:
         case GL_SAMPLER_EXTERNAL_2D_Y2Y_EXT:
             return GL_INT;
         case GL_UNSIGNED_INT:
@@ -367,7 +341,6 @@ int VariableRowCount(GLenum type)
         case GL_IMAGE_BUFFER:
         case GL_INT_IMAGE_BUFFER:
         case GL_UNSIGNED_INT_IMAGE_BUFFER:
-        case GL_SAMPLER_VIDEO_IMAGE_WEBGL:
         case GL_SAMPLER_EXTERNAL_2D_Y2Y_EXT:
             return 1;
         case GL_FLOAT_MAT2:
@@ -448,7 +421,6 @@ int VariableColumnCount(GLenum type)
         case GL_INT_IMAGE_CUBE:
         case GL_UNSIGNED_INT_IMAGE_CUBE:
         case GL_UNSIGNED_INT_ATOMIC_COUNTER:
-        case GL_SAMPLER_VIDEO_IMAGE_WEBGL:
         case GL_SAMPLER_EXTERNAL_2D_Y2Y_EXT:
             return 1;
         case GL_BOOL_VEC2:
@@ -516,7 +488,6 @@ bool IsSamplerType(GLenum type)
         case GL_SAMPLER_CUBE_SHADOW:
         case GL_SAMPLER_2D_ARRAY_SHADOW:
         case GL_SAMPLER_CUBE_MAP_ARRAY_SHADOW:
-        case GL_SAMPLER_VIDEO_IMAGE_WEBGL:
         case GL_SAMPLER_EXTERNAL_2D_Y2Y_EXT:
             return true;
     }
@@ -623,6 +594,33 @@ bool IsMatrixType(GLenum type)
     return VariableRowCount(type) > 1;
 }
 
+bool IsFloatScalarAndVectorType(GLenum type)
+{
+    switch (type)
+    {
+        case GL_FLOAT:
+        case GL_FLOAT_VEC2:
+        case GL_FLOAT_VEC3:
+        case GL_FLOAT_VEC4:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool IsFloatVectorType(GLenum type)
+{
+    switch (type)
+    {
+        case GL_FLOAT_VEC2:
+        case GL_FLOAT_VEC3:
+        case GL_FLOAT_VEC4:
+            return true;
+        default:
+            return false;
+    }
+}
+
 GLenum TransposeMatrixType(GLenum type)
 {
     if (!IsMatrixType(type))
@@ -703,16 +701,13 @@ IndexRange ComputeIndexRange(DrawElementsType indexType,
     {
         case DrawElementsType::UnsignedByte:
             return ComputeTypedIndexRange(static_cast<const GLubyte *>(indices), count,
-                                          primitiveRestartEnabled,
-                                          GetPrimitiveRestartIndex(indexType));
+                                          primitiveRestartEnabled);
         case DrawElementsType::UnsignedShort:
             return ComputeTypedIndexRange(static_cast<const GLushort *>(indices), count,
-                                          primitiveRestartEnabled,
-                                          GetPrimitiveRestartIndex(indexType));
+                                          primitiveRestartEnabled);
         case DrawElementsType::UnsignedInt:
             return ComputeTypedIndexRange(static_cast<const GLuint *>(indices), count,
-                                          primitiveRestartEnabled,
-                                          GetPrimitiveRestartIndex(indexType));
+                                          primitiveRestartEnabled);
         default:
             UNREACHABLE();
             return IndexRange();
@@ -885,7 +880,6 @@ int VariableSortOrder(GLenum type)
         case GL_INT_IMAGE_CUBE:
         case GL_UNSIGNED_INT_IMAGE_CUBE:
         case GL_UNSIGNED_INT_ATOMIC_COUNTER:
-        case GL_SAMPLER_VIDEO_IMAGE_WEBGL:
         case GL_SAMPLER_EXTERNAL_2D_Y2Y_EXT:
             return 6;
 
@@ -908,12 +902,18 @@ std::string ParseResourceName(const std::string &name, std::vector<unsigned int>
     {
         size_t open  = name.find_last_of('[', baseNameLength - 1);
         size_t close = name.find_last_of(']', baseNameLength - 1);
-        hasIndex     = (open != std::string::npos) && (close == baseNameLength - 1);
+        hasIndex =
+            (open != std::string::npos) && (close == baseNameLength - 1) && (close != open + 1);
         if (hasIndex)
         {
             baseNameLength = open;
             if (outSubscripts)
             {
+                if (!isdigit(name[open + 1]))
+                {
+                    outSubscripts->push_back(GL_INVALID_INDEX);
+                    break;
+                }
                 int index = atoi(name.substr(open + 1).c_str());
                 if (index >= 0)
                 {
@@ -1018,8 +1018,8 @@ unsigned int ParseArrayIndex(const std::string &name, size_t *nameLengthWithoutA
         if (indexIsValidDecimalNumber)
         {
             errno = 0;  // reset global error flag.
-            unsigned long subscript =
-                strtoul(name.c_str() + open + 1, /*endptr*/ nullptr, /*radix*/ 10);
+            unsigned long subscript = ANGLE_UNSAFE_TODO(
+                strtoul(name.c_str() + open + 1, /*endptr*/ nullptr, /*radix*/ 10));
 
             // Check if resulting integer is out-of-range or conversion error.
             if (angle::base::IsValueInRangeForNumericType<uint32_t>(subscript) &&
@@ -1296,6 +1296,7 @@ bool IsExternalImageTarget(EGLenum target)
     {
         case EGL_NATIVE_BUFFER_ANDROID:
         case EGL_D3D11_TEXTURE_ANGLE:
+        case EGL_WEBGPU_TEXTURE_ANGLE:
         case EGL_LINUX_DMA_BUF_EXT:
         case EGL_METAL_TEXTURE_ANGLE:
         case EGL_VULKAN_IMAGE_ANGLE:
@@ -1397,7 +1398,6 @@ bool IsDrawEntryPoint(EntryPoint entryPoint)
         case EntryPoint::GLDrawArraysIndirect:
         case EntryPoint::GLDrawArraysInstanced:
         case EntryPoint::GLDrawArraysInstancedANGLE:
-        case EntryPoint::GLDrawArraysInstancedBaseInstance:
         case EntryPoint::GLDrawArraysInstancedBaseInstanceANGLE:
         case EntryPoint::GLDrawArraysInstancedEXT:
         case EntryPoint::GLDrawElements:
@@ -1407,14 +1407,10 @@ bool IsDrawEntryPoint(EntryPoint entryPoint)
         case EntryPoint::GLDrawElementsIndirect:
         case EntryPoint::GLDrawElementsInstanced:
         case EntryPoint::GLDrawElementsInstancedANGLE:
-        case EntryPoint::GLDrawElementsInstancedBaseInstance:
-        case EntryPoint::GLDrawElementsInstancedBaseVertex:
-        case EntryPoint::GLDrawElementsInstancedBaseVertexBaseInstance:
         case EntryPoint::GLDrawElementsInstancedBaseVertexBaseInstanceANGLE:
         case EntryPoint::GLDrawElementsInstancedBaseVertexEXT:
         case EntryPoint::GLDrawElementsInstancedBaseVertexOES:
         case EntryPoint::GLDrawElementsInstancedEXT:
-        case EntryPoint::GLDrawPixels:
         case EntryPoint::GLDrawRangeElements:
         case EntryPoint::GLDrawRangeElementsBaseVertex:
         case EntryPoint::GLDrawRangeElementsBaseVertexEXT:
@@ -1427,10 +1423,6 @@ bool IsDrawEntryPoint(EntryPoint entryPoint)
         case EntryPoint::GLDrawTexsvOES:
         case EntryPoint::GLDrawTexxOES:
         case EntryPoint::GLDrawTexxvOES:
-        case EntryPoint::GLDrawTransformFeedback:
-        case EntryPoint::GLDrawTransformFeedbackInstanced:
-        case EntryPoint::GLDrawTransformFeedbackStream:
-        case EntryPoint::GLDrawTransformFeedbackStreamInstanced:
             return true;
         default:
             return false;
@@ -1470,10 +1462,8 @@ bool IsQueryEntryPoint(EntryPoint entryPoint)
     {
         case EntryPoint::GLBeginQuery:
         case EntryPoint::GLBeginQueryEXT:
-        case EntryPoint::GLBeginQueryIndexed:
         case EntryPoint::GLEndQuery:
         case EntryPoint::GLEndQueryEXT:
-        case EntryPoint::GLEndQueryIndexed:
             return true;
         default:
             return false;
@@ -1481,7 +1471,7 @@ bool IsQueryEntryPoint(EntryPoint entryPoint)
 }
 }  // namespace angle
 
-void writeFile(const char *path, const void *content, size_t size)
+void writeFile(const char *path, std::string_view content)
 {
 #if !defined(ANGLE_ENABLE_WINDOWS_UWP)
     FILE *file = fopen(path, "w");
@@ -1491,7 +1481,7 @@ void writeFile(const char *path, const void *content, size_t size)
         return;
     }
 
-    fwrite(content, sizeof(char), size, file);
+    ANGLE_UNSAFE_TODO(fwrite(content.data(), sizeof(char), content.size(), file));
     fclose(file);
 #else
     UNREACHABLE();

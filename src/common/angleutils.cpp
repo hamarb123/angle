@@ -5,7 +5,9 @@
 //
 
 #include "common/angleutils.h"
+#include "common/SimpleMutex.h"
 #include "common/debug.h"
+#include "common/unsafe_buffers.h"
 
 #include <stdio.h>
 
@@ -18,96 +20,68 @@ namespace angle
 // force the renderer to re-apply the state.
 const uintptr_t DirtyPointer = std::numeric_limits<uintptr_t>::max();
 
-SaveFileHelper::SaveFileHelper(const std::string &filePathIn)
-    : mOfs(filePathIn, std::ios::binary | std::ios::out), mFilePath(filePathIn)
+std::string_view GetVulkanApiPerfCounterGroupName(VulkanApiPerfCounterGroup group)
 {
-    if (!mOfs.is_open())
+#define ANGLE_VK_API_PERF_COUNTER_CASE_GROUP_RETURN_NAME(GROUP) \
+    case VulkanApiPerfCounterGroup::GROUP:                      \
+        return ANGLE_STRINGIFY(GROUP);
+
+    switch (group)
     {
-        FATAL() << "Could not open " << filePathIn;
+        ANGLE_VK_API_PERF_COUNTER_GROUPS_X(ANGLE_VK_API_PERF_COUNTER_CASE_GROUP_RETURN_NAME)
+        default:
+            UNREACHABLE();
+            return "INVALID_VulkanApiPerfCounterGroup";
     }
+
+#undef ANGLE_VK_API_PERF_COUNTER_CASE_GROUP_RETURN_NAME
 }
 
-SaveFileHelper::~SaveFileHelper()
+std::string_view GetVulkanApiPerfCounterTypeName(VulkanApiPerfCounterType type)
 {
-    printf("Saved '%s'.\n", mFilePath.c_str());
-}
+#define ANGLE_VK_API_PERF_COUNTER_CASE_TYPE_RETURN_NAME(TYPE) \
+    case VulkanApiPerfCounterType::TYPE:                      \
+        return ANGLE_STRINGIFY(TYPE);
 
-void SaveFileHelper::checkError()
-{
-    if (mOfs.bad())
+    switch (type)
     {
-        FATAL() << "Error writing to " << mFilePath;
+        ANGLE_VK_API_PERF_COUNTER_TYPES_X(ANGLE_VK_API_PERF_COUNTER_CASE_TYPE_RETURN_NAME)
+        default:
+            UNREACHABLE();
+            return "INVALID_VulkanApiPerfCounterType";
     }
+
+#undef ANGLE_VK_API_PERF_COUNTER_CASE_TYPE_RETURN_NAME
 }
 
-void SaveFileHelper::write(const uint8_t *data, size_t size)
+std::string_view GetVulkanApiPerfCounterName(VulkanApiPerfCounterGroup group,
+                                             VulkanApiPerfCounterType type)
 {
-    mOfs.write(reinterpret_cast<const char *>(data), size);
-}
+#define ANGLE_VK_API_PERF_COUNTER_CASE_TYPE_RETURN_COUNTER_NAME(TYPE, GROUP) \
+    case VulkanApiPerfCounterType::TYPE:                                     \
+        return ANGLE_STRINGIFY(vk##GROUP##Api##TYPE);
 
-// AMD_performance_monitor helpers.
-
-PerfMonitorCounter::PerfMonitorCounter() = default;
-
-PerfMonitorCounter::~PerfMonitorCounter() = default;
-
-PerfMonitorCounterGroup::PerfMonitorCounterGroup() = default;
-
-PerfMonitorCounterGroup::~PerfMonitorCounterGroup() = default;
-
-uint32_t GetPerfMonitorCounterIndex(const PerfMonitorCounters &counters, const std::string &name)
-{
-    for (uint32_t counterIndex = 0; counterIndex < static_cast<uint32_t>(counters.size());
-         ++counterIndex)
-    {
-        if (counters[counterIndex].name == name)
-        {
-            return counterIndex;
+#define ANGLE_VK_API_PERF_COUNTER_CASE_GROUP_SWITCH_TYPE(GROUP)                 \
+    case VulkanApiPerfCounterGroup::GROUP:                                      \
+        switch (type)                                                           \
+        {                                                                       \
+            ANGLE_VK_API_PERF_COUNTER_TYPES_WITH_PARAM_X(                       \
+                ANGLE_VK_API_PERF_COUNTER_CASE_TYPE_RETURN_COUNTER_NAME, GROUP) \
+            default:                                                            \
+                UNREACHABLE();                                                  \
+                return "INVALID_VulkanApiPerfCounterType";                      \
         }
-    }
 
-    return std::numeric_limits<uint32_t>::max();
-}
-
-uint32_t GetPerfMonitorCounterGroupIndex(const PerfMonitorCounterGroups &groups,
-                                         const std::string &name)
-{
-    for (uint32_t groupIndex = 0; groupIndex < static_cast<uint32_t>(groups.size()); ++groupIndex)
+    switch (group)
     {
-        if (groups[groupIndex].name == name)
-        {
-            return groupIndex;
-        }
+        ANGLE_VK_API_PERF_COUNTER_GROUPS_X(ANGLE_VK_API_PERF_COUNTER_CASE_GROUP_SWITCH_TYPE)
+        default:
+            UNREACHABLE();
+            return "INVALID_VulkanApiPerfCounterGroup";
     }
 
-    return std::numeric_limits<uint32_t>::max();
-}
-
-const PerfMonitorCounter &GetPerfMonitorCounter(const PerfMonitorCounters &counters,
-                                                const std::string &name)
-{
-    return GetPerfMonitorCounter(const_cast<PerfMonitorCounters &>(counters), name);
-}
-
-PerfMonitorCounter &GetPerfMonitorCounter(PerfMonitorCounters &counters, const std::string &name)
-{
-    uint32_t counterIndex = GetPerfMonitorCounterIndex(counters, name);
-    ASSERT(counterIndex < static_cast<uint32_t>(counters.size()));
-    return counters[counterIndex];
-}
-
-const PerfMonitorCounterGroup &GetPerfMonitorCounterGroup(const PerfMonitorCounterGroups &groups,
-                                                          const std::string &name)
-{
-    return GetPerfMonitorCounterGroup(const_cast<PerfMonitorCounterGroups &>(groups), name);
-}
-
-PerfMonitorCounterGroup &GetPerfMonitorCounterGroup(PerfMonitorCounterGroups &groups,
-                                                    const std::string &name)
-{
-    uint32_t groupIndex = GetPerfMonitorCounterGroupIndex(groups, name);
-    ASSERT(groupIndex < static_cast<uint32_t>(groups.size()));
-    return groups[groupIndex];
+#undef ANGLE_VK_API_PERF_COUNTER_CASE_TYPE_RETURN_COUNTER_NAME
+#undef ANGLE_VK_API_PERF_COUNTER_CASE_GROUP_SWITCH_TYPE
 }
 }  // namespace angle
 
@@ -144,12 +118,12 @@ size_t FormatStringIntoVector(const char *fmt, va_list vararg, std::vector<char>
     va_list varargCopy;
     va_copy(varargCopy, vararg);
 
-    int len = vsnprintf(nullptr, 0, fmt, vararg);
+    int len = ANGLE_UNSAFE_TODO(vsnprintf(nullptr, 0, fmt, vararg));
     ASSERT(len >= 0);
 
     outBuffer.resize(len + 1, 0);
 
-    len = vsnprintf(outBuffer.data(), outBuffer.size(), fmt, varargCopy);
+    len = ANGLE_UNSAFE_TODO(vsnprintf(outBuffer.data(), outBuffer.size(), fmt, varargCopy));
     va_end(varargCopy);
     ASSERT(len >= 0);
     return static_cast<size_t>(len);

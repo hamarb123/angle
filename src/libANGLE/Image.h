@@ -10,12 +10,14 @@
 #define LIBANGLE_IMAGE_H_
 
 #include "common/FastVector.h"
+#include "common/SimpleMutex.h"
 #include "common/angleutils.h"
 #include "libANGLE/AttributeMap.h"
 #include "libANGLE/Debug.h"
 #include "libANGLE/Error.h"
 #include "libANGLE/FramebufferAttachment.h"
 #include "libANGLE/RefCountObject.h"
+#include "libANGLE/angletypes.h"
 #include "libANGLE/formatutils.h"
 
 namespace rx
@@ -35,6 +37,22 @@ class Image;
 class Display;
 class ContextMutex;
 
+// Attributes of the image source that siblings might care about.
+struct ImageSourceAttributes
+{
+    // Corresponding to |target| in |eglCreateImage|
+    gl::TextureType type = gl::TextureType::InvalidEnum;
+    // Corresponding to |EGL_GL_TEXTURE_LEVEL| value in attributes of |eglCreateImage|
+    uint32_t level = 0;
+    // Corresponding to |EGL_GL_TEXTURE_ZOFFSET| value in attributes of |eglCreateImage|
+    uint32_t zoffset = 0;
+
+    gl::OwnerImageIndex toOwnerIndex(const gl::ImageIndex &ownIndex) const;
+    gl::OwnerLevel toOwnerLevel(gl::LevelIndex ownLevel) const;
+    gl::OwnerLayer toOwnerLayer(gl::LayerIndex ownLayer) const;
+    gl::OwnerLayer toOwnerDepth(const gl::Offset &offset) const;
+};
+
 // Only currently Renderbuffers and Textures can be bound with images. This makes the relationship
 // explicit, and also ensures that an image sibling can determine if it's been initialized or not,
 // which is important for the robust resource init extension with Textures and EGLImages.
@@ -48,6 +66,8 @@ class ImageSibling : public gl::FramebufferAttachmentObject
     gl::InitState sourceEGLImageInitState() const;
     void setSourceEGLImageInitState(gl::InitState initState) const;
 
+    angle::Result ensureSizeResolved(const gl::Context *context) const override;
+    bool isAttachmentSpecified(const gl::ImageIndex &imageIndex) const override;
     bool isRenderable(const gl::Context *context,
                       GLenum binding,
                       const gl::ImageIndex &imageIndex) const override;
@@ -55,10 +75,18 @@ class ImageSibling : public gl::FramebufferAttachmentObject
     bool isExternalImageWithoutIndividualSync() const override;
     bool hasFrontBufferUsage() const override;
     bool hasProtectedContent() const override;
+    bool hasFoveatedRendering() const override { return false; }
+    const gl::FoveationState *getFoveationState() const override { return nullptr; }
 
   protected:
+    static constexpr size_t kSourcesOfSetSize = 2;
+    using UnorderedSetSiblingSource           = angle::FlatUnorderedSet<Image *, kSourcesOfSetSize>;
+
+    const UnorderedSetSiblingSource &getSiblingSourcesOf() const { return mSourcesOf; }
     // Set the image target of this sibling
-    void setTargetImage(const gl::Context *context, egl::Image *imageTarget);
+    void setTargetImage(const gl::Context *context,
+                        egl::Image *imageTarget,
+                        ImageSourceAttributes *attributesOut);
 
     // Orphan all EGL image sources and targets
     angle::Result orphanImages(const gl::Context *context,
@@ -75,8 +103,8 @@ class ImageSibling : public gl::FramebufferAttachmentObject
     // Called from Image only to remove a source image when the Image is being deleted
     void removeImageSource(egl::Image *imageSource);
 
-    static constexpr size_t kSourcesOfSetSize = 2;
-    angle::FlatUnorderedSet<Image *, kSourcesOfSetSize> mSourcesOf;
+    UnorderedSetSiblingSource mSourcesOf;
+
     BindingPointer<Image> mTargetOf;
 };
 
@@ -140,7 +168,7 @@ struct ImageState : private angle::NonCopyable
 
     EGLLabelKHR label;
     EGLenum target;
-    gl::ImageIndex imageIndex;
+    gl::OwnerImageIndex imageIndex;
     ImageSibling *source;
 
     gl::Format format;
@@ -152,13 +180,13 @@ struct ImageState : private angle::NonCopyable
     EGLenum colorspace;
     bool hasProtectedContent;
 
-    mutable std::mutex targetsLock;
+    mutable angle::SimpleMutex targetsLock;
 
     static constexpr size_t kTargetsSetSize = 2;
     angle::FlatUnorderedSet<ImageSibling *, kTargetsSetSize> targets;
 };
 
-class Image final : public RefCountObject, public LabeledObject
+class Image final : public ThreadSafeRefCountObject, public LabeledObject
 {
   public:
     Image(rx::EGLImplFactory *factory,
@@ -191,6 +219,8 @@ class Image final : public RefCountObject, public LabeledObject
     size_t getSamples() const;
     GLuint getLevelCount() const;
     bool hasProtectedContent() const;
+    bool isFixedRatedCompression(const gl::Context *context) const;
+    EGLenum getColorspaceAttribute() const { return mState.colorspace; }
 
     Error initialize(const Display *display, const gl::Context *context);
 
@@ -203,6 +233,8 @@ class Image final : public RefCountObject, public LabeledObject
     Error exportVkImage(void *vkImage, void *vkImageCreateInfo);
 
     ContextMutex *getContextMutex() const { return mContextMutex; }
+
+    const gl::OwnerImageIndex &getSourceImageIndex() const { return mState.imageIndex; }
 
   private:
     friend class ImageSibling;

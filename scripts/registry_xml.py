@@ -12,6 +12,7 @@
 
 import difflib
 import os
+import re
 import sys
 import xml.etree.ElementTree as etree
 
@@ -36,17 +37,13 @@ xml_inputs = sorted(khronos_xml_inputs + angle_xml_inputs)
 # Notes on categories of extensions:
 # 'Requestable' extensions are extensions that can be enabled with ANGLE_request_extension
 # 'ES-Only' extensions are always implicitly enabled.
-# 'Toggleable' extensions are like 'Requestable' except they can be also disabled.
 # 'ANGLE' extensions are extensions that are not yet officially upstreamed to Khronos.
 # We document those extensions in gl_angle_ext.xml instead of the canonical gl.xml.
-
-angle_toggleable_extensions = [
-    "GL_ANGLE_texture_rectangle",
-]
 
 angle_requestable_extensions = [
     "GL_ANGLE_base_vertex_base_instance",
     "GL_ANGLE_base_vertex_base_instance_shader_builtin",
+    "GL_ANGLE_blob_cache",
     "GL_ANGLE_clip_cull_distance",
     "GL_ANGLE_compressed_texture_etc",
     "GL_ANGLE_copy_texture_3d",
@@ -54,7 +51,6 @@ angle_requestable_extensions = [
     "GL_ANGLE_get_image",
     "GL_ANGLE_get_tex_level_parameter",
     "GL_ANGLE_logic_op",
-    "GL_ANGLE_lossy_etc_decode",
     "GL_ANGLE_memory_object_flags",
     "GL_ANGLE_memory_object_fuchsia",
     "GL_ANGLE_memory_size",
@@ -71,14 +67,13 @@ angle_requestable_extensions = [
     "GL_ANGLE_stencil_texturing",
     "GL_ANGLE_texture_compression_dxt3",
     "GL_ANGLE_texture_compression_dxt5",
-    "GL_ANGLE_texture_external_update",
     "GL_ANGLE_texture_multisample",
+    "GL_ANGLE_texture_rectangle",
     "GL_ANGLE_vulkan_image",
     "GL_ANGLE_yuv_internal_format",
     "GL_CHROMIUM_color_buffer_float_rgb",
     "GL_CHROMIUM_color_buffer_float_rgba",
     "GL_CHROMIUM_lose_context",
-    "GL_CHROMIUM_sync_query",
 ]
 
 gles_requestable_extensions = [
@@ -87,12 +82,15 @@ gles_requestable_extensions = [
     "GL_ANGLE_pack_reverse_row_order",
     "GL_ANGLE_texture_usage",
     "GL_APPLE_clip_distance",
-    "GL_ARB_sync",
+    "GL_ARM_rgba8",
     "GL_ARM_shader_framebuffer_fetch",
+    "GL_ARM_shader_framebuffer_fetch_depth_stencil",
+    "GL_ARM_texture_unnormalized_coordinates",
     "GL_EXT_base_instance",
     "GL_EXT_blend_func_extended",
     "GL_EXT_blend_minmax",
     "GL_EXT_buffer_storage",
+    "GL_EXT_clear_texture",
     "GL_EXT_clip_control",
     "GL_EXT_clip_cull_distance",
     "GL_EXT_color_buffer_float",
@@ -105,37 +103,47 @@ gles_requestable_extensions = [
     "GL_EXT_draw_buffers",
     "GL_EXT_draw_buffers_indexed",
     "GL_EXT_draw_elements_base_vertex",
+    "GL_EXT_draw_instanced",
     "GL_EXT_EGL_image_array",
     "GL_EXT_EGL_image_external_wrap_modes",
     "GL_EXT_EGL_image_storage",
+    "GL_EXT_EGL_image_storage_compression",
     "GL_EXT_external_buffer",
     "GL_EXT_float_blend",
     "GL_EXT_frag_depth",
+    "GL_EXT_fragment_shading_rate",
+    "GL_EXT_fragment_shading_rate_attachment",
+    "GL_EXT_fragment_shading_rate_primitive",
     "GL_EXT_geometry_shader",
     "GL_EXT_gpu_shader5",
     "GL_EXT_instanced_arrays",
     "GL_EXT_map_buffer_range",
     "GL_EXT_memory_object",
     "GL_EXT_memory_object_fd",
+    "GL_EXT_multi_draw_arrays",
     "GL_EXT_multi_draw_indirect",
     "GL_EXT_multisampled_render_to_texture",
     "GL_EXT_multisampled_render_to_texture2",
     "GL_EXT_occlusion_query_boolean",
     "GL_EXT_polygon_offset_clamp",
+    "GL_EXT_primitive_bounding_box",
     "GL_EXT_protected_textures",
     "GL_EXT_pvrtc_sRGB",
     "GL_EXT_read_format_bgra",
     "GL_EXT_render_snorm",
     "GL_EXT_semaphore",
     "GL_EXT_semaphore_fd",
+    "GL_EXT_separate_depth_stencil",
     "GL_EXT_separate_shader_objects",
     "GL_EXT_shader_framebuffer_fetch",
     "GL_EXT_shader_framebuffer_fetch_non_coherent",
     "GL_EXT_shader_io_blocks",
     "GL_EXT_shader_non_constant_global_initializers",
     "GL_EXT_shader_texture_lod",
+    "GL_EXT_shader_texture_samples",
     "GL_EXT_shadow_samplers",
     "GL_EXT_sRGB",
+    "GL_EXT_sRGB_write_control",
     "GL_EXT_tessellation_shader",
     "GL_EXT_texture_border_clamp",
     "GL_EXT_texture_buffer",
@@ -150,23 +158,29 @@ gles_requestable_extensions = [
     "GL_EXT_texture_filter_anisotropic",
     "GL_EXT_texture_filter_minmax",
     "GL_EXT_texture_format_BGRA8888",
+    "GL_EXT_texture_format_sRGB_override",
     "GL_EXT_texture_mirror_clamp_to_edge",
     "GL_EXT_texture_norm16",
+    "GL_EXT_texture_query_lod",
     "GL_EXT_texture_rg",
+    "GL_EXT_texture_shadow_lod",
+    "GL_EXT_texture_sRGB_decode",
     "GL_EXT_texture_sRGB_R8",
     "GL_EXT_texture_sRGB_RG8",
     "GL_EXT_texture_storage",
+    "GL_EXT_texture_storage_compression",
     "GL_EXT_texture_type_2_10_10_10_REV",
     "GL_EXT_unpack_subimage",
     "GL_EXT_YUV_target",
     "GL_IMG_texture_compression_pvrtc",
     "GL_IMG_texture_compression_pvrtc2",
+    "GL_KHR_blend_equation_advanced",
+    "GL_KHR_blend_equation_advanced_coherent",
     "GL_KHR_parallel_shader_compile",
     "GL_KHR_texture_compression_astc_hdr",
     "GL_KHR_texture_compression_astc_ldr",
     "GL_KHR_texture_compression_astc_sliced_3d",
     "GL_MESA_framebuffer_flip_y",
-    "GL_NV_depth_buffer_float2",
     "GL_NV_EGL_stream_consumer_external",
     "GL_NV_framebuffer_blit",
     "GL_NV_pack_subimage",
@@ -176,17 +190,7 @@ gles_requestable_extensions = [
     "GL_NV_read_depth_stencil",
     "GL_NV_read_stencil",
     "GL_NV_shader_noperspective_interpolation",
-    "GL_OES_compressed_EAC_R11_signed_texture",
-    "GL_OES_compressed_EAC_R11_unsigned_texture",
-    "GL_OES_compressed_EAC_RG11_signed_texture",
-    "GL_OES_compressed_EAC_RG11_unsigned_texture",
     "GL_OES_compressed_ETC1_RGB8_texture",
-    "GL_OES_compressed_ETC2_punchthroughA_RGBA8_texture",
-    "GL_OES_compressed_ETC2_punchthroughA_sRGB8_alpha_texture",
-    "GL_OES_compressed_ETC2_RGB8_texture",
-    "GL_OES_compressed_ETC2_RGBA8_texture",
-    "GL_OES_compressed_ETC2_sRGB8_alpha8_texture",
-    "GL_OES_compressed_ETC2_sRGB8_texture",
     "GL_OES_compressed_paletted_texture",
     "GL_OES_copy_image",
     "GL_OES_depth_texture_cube_map",
@@ -199,7 +203,10 @@ gles_requestable_extensions = [
     "GL_OES_fbo_render_mipmap",
     "GL_OES_geometry_shader",
     "GL_OES_get_program_binary",
+    "GL_OES_gpu_shader5",
     "GL_OES_mapbuffer",
+    "GL_OES_primitive_bounding_box",
+    "GL_OES_required_internalformat",
     "GL_OES_rgb8_rgba8",
     "GL_OES_sample_shading",
     "GL_OES_sample_variables",
@@ -207,6 +214,7 @@ gles_requestable_extensions = [
     "GL_OES_shader_io_blocks",
     "GL_OES_shader_multisample_interpolation",
     "GL_OES_standard_derivatives",
+    "GL_OES_tessellation_shader",
     "GL_OES_texture_3D",
     "GL_OES_texture_border_clamp",
     "GL_OES_texture_buffer",
@@ -224,15 +232,21 @@ gles_requestable_extensions = [
     "GL_OES_vertex_type_10_10_10_2",
     "GL_OVR_multiview",
     "GL_OVR_multiview2",
+    "GL_OVR_multiview_multisampled_render_to_texture",
+    "GL_QCOM_framebuffer_foveated",
     "GL_QCOM_render_shared_exponent",
     "GL_QCOM_shading_rate",
-    "GL_WEBGL_video_texture",
+    "GL_QCOM_texture_foveated",
+    "GL_QCOM_texture_lod_bias",
+    "GL_QCOM_tiled_rendering",
 ]
 
 angle_es_only_extensions = [
     "GL_ANGLE_client_arrays",
+    "GL_ANGLE_explicit_context",
     "GL_ANGLE_get_serialized_context_string",
     "GL_ANGLE_program_binary",
+    "GL_ANGLE_program_binary_readiness_query",
     "GL_ANGLE_program_cache_control",
     "GL_ANGLE_relaxed_vertex_attribute_type",
     "GL_ANGLE_request_extension",
@@ -245,7 +259,6 @@ angle_es_only_extensions = [
     "GL_CHROMIUM_bind_uniform_location",
     "GL_CHROMIUM_copy_compressed_texture",
     "GL_CHROMIUM_copy_texture",
-    "GL_CHROMIUM_framebuffer_mixed_samples",
 ]
 
 gles_es_only_extensions = [
@@ -257,15 +270,11 @@ gles_es_only_extensions = [
     "GL_EXT_debug_marker",
     "GL_EXT_discard_framebuffer",
     "GL_EXT_multisample_compatibility",
-    "GL_EXT_primitive_bounding_box",
     "GL_EXT_robustness",
-    "GL_EXT_sRGB_write_control",
-    "GL_EXT_texture_format_sRGB_override",
-    "GL_EXT_texture_sRGB_decode",
-    "GL_KHR_blend_equation_advanced",
     "GL_KHR_debug",
     "GL_KHR_no_error",
     "GL_KHR_robust_buffer_access_behavior",
+    "GL_KHR_robustness",
     "GL_NV_fence",
     "GL_NV_robustness_video_memory_purge",
     "GL_OES_depth24",
@@ -273,21 +282,45 @@ gles_es_only_extensions = [
     "GL_OES_depth_texture",
     "GL_OES_EGL_sync",
     "GL_OES_packed_depth_stencil",
-    "GL_OES_primitive_bounding_box",
     "GL_OES_surfaceless_context",
 ]
 
 # ES1 (Possibly the min set of extensions needed by Android)
 gles1_extensions = [
+    "GL_EXT_texture_lod_bias",
+    "GL_OES_blend_subtract",
     "GL_OES_draw_texture",
     "GL_OES_framebuffer_object",
     "GL_OES_matrix_palette",
     "GL_OES_point_size_array",
     "GL_OES_point_sprite",
     "GL_OES_query_matrix",
+    "GL_OES_stencil8",
     "GL_OES_texture_cube_map",
+    "GL_OES_texture_mirrored_repeat",
 ]
 
+# Unsupported entry points that require explicit exclusion
+# because XML registry does not contain enough information.
+gles_skipped_commands = [
+    # GL_EXT_EGL_image_storage
+    "glEGLImageTargetTextureStorageEXT",
+    # GL_EXT_external_buffer
+    "glNamedBufferStorageExternalEXT",
+    # GL_EXT_memory_object
+    "glTextureStorageMem2DEXT",
+    "glTextureStorageMem2DMultisampleEXT",
+    "glTextureStorageMem3DEXT",
+    "glTextureStorageMem3DMultisampleEXT",
+    "glNamedBufferStorageMemEXT",
+    # GL_EXT_texture_storage
+    "glTexStorage1DEXT",
+    "glTextureStorage1DEXT",
+    "glTextureStorage2DEXT",
+    "glTextureStorage3DEXT",
+    # GL_OVR_multiview
+    "glNamedFramebufferTextureMultiviewOVR",
+]
 
 def check_sorted(name, l):
     unidiff = difflib.unified_diff(l, sorted(l, key=str.casefold), 'unsorted', 'sorted')
@@ -295,14 +328,13 @@ def check_sorted(name, l):
     assert not diff_lines, '\n\nPlease sort "%s":\n%s' % (name, '\n'.join(diff_lines))
 
 
-angle_extensions = angle_requestable_extensions + angle_es_only_extensions + angle_toggleable_extensions
+angle_extensions = angle_requestable_extensions + angle_es_only_extensions
 gles_extensions = gles_requestable_extensions + gles_es_only_extensions
 supported_extensions = sorted(angle_extensions + gles1_extensions + gles_extensions)
 
 assert len(supported_extensions) == len(set(supported_extensions)), 'Duplicates in extension list'
 check_sorted('angle_requestable_extensions', angle_requestable_extensions)
 check_sorted('angle_es_only_extensions', angle_es_only_extensions)
-check_sorted('angle_toggleable_extensions', angle_toggleable_extensions)
 check_sorted('gles_requestable_extensions', gles_requestable_extensions)
 check_sorted('gles_es_only_extensions', gles_es_only_extensions)
 check_sorted('gles_extensions', gles1_extensions)
@@ -319,20 +351,22 @@ supported_egl_extensions = [
     "EGL_ANGLE_d3d_share_handle_client_buffer",
     "EGL_ANGLE_device_creation",
     "EGL_ANGLE_device_d3d",
+    "EGL_ANGLE_device_d3d11",
+    "EGL_ANGLE_device_vulkan",
     "EGL_ANGLE_display_semaphore_share_group",
     "EGL_ANGLE_display_texture_share_group",
     "EGL_ANGLE_external_context_and_surface",
     "EGL_ANGLE_feature_control",
-    "EGL_ANGLE_ggp_stream_descriptor",
+    "EGL_ANGLE_memory_usage_report",
     "EGL_ANGLE_metal_create_context_ownership_identity",
     "EGL_ANGLE_metal_shared_event_sync",
+    "EGL_ANGLE_no_error",
     "EGL_ANGLE_power_preference",
     "EGL_ANGLE_prepare_swap_buffers",
     "EGL_ANGLE_program_cache_control",
     "EGL_ANGLE_query_surface_pointer",
     "EGL_ANGLE_stream_producer_d3d_texture",
     "EGL_ANGLE_surface_d3d_texture_2d_share_handle",
-    "EGL_ANGLE_swap_with_frame_token",
     "EGL_ANGLE_sync_control_rate",
     "EGL_ANGLE_vulkan_image",
     "EGL_ANGLE_wait_until_work_scheduled",
@@ -355,6 +389,7 @@ supported_egl_extensions = [
     "EGL_EXT_platform_base",
     "EGL_EXT_platform_device",
     "EGL_EXT_protected_content",
+    "EGL_EXT_surface_compression",
     "EGL_IMG_context_priority",
     "EGL_KHR_debug",
     "EGL_KHR_fence_sync",
@@ -370,6 +405,7 @@ supported_egl_extensions = [
     "EGL_KHR_surfaceless_context",
     "EGL_KHR_swap_buffers_with_damage",
     "EGL_KHR_wait_sync",
+    "EGL_NV_context_priority_realtime",
     "EGL_NV_post_sub_buffer",
     "EGL_NV_stream_consumer_gltexture_yuv",
 ]
@@ -377,6 +413,9 @@ supported_egl_extensions = [
 check_sorted('supported_egl_extensions', supported_egl_extensions)
 
 supported_cl_extensions = [
+    # OpenCL 1.0
+    "cl_arm_import_memory",
+
     # Since OpenCL 1.1
     "cl_khr_byte_addressable_store",
     "cl_khr_global_int32_base_atomics",
@@ -389,21 +428,24 @@ supported_cl_extensions = [
     "cl_khr_depth_images",
     "cl_khr_image2d_from_buffer",
 
+    # OpenCL 3.0
+    "cl_khr_external_memory",
+
     # Optional
     "cl_khr_extended_versioning",
     "cl_khr_fp64",
     "cl_khr_icd",
     "cl_khr_int64_base_atomics",
     "cl_khr_int64_extended_atomics",
+    "cl_khr_priority_hints",
+    "cl_khr_subgroups",
 ]
 
-# Strip these suffixes from Context entry point names. NV is excluded (for now).
-strip_suffixes = ["AMD", "ANDROID", "ANGLE", "CHROMIUM", "EXT", "KHR", "OES", "OVR", "QCOM"]
+# Strip these suffixes from Context entry point names.
+strip_suffixes = [
+    "AMD", "ANDROID", "ANGLE", "CHROMIUM", "EXT", "KHR", "MESA", "NV", "OES", "OVR", "QCOM"
+]
 check_sorted('strip_suffixes', strip_suffixes)
-
-# The EGL_ANGLE_explicit_context extension is generated differently from other extensions.
-# Toggle generation here.
-support_EGL_ANGLE_explicit_context = True
 
 # Group names that appear in command/param, but not present in groups/group
 unsupported_enum_group_names = {
@@ -422,13 +464,8 @@ unsupported_enum_group_names = {
 }
 
 # Versions (major, minor). Note that GLES intentionally places 1.0 last.
-DESKTOP_GL_VERSIONS = [(1, 0), (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (2, 0), (2, 1), (3, 0),
-                       (3, 1), (3, 2), (3, 3), (4, 0), (4, 1), (4, 2), (4, 3), (4, 4), (4, 5),
-                       (4, 6)]
 GLES_VERSIONS = [(2, 0), (3, 0), (3, 1), (3, 2), (1, 0)]
 EGL_VERSIONS = [(1, 0), (1, 1), (1, 2), (1, 3), (1, 4), (1, 5)]
-WGL_VERSIONS = [(1, 0)]
-GLX_VERSIONS = [(1, 0), (1, 1), (1, 2), (1, 3), (1, 4)]
 CL_VERSIONS = [(1, 0), (1, 1), (1, 2), (2, 0), (2, 1), (2, 2), (3, 0)]
 
 
@@ -442,7 +479,7 @@ class apis:
     CL = 'CL'
 
 # For GLenum types
-api_enums = {apis.GL: 'BigGLEnum', apis.GLES: 'GLESEnum'}
+api_enums = {apis.GLES: 'GLESEnum'}
 default_enum_group_name = 'AllEnums'
 
 
@@ -505,10 +542,16 @@ class RegistryXML:
         self.all_commands = self.root.findall('commands/command')
         self.all_cmd_names = CommandNames()
         self.commands = {}
+        self.sources_by_command = {}
+        self.sources_by_command_no_suffix = {}
 
     def _AppendANGLEExts(self, ext_file):
         angle_ext_tree = etree.parse(script_relative(ext_file))
         angle_ext_root = angle_ext_tree.getroot()
+
+        insertion_point = self.root.findall("./types")[0]
+        for t in angle_ext_root.iter('types'):
+            insertion_point.extend(t)
 
         insertion_point = self.root.findall("./commands")[0]
         for command in angle_ext_root.iter('commands'):
@@ -526,6 +569,11 @@ class RegistryXML:
         xpath = ".//feature[@name='%s']//command" % feature_name
         commands = [cmd.attrib['name'] for cmd in self.root.findall(xpath)]
 
+        # Reverse cache for all places a command may be defined in.
+        for cmd in commands:
+            self.sources_by_command.setdefault(cmd, []).append(annotation)
+            self.sources_by_command_no_suffix.setdefault(cmd, []).append(annotation)
+
         # Remove commands that have already been processed
         current_cmds = self.all_cmd_names.get_all_commands()
         commands = [cmd for cmd in commands if cmd not in current_cmds]
@@ -536,7 +584,7 @@ class RegistryXML:
     def _ClassifySupport(self, extension):
         supported = extension.attrib['supported']
         # Desktop GL extensions exposed in ANGLE GLES for Chrome.
-        if extension.attrib['name'] in ['GL_ARB_sync', 'GL_NV_robustness_video_memory_purge']:
+        if extension.attrib['name'] in ['GL_NV_robustness_video_memory_purge']:
             supported += "|gles2"
         if 'gles2' in supported:
             return 'gl2ext'
@@ -561,11 +609,16 @@ class RegistryXML:
         self.ext_data = {}
         self.ext_dupes = {}
         ext_annotations = {}
+        ext_prefixes = set()
 
         for extension in self.root.findall("extensions/extension"):
             extension_name = extension.attrib['name']
             if not extension_name in supported_extensions:
                 continue
+
+            # Extract the extension prefix
+            if (extension_name.startswith("GL_")):
+                ext_prefixes.add(re.match(r"^GL_([A-Z]+)_", extension_name).group(1))
 
             ext_annotations[extension_name] = self._ClassifySupport(extension)
 
@@ -579,17 +632,25 @@ class RegistryXML:
                 if 'api' in require.attrib and require.attrib['api'] not in apis:
                     continue
 
-                # A special case for EXT_texture_storage
-                filter_out_comment = "Supported only if GL_EXT_direct_state_access is supported"
-                if 'comment' in require.attrib and require.attrib['comment'] == filter_out_comment:
-                    continue
-
-                extension_commands = require.findall('command')
-                ext_cmd_names += [command.attrib['name'] for command in extension_commands]
+                ext_cmd_names += [
+                    command.attrib['name']
+                    for command in require.findall('command')
+                    if command.attrib['name'] not in gles_skipped_commands
+                ]
 
             self.ext_data[extension_name] = sorted(ext_cmd_names)
 
         for extension_name, ext_cmd_names in sorted(self.ext_data.items()):
+
+            # Reverse cache for all places a command may be defined in.
+            for cmd in ext_cmd_names:
+                self.sources_by_command.setdefault(cmd, []).append(extension_name)
+
+                for prefix in ext_prefixes:
+                    if cmd.endswith(prefix):
+                        self.sources_by_command_no_suffix.setdefault(cmd[:-len(prefix)],
+                                                                     []).append(extension_name)
+                        break
 
             # Detect and filter duplicate extensions.
             dupes = []

@@ -8,7 +8,7 @@
 //
 
 #include "WindowSurfaceVkSimple.h"
-#include "libANGLE/renderer/vulkan/RendererVk.h"
+#include "libANGLE/renderer/vulkan/vk_renderer.h"
 
 namespace rx
 {
@@ -20,31 +20,33 @@ WindowSurfaceVkSimple::WindowSurfaceVkSimple(const egl::SurfaceState &surfaceSta
 
 WindowSurfaceVkSimple::~WindowSurfaceVkSimple() {}
 
-angle::Result WindowSurfaceVkSimple::createSurfaceVk(vk::Context *context, gl::Extents *extentsOut)
+angle::Result WindowSurfaceVkSimple::createSurfaceVk(vk::ErrorContext *context)
 {
-    RendererVk *renderer = context->getRenderer();
+    vk::Renderer *renderer = context->getRenderer();
     ASSERT(renderer != nullptr);
     VkInstance instance             = renderer->getInstance();
     VkPhysicalDevice physicalDevice = renderer->getPhysicalDevice();
 
     // Query if there is a valid display
     uint32_t count = 1;
-    ANGLE_VK_TRY(context, vkGetPhysicalDeviceDisplayPropertiesKHR(physicalDevice, &count, nullptr));
+    ANGLE_VK_TRY(context,
+                 VK_CALL(vkGetPhysicalDeviceDisplayPropertiesKHR, physicalDevice, &count, nullptr));
 
     // Get display properties
     VkDisplayPropertiesKHR prop = {};
     count                       = 1;
-    ANGLE_VK_TRY(context, vkGetPhysicalDeviceDisplayPropertiesKHR(physicalDevice, &count, &prop));
+    ANGLE_VK_TRY(context,
+                 VK_CALL(vkGetPhysicalDeviceDisplayPropertiesKHR, physicalDevice, &count, &prop));
 
     // we should have a valid display now
     ASSERT(prop.display != VK_NULL_HANDLE);
-    ANGLE_VK_TRY(context,
-                 vkGetDisplayModePropertiesKHR(physicalDevice, prop.display, &count, nullptr));
+    ANGLE_VK_TRY(context, VK_CALL(vkGetDisplayModePropertiesKHR, physicalDevice, prop.display,
+                                  &count, nullptr));
 
     ASSERT(count != 0);
     std::vector<VkDisplayModePropertiesKHR> modeProperties(count);
-    ANGLE_VK_TRY(context, vkGetDisplayModePropertiesKHR(physicalDevice, prop.display, &count,
-                                                        modeProperties.data()));
+    ANGLE_VK_TRY(context, VK_CALL(vkGetDisplayModePropertiesKHR, physicalDevice, prop.display,
+                                  &count, modeProperties.data()));
 
     angle::vk::SimpleDisplayWindow *displayWindow =
         reinterpret_cast<angle::vk::SimpleDisplayWindow *>(mNativeWindowType);
@@ -60,22 +62,23 @@ angle::Result WindowSurfaceVkSimple::createSurfaceVk(vk::Context *context, gl::E
     info.imageExtent.width             = displayWindow->width;
     info.imageExtent.height            = displayWindow->height;
 
-    ANGLE_VK_TRY(context, vkCreateDisplayPlaneSurfaceKHR(instance, &info, nullptr, &mSurface));
+    ANGLE_VK_TRY(context,
+                 VK_CALL(vkCreateDisplayPlaneSurfaceKHR, instance, &info, nullptr, &mSurface));
 
-    return getCurrentWindowSize(context, extentsOut);
+    return angle::Result::Continue;
 }
 
-angle::Result WindowSurfaceVkSimple::getCurrentWindowSize(vk::Context *context,
-                                                          gl::Extents *extentsOut)
+angle::Result WindowSurfaceVkSimple::getCurrentWindowSize(vk::ErrorContext *context,
+                                                          gl::Extents *extentsOut) const
 {
-    RendererVk *renderer                   = context->getRenderer();
+    vk::Renderer *renderer                 = context->getRenderer();
     const VkPhysicalDevice &physicalDevice = renderer->getPhysicalDevice();
 
-    ANGLE_VK_TRY(context, vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, mSurface,
-                                                                    &mSurfaceCaps));
+    VkSurfaceCapabilitiesKHR surfaceCaps;
+    ANGLE_VK_TRY(context, VK_CALL(vkGetPhysicalDeviceSurfaceCapabilitiesKHR, physicalDevice,
+                                  mSurface, &surfaceCaps));
 
-    *extentsOut =
-        gl::Extents(mSurfaceCaps.currentExtent.width, mSurfaceCaps.currentExtent.height, 1);
+    *extentsOut = gl::Extents(surfaceCaps.currentExtent.width, surfaceCaps.currentExtent.height, 1);
     return angle::Result::Continue;
 }
 

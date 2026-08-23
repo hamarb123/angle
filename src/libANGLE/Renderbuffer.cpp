@@ -18,7 +18,6 @@
 #include "libANGLE/Texture.h"
 #include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/GLImplFactory.h"
-#include "libANGLE/renderer/d3d/RenderTargetD3D.h"
 
 namespace gl
 {
@@ -37,7 +36,7 @@ InitState DetermineInitState(const Context *context)
 RenderbufferState::RenderbufferState()
     : mWidth(0),
       mHeight(0),
-      mFormat(GL_RGBA4),
+      mFormat(GL_NONE),
       mSamples(0),
       mMultisamplingMode(MultisamplingMode::Regular),
       mHasProtectedContent(false),
@@ -113,6 +112,11 @@ void Renderbuffer::onDestroy(const Context *context)
     egl::RefCountObjectReleaser<egl::Image> releaseImage;
     (void)orphanImages(context, &releaseImage);
 
+    if (context && context->retainIdUntilObjectDestroyed())
+    {
+        context->onRenderbufferDestroy(this);
+    }
+
     if (mImplementation)
     {
         mImplementation->onDestroy(context);
@@ -167,7 +171,7 @@ angle::Result Renderbuffer::setStorageMultisample(const Context *context,
 
     // Potentially adjust "samplesIn" to a supported value
     const TextureCaps &formatCaps = context->getTextureCaps().get(internalformat);
-    GLsizei samples               = formatCaps.getNearestSamples(samplesIn);
+    GLsizei samples               = formatCaps.sampleCounts.getNearestSamples(samplesIn);
 
     ANGLE_TRY(mImplementation->setStorageMultisample(context, samples, internalformat, width,
                                                      height, mode));
@@ -179,6 +183,14 @@ angle::Result Renderbuffer::setStorageMultisample(const Context *context,
     return angle::Result::Continue;
 }
 
+angle::Result Renderbuffer::orphanImages(const gl::Context *context,
+                                         egl::RefCountObjectReleaser<egl::Image> *outReleaseImage)
+{
+    ANGLE_TRY(ImageSibling::orphanImages(context, outReleaseImage));
+    mState.mEGLImageSourceAttributes = egl::ImageSourceAttributes{};
+    return angle::Result::Continue;
+}
+
 angle::Result Renderbuffer::setStorageEGLImageTarget(const Context *context, egl::Image *image)
 {
     egl::RefCountObjectReleaser<egl::Image> releaseImage;
@@ -186,7 +198,7 @@ angle::Result Renderbuffer::setStorageEGLImageTarget(const Context *context, egl
 
     ANGLE_TRY(mImplementation->setStorageEGLImageTarget(context, image));
 
-    setTargetImage(context, image);
+    setTargetImage(context, image, &mState.mEGLImageSourceAttributes);
 
     mState.update(static_cast<GLsizei>(image->getWidth()), static_cast<GLsizei>(image->getHeight()),
                   Format(image->getFormat()), 0, MultisamplingMode::Regular,
@@ -200,21 +212,15 @@ angle::Result Renderbuffer::setStorageEGLImageTarget(const Context *context, egl
 
 angle::Result Renderbuffer::copyRenderbufferSubData(Context *context,
                                                     const gl::Renderbuffer *srcBuffer,
-                                                    GLint srcLevel,
                                                     GLint srcX,
                                                     GLint srcY,
-                                                    GLint srcZ,
-                                                    GLint dstLevel,
                                                     GLint dstX,
                                                     GLint dstY,
-                                                    GLint dstZ,
                                                     GLsizei srcWidth,
-                                                    GLsizei srcHeight,
-                                                    GLsizei srcDepth)
+                                                    GLsizei srcHeight)
 {
-    ANGLE_TRY(mImplementation->copyRenderbufferSubData(context, srcBuffer, srcLevel, srcX, srcY,
-                                                       srcZ, dstLevel, dstX, dstY, dstZ, srcWidth,
-                                                       srcHeight, srcDepth));
+    ANGLE_TRY(mImplementation->copyRenderbufferSubData(context, srcBuffer, srcX, srcY, dstX, dstY,
+                                                       srcWidth, srcHeight));
 
     return angle::Result::Continue;
 }
@@ -225,17 +231,14 @@ angle::Result Renderbuffer::copyTextureSubData(Context *context,
                                                GLint srcX,
                                                GLint srcY,
                                                GLint srcZ,
-                                               GLint dstLevel,
                                                GLint dstX,
                                                GLint dstY,
-                                               GLint dstZ,
                                                GLsizei srcWidth,
-                                               GLsizei srcHeight,
-                                               GLsizei srcDepth)
+                                               GLsizei srcHeight)
 {
-    ANGLE_TRY(mImplementation->copyTextureSubData(context, srcTexture, srcLevel, srcX, srcY, srcZ,
-                                                  dstLevel, dstX, dstY, dstZ, srcWidth, srcHeight,
-                                                  srcDepth));
+    ANGLE_TRY(mImplementation->copyTextureSubData(context, srcTexture, LevelIndex(srcLevel), srcX,
+                                                  srcY, LayerIndex(srcZ), dstX, dstY, srcWidth,
+                                                  srcHeight));
 
     return angle::Result::Continue;
 }
@@ -365,6 +368,11 @@ bool Renderbuffer::isRenderable(const Context *context,
                                                  context->getExtensions());
 }
 
+bool Renderbuffer::isEGLImageSource() const
+{
+    return !getSiblingSourcesOf().empty();
+}
+
 InitState Renderbuffer::initState(GLenum /*binding*/, const gl::ImageIndex & /*imageIndex*/) const
 {
     if (isEGLImageTarget())
@@ -417,6 +425,11 @@ angle::Result Renderbuffer::getRenderbufferImage(const Context *context,
 
 void Renderbuffer::onSubjectStateChange(angle::SubjectIndex index, angle::SubjectMessage message)
 {
+    if (message == angle::SubjectMessage::ObjectReallocated)
+    {
+        onStateChange(angle::SubjectMessage::ObjectReallocated);
+        return;
+    }
     ASSERT(message == angle::SubjectMessage::SubjectChanged);
     onStateChange(angle::SubjectMessage::ContentsChanged);
 }

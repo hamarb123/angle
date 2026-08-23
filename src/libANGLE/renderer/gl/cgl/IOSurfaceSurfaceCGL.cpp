@@ -15,6 +15,7 @@
 
 #include "common/debug.h"
 #include "common/gl/cgl/FunctionsCGL.h"
+#include "common/unsafe_buffers.h"
 #include "libANGLE/AttributeMap.h"
 #include "libANGLE/renderer/gl/BlitGL.h"
 #include "libANGLE/renderer/gl/FramebufferGL.h"
@@ -46,7 +47,6 @@ struct IOSurfaceFormatInfo
 static const IOSurfaceFormatInfo kIOSurfaceFormats[] = {
     {GL_RED,      GL_UNSIGNED_BYTE,                1, GL_RED,  GL_RED,  GL_UNSIGNED_BYTE              },
     {GL_RED,      GL_UNSIGNED_SHORT,               2, GL_RED,  GL_RED,  GL_UNSIGNED_SHORT             },
-    {GL_R16UI,    GL_UNSIGNED_SHORT,               2, GL_RED,  GL_RED,  GL_UNSIGNED_SHORT             },
     {GL_RG,       GL_UNSIGNED_BYTE,                2, GL_RG,   GL_RG,   GL_UNSIGNED_BYTE              },
     {GL_RG,       GL_UNSIGNED_SHORT,               4, GL_RG,   GL_RG,   GL_UNSIGNED_SHORT             },
     {GL_RGB,      GL_UNSIGNED_BYTE,                4, GL_RGBA, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV   },
@@ -60,7 +60,7 @@ int FindIOSurfaceFormatIndex(GLenum internalFormat, GLenum type)
 {
     for (int i = 0; i < static_cast<int>(ArraySize(kIOSurfaceFormats)); ++i)
     {
-        const auto &formatInfo = kIOSurfaceFormats[i];
+        const auto &formatInfo = ANGLE_UNSAFE_TODO(kIOSurfaceFormats[i]);
         if (formatInfo.internalFormat == internalFormat && formatInfo.type == type)
         {
             return i;
@@ -140,7 +140,7 @@ egl::Error IOSurfaceSurfaceCGL::unMakeCurrent(const gl::Context *context)
     return egl::NoError();
 }
 
-egl::Error IOSurfaceSurfaceCGL::swap(const gl::Context *context)
+egl::Error IOSurfaceSurfaceCGL::swap(const gl::Context *context, SurfaceSwapFeedback *feedback)
 {
     return egl::NoError();
 }
@@ -171,19 +171,21 @@ egl::Error IOSurfaceSurfaceCGL::bindTexImage(const gl::Context *context,
     GLuint textureID           = textureGL->getTextureID();
     stateManager->bindTexture(gl::TextureType::Rectangle, textureID);
 
-    const auto &format = kIOSurfaceFormats[mFormatIndex];
+    const auto &format = ANGLE_UNSAFE_TODO(kIOSurfaceFormats[mFormatIndex]);
     CGLError error     = CGLTexImageIOSurface2D(
         mCGLContext, GL_TEXTURE_RECTANGLE, format.nativeInternalFormat, mWidth, mHeight,
         format.nativeFormat, format.nativeType, mIOSurface, mPlane);
 
     if (error != kCGLNoError)
     {
-        return egl::EglContextLost() << "CGLTexImageIOSurface2D failed: " << CGLErrorString(error);
+        std::ostringstream err;
+        err << "CGLTexImageIOSurface2D failed: " << CGLErrorString(error);
+        return egl::Error(EGL_CONTEXT_LOST, err.str());
     }
 
     if (IsError(initializeAlphaChannel(context, textureID)))
     {
-        return egl::EglContextLost() << "Failed to initialize IOSurface alpha channel.";
+        return egl::Error(EGL_CONTEXT_LOST, "Failed to initialize IOSurface alpha channel.");
     }
 
     return egl::NoError();
@@ -196,19 +198,14 @@ egl::Error IOSurfaceSurfaceCGL::releaseTexImage(const gl::Context *context, EGLi
     return egl::NoError();
 }
 
-void IOSurfaceSurfaceCGL::setSwapInterval(EGLint interval)
+void IOSurfaceSurfaceCGL::setSwapInterval(const egl::Display *display, EGLint interval)
 {
     UNREACHABLE();
 }
 
-EGLint IOSurfaceSurfaceCGL::getWidth() const
+gl::Extents IOSurfaceSurfaceCGL::getSize() const
 {
-    return mWidth;
-}
-
-EGLint IOSurfaceSurfaceCGL::getHeight() const
-{
-    return mHeight;
+    return gl::Extents(mWidth, mHeight, 1);
 }
 
 EGLint IOSurfaceSurfaceCGL::isPostSubBufferSupported() const
@@ -264,7 +261,7 @@ bool IOSurfaceSurfaceCGL::validateAttributes(EGLClientBuffer buffer,
     // However, the caller might supply us non-public pixel format, which makes exhaustive checks
     // problematic.
     if (IOSurfaceGetBytesPerElementOfPlane(ioSurface, plane) !=
-        kIOSurfaceFormats[formatIndex].componentBytes)
+        ANGLE_UNSAFE_TODO(kIOSurfaceFormats[formatIndex].componentBytes))
     {
         WARN() << "IOSurface bytes per elements does not match the pbuffer internal format.";
     }
@@ -289,7 +286,7 @@ angle::Result IOSurfaceSurfaceCGL::initializeAlphaChannel(const gl::Context *con
 
 bool IOSurfaceSurfaceCGL::hasEmulatedAlphaChannel() const
 {
-    const auto &format = kIOSurfaceFormats[mFormatIndex];
+    const auto &format = ANGLE_UNSAFE_TODO(kIOSurfaceFormats[mFormatIndex]);
     return format.internalFormat == GL_RGB;
 }
 
@@ -302,22 +299,23 @@ egl::Error IOSurfaceSurfaceCGL::attachToFramebuffer(const gl::Context *context,
     {
         GLuint textureID = 0;
         mFunctions->genTextures(1, &textureID);
-        const auto &format = kIOSurfaceFormats[mFormatIndex];
+        const auto &format = ANGLE_UNSAFE_TODO(kIOSurfaceFormats[mFormatIndex]);
         mStateManager->bindTexture(gl::TextureType::Rectangle, textureID);
         CGLError error = CGLTexImageIOSurface2D(
             mCGLContext, GL_TEXTURE_RECTANGLE, format.nativeInternalFormat, mWidth, mHeight,
             format.nativeFormat, format.nativeType, mIOSurface, mPlane);
         if (error != kCGLNoError)
         {
-            return egl::EglContextLost()
-                   << "CGLTexImageIOSurface2D failed: " << CGLErrorString(error);
+            std::ostringstream err;
+            err << "CGLTexImageIOSurface2D failed: " << CGLErrorString(error);
+            return egl::Error(EGL_CONTEXT_LOST, err.str());
         }
         ASSERT(error == kCGLNoError);
 
         // TODO: pass context
         if (IsError(initializeAlphaChannel(context, textureID)))
         {
-            return egl::EglContextLost() << "Failed to initialize IOSurface alpha channel.";
+            return egl::Error(EGL_CONTEXT_LOST, "Failed to initialize IOSurface alpha channel.");
         }
 
         GLuint framebufferID = 0;

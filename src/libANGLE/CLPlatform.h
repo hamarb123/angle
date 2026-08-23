@@ -9,10 +9,17 @@
 #ifndef LIBANGLE_CLPLATFORM_H_
 #define LIBANGLE_CLPLATFORM_H_
 
+#include <angle_cl.h>
+
+#include "libANGLE/CLBitField.h"
 #include "libANGLE/CLObject.h"
+#include "libANGLE/Context.h"
 #include "libANGLE/renderer/CLPlatformImpl.h"
 
 #include "anglebase/no_destructor.h"
+
+#include <cstddef>
+#include <memory>
 
 namespace cl
 {
@@ -28,32 +35,36 @@ class Platform final : public _cl_platform_id, public Object
     static Platform *GetDefault();
     static Platform *CastOrDefault(cl_platform_id platform);
     static bool IsValidOrDefault(const _cl_platform_id *platform);
+    static bool IsDeviceTypeMatch(DeviceType select, DeviceType type);
 
-    static cl_int GetPlatformIDs(cl_uint numEntries,
-                                 cl_platform_id *platforms,
-                                 cl_uint *numPlatforms);
+    static angle::Result GetPlatformIDs(cl_uint numEntries,
+                                        cl_platform_id *platforms,
+                                        cl_uint *numPlatforms);
 
-    cl_int getInfo(PlatformInfo name, size_t valueSize, void *value, size_t *valueSizeRet) const;
+    angle::Result getInfo(PlatformInfo name,
+                          size_t valueSize,
+                          void *value,
+                          size_t *valueSizeRet) const;
 
-    cl_int getDeviceIDs(DeviceType deviceType,
-                        cl_uint numEntries,
-                        cl_device_id *devices,
-                        cl_uint *numDevices) const;
+    angle::Result getDeviceIDs(DeviceType deviceType,
+                               cl_uint numEntries,
+                               cl_device_id *devices,
+                               cl_uint *numDevices) const;
+
+    bool hasDeviceType(DeviceType) const;
 
     static cl_context CreateContext(const cl_context_properties *properties,
                                     cl_uint numDevices,
                                     const cl_device_id *devices,
                                     ContextErrorCB notify,
-                                    void *userData,
-                                    cl_int &errorCode);
+                                    void *userData);
 
     static cl_context CreateContextFromType(const cl_context_properties *properties,
                                             DeviceType deviceType,
                                             ContextErrorCB notify,
-                                            void *userData,
-                                            cl_int &errorCode);
+                                            void *userData);
 
-    cl_int unloadCompiler();
+    angle::Result unloadCompiler();
 
   public:
     ~Platform() override;
@@ -70,6 +81,10 @@ class Platform final : public _cl_platform_id, public Object
 
     static constexpr const char *GetVendor();
 
+    const std::shared_ptr<angle::WorkerThreadPool> &getMultiThreadPool() const;
+
+    angle::FrameCaptureShared *getFrameCaptureShared();
+
   private:
     explicit Platform(const rx::CLPlatformImpl::CreateFunc &createFunc);
 
@@ -78,11 +93,16 @@ class Platform final : public _cl_platform_id, public Object
     static PlatformPtrs &GetPointers();
 
     const rx::CLPlatformImpl::Ptr mImpl;
-    const rx::CLPlatformImpl::Info mInfo;
     const DevicePtrs mDevices;
+    const rx::CLPlatformImpl::Info mInfo;
+    std::shared_ptr<angle::WorkerThreadPool> mMultiThreadPool;
 
     static constexpr char kVendor[]    = "ANGLE";
     static constexpr char kIcdSuffix[] = "ANGLE";
+
+    static angle::FrameCaptureShared *mFrameCaptureShared;
+
+    friend class Object;
 };
 
 inline Platform *Platform::GetDefault()
@@ -100,6 +120,15 @@ inline Platform *Platform::CastOrDefault(cl_platform_id platform)
 inline bool Platform::IsValidOrDefault(const _cl_platform_id *platform)
 {
     return platform != nullptr ? IsValid(platform) : GetDefault() != nullptr;
+}
+
+inline bool Platform::IsDeviceTypeMatch(DeviceType select, DeviceType type)
+{
+    // The type 'DeviceType' is a bitfield, so it matches if any selected bit is set.
+    // A custom device is an exception, which only matches if it was explicitly selected, see:
+    // https://www.khronos.org/registry/OpenCL/specs/3.0-unified/html/OpenCL_API.html#clGetDeviceIDs
+    return type == CL_DEVICE_TYPE_CUSTOM ? select == CL_DEVICE_TYPE_CUSTOM
+                                         : type.intersects(select);
 }
 
 inline const rx::CLPlatformImpl::Info &Platform::getInfo() const
@@ -136,6 +165,11 @@ inline const PlatformPtrs &Platform::GetPlatforms()
 constexpr const char *Platform::GetVendor()
 {
     return kVendor;
+}
+
+inline const std::shared_ptr<angle::WorkerThreadPool> &Platform::getMultiThreadPool() const
+{
+    return mMultiThreadPool;
 }
 
 inline PlatformPtrs &Platform::GetPointers()

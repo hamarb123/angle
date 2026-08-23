@@ -155,7 +155,7 @@ TEST_P(BPTCCompressedTextureTest, CompressedTexImageBC6HNoCrash)
     setupTextureParameters(texture);
 
     // This fake pixel data represents a 4x4 pixel image.
-    // TODO(http://anglebug.com/2869): Add pixel tests for these formats. These need HDR source
+    // TODO(http://anglebug.com/40096529): Add pixel tests for these formats. These need HDR source
     // images.
     std::vector<GLubyte> data;
     data.resize(16u, 0u);
@@ -412,7 +412,7 @@ TEST_P(BPTCCompressedTextureTestES3, CompressedTexSubImage3DValidation)
     ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_texture_compression_bptc"));
 
     GLTexture texture;
-    glBindTexture(GL_TEXTURE_2D_ARRAY, texture.get());
+    glBindTexture(GL_TEXTURE_2D_ARRAY, texture);
 
     std::vector<GLubyte> data(16 * 2 * 2);  // 2x2x1 blocks, thats 8x8x1 pixels.
 
@@ -452,3 +452,55 @@ ANGLE_INSTANTIATE_TEST_ES2_AND_ES3(BPTCCompressedTextureTest);
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(BPTCCompressedTextureTestES3);
 ANGLE_INSTANTIATE_TEST_ES3(BPTCCompressedTextureTestES3);
+
+class BPTCCompressedTextureTestES3WebGL : public BPTCCompressedTextureTestES3
+{
+  protected:
+    BPTCCompressedTextureTestES3WebGL()
+    {
+        setWebGLCompatibilityEnabled(true);
+        setRobustResourceInit(true);
+    }
+};
+
+// Test that initializing a large 3D BPTC texture doesn't overflow the size calculation.
+// This is a regression test for a bug where the size was computed as (width/4 * 16) * height *
+// depth instead of (width/4 * 16) * (height/4) * depth.
+TEST_P(BPTCCompressedTextureTestES3WebGL, DeferredInit3DOverflow)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_texture_compression_bptc"));
+
+    // The overflow happens in the D3D11 backend.
+    // The dimensions 2048x2048x320 were reported to trigger it.
+    // 2048/4 * 16 = 8192 (row pitch)
+    // 8192 * 2048 * 320 = 5,368,709,120, which wraps to 1,073,741,824 in 32-bit GLuint.
+    // The correct size is 1,342,177,280 (1.25 GB).
+    // Since the wrapped buggy size is smaller than the correct size, it triggers an OOB read.
+    // 1.25 GB is large enough that it might trigger GL_OUT_OF_MEMORY on some systems.
+
+    GLTexture tex;
+    glBindTexture(GL_TEXTURE_3D, tex);
+    {
+        ScopedIgnorePlatformMessages ignore;
+        glTexStorage3D(GL_TEXTURE_3D, 1, GL_COMPRESSED_RGBA_BPTC_UNORM_EXT, 2048, 2048, 320);
+    }
+    GLenum err = glGetError();
+    // Allow GL_OUT_OF_MEMORY as the texture is large.
+    ASSERT_TRUE(err == GL_NO_ERROR || err == GL_OUT_OF_MEMORY || err == GL_INVALID_OPERATION);
+
+    if (err != GL_OUT_OF_MEMORY && err != GL_INVALID_OPERATION)
+    {
+        // Trigger deferred initialization by updating a small sub-region.
+        std::vector<GLubyte> data(16, 0);
+        glCompressedTexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, 4, 4, 1,
+                                  GL_COMPRESSED_RGBA_BPTC_UNORM_EXT, 16, data.data());
+        err = glGetError();
+        EXPECT_TRUE(err == GL_NO_ERROR || err == GL_OUT_OF_MEMORY);
+    }
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(BPTCCompressedTextureTestES3WebGL);
+// The overflow happens in the "slow path" of initializeContents, which is only called if
+// robust resource initialization is enabled. Since it is always enabled in WebGL, we
+// enable it here to reproduce the bug.
+ANGLE_INSTANTIATE_TEST(BPTCCompressedTextureTestES3WebGL, ES3_D3D11());

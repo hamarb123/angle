@@ -6,6 +6,7 @@
 
 // loadimage_astc.cpp: Decodes ASTC encoded textures.
 
+#include "common/unsafe_buffers.h"
 #include "image_util/AstcDecompressor.h"
 #include "image_util/loadimage.h"
 
@@ -42,12 +43,20 @@ void LoadASTCToRGBA8Inner(const ImageLoadContext &context,
     // Space needed for 16 bytes of output per compressed block
     size_t blockSize = blockCountX * blockCountY * 16;
 
-    int32_t result =
-        decompressor.decompress(context.singleThreadPool, context.multiThreadPool, imgWidth,
-                                imgHeight, blockWidth, blockHeight, input, blockSize, output);
-    if (result != 0)
+    for (size_t slice = 0; slice < depth; ++slice)
     {
-        WARN() << "ASTC decompression failed: " << decompressor.getStatusString(result);
+        int32_t result =
+            decompressor.decompress(context.singleThreadPool, context.multiThreadPool, imgWidth,
+                                    imgHeight, blockWidth, blockHeight, input, blockSize, output);
+        if (result != 0)
+        {
+            WARN() << "ASTC decompression failed: " << decompressor.getStatusString(result);
+        }
+
+        ANGLE_UNSAFE_TODO({
+            input += inputDepthPitch;
+            output += outputDepthPitch;
+        })
     }
 }
 }  // namespace angle

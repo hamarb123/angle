@@ -120,6 +120,8 @@ class FunctionsEGL
     const char *queryDeviceStringEXT(EGLDeviceEXT device, EGLint name) const;
     EGLBoolean queryDisplayAttribEXT(EGLint attribute, EGLAttrib *value) const;
 
+    const char *getDisplayDriverName() const;
+
   private:
     // So as to isolate from angle we do not include angleutils.h and cannot
     // use angle::NonCopyable so we replicated it here instead.
@@ -129,8 +131,22 @@ class FunctionsEGL
     // Helper mechanism for creating a display for the desired platform type.
     EGLDisplay getPlatformDisplay(EGLAttrib platformType, EGLNativeDisplayType nativeDisplay);
 
+    // Helper method to populate EGL extensions. Returns true if extensions are found.
+    bool queryExtensions();
+
+    // Helper method to query egl for devices.
+    std::vector<EGLDeviceEXT> queryDevices(int *major, int *minor);
+
     // Fallback mechanism for creating a display from a native device object.
     EGLDisplay getNativeDisplay(int *major, int *minor);
+
+#if defined(ANGLE_HAS_LIBDRM)
+    // Helper method to select preferred EGL device from queried devices.
+    EGLDeviceEXT getPreferredEGLDevice(const std::vector<EGLDeviceEXT> &devices);
+
+    // Helper method to get preferred display.
+    EGLDisplay getPreferredDisplay(int *major, int *minor);
+#endif  // defined(ANGLE_HAS_LIBDRM)
 
     struct EGLDispatchTable;
     EGLDispatchTable *mFnPtrs;

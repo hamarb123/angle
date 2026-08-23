@@ -7,6 +7,7 @@
 //   Synchronization help for tests that use multiple threads.
 
 #include "MultiThreadSteps.h"
+#include "common/unsafe_buffers.h"
 
 #include "angle_test_platform.h"
 #include "gtest/gtest.h"
@@ -59,8 +60,8 @@ void RunLockStepThreadsWithSize(EGLWindow *window,
     // Run the threads
     for (size_t threadIndex = 0; threadIndex < threadCount; ++threadIndex)
     {
-        threads[threadIndex] = std::thread(std::move(threadFuncs[threadIndex]), dpy,
-                                           surfaces[threadIndex], contexts[threadIndex]);
+        threads[threadIndex] = std::thread(std::move(ANGLE_UNSAFE_TODO(threadFuncs[threadIndex])),
+                                           dpy, surfaces[threadIndex], contexts[threadIndex]);
     }
 
     // Wait for them to finish

@@ -7,6 +7,7 @@
 //   Various tests related to Program Pipeline.
 //
 
+#include "common/unsafe_buffers.h"
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
 
@@ -83,9 +84,9 @@ class ProgramPipelineTest31 : public ProgramPipelineTest
                          const GLfloat positionAttribXYScale);
     GLint getAvailableProgramBinaryFormatCount() const;
 
-    GLuint mVertProg;
-    GLuint mFragProg;
-    GLuint mPipeline;
+    GLuint mVertProg = 0;
+    GLuint mFragProg = 0;
+    GLuint mPipeline = 0;
 };
 
 class ProgramPipelineXFBTest31 : public ProgramPipelineTest31
@@ -256,7 +257,7 @@ GLuint createShaderProgram(GLenum type,
                            const char *const *varyings)
 {
     GLShader shader(type);
-    if (!shader.get())
+    if (!shader)
     {
         return 0;
     }
@@ -614,7 +615,7 @@ void main()
     glDeleteProgram(mFragProg);
 }
 
-// Test glUniformBlockBinding and followed by glBindBufferRange
+// Test glUniformBlockBinding followed by glBindBufferRange
 TEST_P(ProgramPipelineTest31, FragmentStageUniformBlockBindBufferRangeTest)
 {
     ANGLE_SKIP_TEST_IF(!IsVulkan());
@@ -628,21 +629,25 @@ layout (std140) uniform color_ubo
 {
     float redColorIn;
     float greenColorIn;
+    float blueColorIn;
 };
 
 out vec4 my_FragColor;
 void main()
 {
-    my_FragColor = vec4(redColorIn, greenColorIn, 0.0, 1.0);
+    my_FragColor = vec4(redColorIn, greenColorIn, blueColorIn, 1.0);
 })";
 
-    // Setup two uniform buffers, one with red and one with green
+    // Setup three uniform buffers, one with red, one with green, and one with blue
     GLBuffer uboBufRed;
     glBindBuffer(GL_UNIFORM_BUFFER, uboBufRed);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(GLColor32F), &kFloatRed, GL_STATIC_DRAW);
     GLBuffer uboBufGreen;
     glBindBuffer(GL_UNIFORM_BUFFER, uboBufGreen);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(GLColor32F), &kFloatGreen, GL_STATIC_DRAW);
+    GLBuffer uboBufBlue;
+    glBindBuffer(GL_UNIFORM_BUFFER, uboBufBlue);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(GLColor32F), &kFloatBlue, GL_STATIC_DRAW);
 
     // Setup pipeline program using red uniform buffer
     bindProgramPipeline(vertString, fragString);
@@ -661,11 +666,286 @@ void main()
     // bind to green uniform buffer
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, uboBufGreen);
     drawQuadWithPPO(essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    // bind to blue uniform buffer
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, uboBufBlue);
+    drawQuadWithPPO(essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
     ASSERT_GL_NO_ERROR();
-    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::blue);
 
     glDeleteProgram(mVertProg);
     glDeleteProgram(mFragProg);
+}
+
+// Test that glUniformBlockBinding can successfully change the binding for PPOs
+TEST_P(ProgramPipelineTest31, FragmentStageUniformBlockBinding)
+{
+    ANGLE_SKIP_TEST_IF(!IsVulkan());
+
+    // Create two separable program objects from a
+    // single source string respectively (vertSrc and fragSrc)
+    const GLchar *vertString = essl31_shaders::vs::Simple();
+    const GLchar *fragString = R"(#version 310 es
+precision highp float;
+layout (std140) uniform color_ubo
+{
+    float redColorIn;
+    float greenColorIn;
+    float blueColorIn;
+};
+
+out vec4 my_FragColor;
+void main()
+{
+    my_FragColor = vec4(redColorIn, greenColorIn, blueColorIn, 1.0);
+})";
+
+    // Setup three uniform buffers, one with red, one with green, and one with blue
+    GLBuffer uboBufRed;
+    glBindBuffer(GL_UNIFORM_BUFFER, uboBufRed);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(GLColor32F), &kFloatRed, GL_STATIC_DRAW);
+    GLBuffer uboBufGreen;
+    glBindBuffer(GL_UNIFORM_BUFFER, uboBufGreen);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(GLColor32F), &kFloatGreen, GL_STATIC_DRAW);
+    GLBuffer uboBufBlue;
+    glBindBuffer(GL_UNIFORM_BUFFER, uboBufBlue);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(GLColor32F), &kFloatBlue, GL_STATIC_DRAW);
+
+    // Setup pipeline program using red uniform buffer
+    bindProgramPipeline(vertString, fragString);
+    glActiveShaderProgram(mPipeline, mFragProg);
+    GLint uboIndex = glGetUniformBlockIndex(mFragProg, "color_ubo");
+
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, uboBufRed);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 1, uboBufGreen);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 2, uboBufBlue);
+
+    // Bind the UBO to binding 0 and draw, should be red
+    const int w = getWindowWidth();
+    const int h = getWindowHeight();
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, 0, w / 2, h / 2);
+    glUniformBlockBinding(mFragProg, uboIndex, 0);
+    drawQuadWithPPO(essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+
+    // Bind it to binding 1 and draw, should be green
+    glScissor(w / 2, 0, w - w / 2, h / 2);
+    glUniformBlockBinding(mFragProg, uboIndex, 1);
+    drawQuadWithPPO(essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+
+    // Bind it to binding 2 and draw, should be blue
+    glScissor(0, h / 2, w, h);
+    glUniformBlockBinding(mFragProg, uboIndex, 2);
+    drawQuadWithPPO(essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+
+    EXPECT_PIXEL_RECT_EQ(0, 0, w / 2, h / 2, GLColor::red);
+    EXPECT_PIXEL_RECT_EQ(w / 2, 0, w - w / 2, h / 2, GLColor::green);
+    EXPECT_PIXEL_RECT_EQ(0, h / 2, w, h - h / 2, GLColor::blue);
+    ASSERT_GL_NO_ERROR();
+}
+
+// Test that dirty bits related to UBOs propagates to the PPO.
+TEST_P(ProgramPipelineTest31, UniformBufferUpdatesBeforeBindToPPO)
+{
+    ANGLE_SKIP_TEST_IF(!IsVulkan());
+
+    const GLchar *vertString = essl31_shaders::vs::Simple();
+    const GLchar *fragString = R"(#version 310 es
+precision highp float;
+layout (std140) uniform color_ubo
+{
+    float redColorIn;
+    float greenColorIn;
+    float blueColorIn;
+};
+
+out vec4 my_FragColor;
+void main()
+{
+    my_FragColor = vec4(redColorIn, greenColorIn, blueColorIn, 1.0);
+})";
+
+    GLuint vs = CompileShader(GL_VERTEX_SHADER, vertString);
+    GLuint fs = CompileShader(GL_FRAGMENT_SHADER, fragString);
+    mVertProg = glCreateProgram();
+    mFragProg = glCreateProgram();
+
+    // Compile and link a separable vertex shader
+    glProgramParameteri(mVertProg, GL_PROGRAM_SEPARABLE, GL_TRUE);
+    glAttachShader(mVertProg, vs);
+    glLinkProgram(mVertProg);
+    EXPECT_GL_NO_ERROR();
+
+    // Compile and link a separable fragment shader
+    glProgramParameteri(mFragProg, GL_PROGRAM_SEPARABLE, GL_TRUE);
+    glAttachShader(mFragProg, fs);
+    glLinkProgram(mFragProg);
+    EXPECT_GL_NO_ERROR();
+
+    // Generate a program pipeline and attach the programs
+    glGenProgramPipelines(1, &mPipeline);
+    glUseProgramStages(mPipeline, GL_VERTEX_SHADER_BIT, mVertProg);
+    glUseProgramStages(mPipeline, GL_FRAGMENT_SHADER_BIT, mFragProg);
+    glBindProgramPipeline(mPipeline);
+    EXPECT_GL_NO_ERROR();
+
+    GLBuffer uboBufRed;
+    glBindBuffer(GL_UNIFORM_BUFFER, uboBufRed);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(GLColor32F), &kFloatRed, GL_STATIC_DRAW);
+    GLBuffer uboBufGreen;
+    glBindBuffer(GL_UNIFORM_BUFFER, uboBufGreen);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(GLColor32F), &kFloatGreen, GL_STATIC_DRAW);
+    GLBuffer uboBufBlue;
+    glBindBuffer(GL_UNIFORM_BUFFER, uboBufBlue);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(GLColor32F), &kFloatBlue, GL_STATIC_DRAW);
+
+    glActiveShaderProgram(mPipeline, mFragProg);
+    GLint uboIndex = glGetUniformBlockIndex(mFragProg, "color_ubo");
+    glUniformBlockBinding(mFragProg, uboIndex, 0);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, uboBufRed);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 1, uboBufGreen);
+
+    // Draw once so all dirty bits are handled.  Should be red
+    const int w = getWindowWidth();
+    const int h = getWindowHeight();
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, 0, w / 2, h / 2);
+    drawQuadWithPPO(essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+
+    // Unbind the fragment program from the PPO
+    glUseProgramStages(mPipeline, GL_FRAGMENT_SHADER_BIT, 0);
+    EXPECT_GL_NO_ERROR();
+
+    // Modify the UBO bindings, reattach the program and draw again.  Should be green
+    glUniformBlockBinding(mFragProg, uboIndex, 1);
+
+    glUseProgramStages(mPipeline, GL_FRAGMENT_SHADER_BIT, mFragProg);
+    glScissor(w / 2, 0, w - w / 2, h / 2);
+    drawQuadWithPPO(essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+
+    // Unbind the fragment program from the PPO again, and modify the UBO bindings differently.
+    // Draw again, which should be blue.
+    glUseProgramStages(mPipeline, GL_FRAGMENT_SHADER_BIT, 0);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 1, uboBufBlue);
+
+    glUseProgramStages(mPipeline, GL_FRAGMENT_SHADER_BIT, mFragProg);
+    glScissor(0, h / 2, w, h);
+    drawQuadWithPPO(essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+
+    EXPECT_PIXEL_RECT_EQ(0, 0, w / 2, h / 2, GLColor::red);
+    EXPECT_PIXEL_RECT_EQ(w / 2, 0, w - w / 2, h / 2, GLColor::green);
+    EXPECT_PIXEL_RECT_EQ(0, h / 2, w, h - h / 2, GLColor::blue);
+    ASSERT_GL_NO_ERROR();
+}
+
+// Test glBindBufferRange between draw calls in the presence of multiple UBOs between VS and FS
+TEST_P(ProgramPipelineTest31, BindBufferRangeForMultipleUBOsInMultipleStages)
+{
+    ANGLE_SKIP_TEST_IF(!IsVulkan());
+
+    // Create two separable program objects from a
+    // single source string respectively (vertSrc and fragSrc)
+    const GLchar *vertString = R"(#version 310 es
+precision highp float;
+layout (std140) uniform vsUBO1
+{
+    float redIn;
+};
+
+layout (std140) uniform vsUBO2
+{
+    float greenIn;
+};
+
+out float red;
+out float green;
+
+void main()
+{
+    vec2 pos = vec2(0.0);
+    switch (gl_VertexID) {
+        case 0: pos = vec2(-1.0, -1.0); break;
+        case 1: pos = vec2(3.0, -1.0); break;
+        case 2: pos = vec2(-1.0, 3.0); break;
+    };
+    gl_Position = vec4(pos, 0.0, 1.0);
+    red = redIn;
+    green = greenIn;
+})";
+    const GLchar *fragString = R"(#version 310 es
+precision highp float;
+layout (std140) uniform fsUBO1
+{
+    float blueIn;
+};
+
+layout (std140) uniform fsUBO2
+{
+    float alphaIn;
+};
+
+in float red;
+in float green;
+
+out vec4 my_FragColor;
+void main()
+{
+    my_FragColor = vec4(red, green, blueIn, alphaIn);
+})";
+
+    // Setup two uniform buffers, one with 1, one with 0
+    GLBuffer ubo0;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo0);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(GLColor32F), &kFloatBlack, GL_STATIC_DRAW);
+    GLBuffer ubo1;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo1);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(GLColor32F), &kFloatRed, GL_STATIC_DRAW);
+
+    bindProgramPipeline(vertString, fragString);
+
+    // Setup the initial bindings to draw red
+    const GLint vsUBO1 = glGetUniformBlockIndex(mVertProg, "vsUBO1");
+    const GLint vsUBO2 = glGetUniformBlockIndex(mVertProg, "vsUBO2");
+    const GLint fsUBO1 = glGetUniformBlockIndex(mFragProg, "fsUBO1");
+    const GLint fsUBO2 = glGetUniformBlockIndex(mFragProg, "fsUBO2");
+    glUniformBlockBinding(mVertProg, vsUBO1, 0);
+    glUniformBlockBinding(mVertProg, vsUBO2, 1);
+    glUniformBlockBinding(mFragProg, fsUBO1, 2);
+    glUniformBlockBinding(mFragProg, fsUBO2, 3);
+
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo1);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 1, ubo0);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 2, ubo0);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 3, ubo1);
+
+    const int w = getWindowWidth();
+    const int h = getWindowHeight();
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, 0, w / 2, h / 2);
+
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    // Change the bindings in the vertex shader UBO binding and draw again, should be yellow.
+    glBindBufferBase(GL_UNIFORM_BUFFER, 1, ubo1);
+    glScissor(w / 2, 0, w - w / 2, h / 2);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    // Change the bindings in the fragment shader UBO binding and draw again, should be white.
+    glBindBufferBase(GL_UNIFORM_BUFFER, 2, ubo1);
+    glScissor(0, h / 2, w / 2, h - h / 2);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    // Change the bindings in both shader UBO bindings and draw again, should be green.
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo0);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 2, ubo0);
+    glScissor(w / 2, h / 2, w - w / 2, h - h / 2);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    ASSERT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_RECT_EQ(0, 0, w / 2, h / 2, GLColor::red);
+    EXPECT_PIXEL_RECT_EQ(w / 2, 0, w - w / 2, h / 2, GLColor::yellow);
+    EXPECT_PIXEL_RECT_EQ(0, h / 2, w / 2, h - h / 2, GLColor::white);
+    EXPECT_PIXEL_RECT_EQ(w / 2, h / 2, w - w / 2, h - h / 2, GLColor::green);
+    ASSERT_GL_NO_ERROR();
 }
 
 // Test varyings
@@ -912,7 +1192,7 @@ void main()
     bindProgramPipeline(vertString, fragStringBad);
 
     ANGLE_GL_PROGRAM(program, vertString, fragString);
-    drawQuad(program.get(), essl1_shaders::PositionAttrib(), 0.0f, 1.0f, true);
+    drawQuad(program, essl1_shaders::PositionAttrib(), 0.0f, 1.0f, true);
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
 
     // Draw with the PPO, which should generate an error due to the link failure.
@@ -1307,11 +1587,750 @@ TEST_P(ProgramPipelineXFBTest31, VaryingIOBlockSeparableProgramWithXFB)
     float *mappedFloats = static_cast<float *>(mappedBuffer);
     for (unsigned int cnt = 0; cnt < 8; ++cnt)
     {
-        EXPECT_EQ(4 + cnt, mappedFloats[cnt]);
+        ANGLE_UNSAFE_TODO(EXPECT_EQ(4 + cnt, mappedFloats[cnt]));
     }
     glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
 
     EXPECT_GL_NO_ERROR();
+}
+
+// Test that XFB GL_SEPARATE_ATTRIBS behaves correctly with PPO.
+TEST_P(ProgramPipelineXFBTest31, SeparableProgramWithXFBSeparateMode)
+{
+    // Only the Vulkan backend supports PPOs
+    ANGLE_SKIP_TEST_IF(!IsVulkan());
+
+    const GLchar *vertString = R"(#version 310 es
+precision highp float;
+in vec4 inputAttribute;
+uniform vec4 u_color;
+out vec4 texCoord;
+out vec4 unused1;
+void main()
+{
+    gl_Position = inputAttribute;
+    texCoord = u_color;
+})";
+
+    GLShader vertShader(GL_VERTEX_SHADER);
+    mVertProg = glCreateProgram();
+
+    // Compile and attach a separable vertex shader
+    glShaderSource(vertShader, 1, &vertString, nullptr);
+    glCompileShader(vertShader);
+    glProgramParameteri(mVertProg, GL_PROGRAM_SEPARABLE, GL_TRUE);
+    glAttachShader(mVertProg, vertShader);
+    EXPECT_GL_NO_ERROR();
+
+    // Select the varyings for XFB with GL_SEPARATE_ATTRIBS mode
+    std::vector<const char *> tfVaryings = {"unused1", "texCoord"};
+    glTransformFeedbackVaryings(mVertProg, static_cast<GLsizei>(tfVaryings.size()),
+                                tfVaryings.data(), GL_SEPARATE_ATTRIBS);
+    glLinkProgram(mVertProg);
+    ASSERT_GL_NO_ERROR();
+
+    GLint uniformLoc = glGetUniformLocation(mVertProg, "u_color");
+    ASSERT_NE(uniformLoc, -1);
+    glProgramUniform4f(mVertProg, uniformLoc, 1, 2, 3, 4);
+    ASSERT_GL_NO_ERROR();
+
+    // Generate a program pipeline and attach the program to respective stage
+    glGenProgramPipelines(1, &mPipeline);
+    glUseProgramStages(mPipeline, GL_VERTEX_SHADER_BIT, mVertProg);
+    glBindProgramPipeline(mPipeline);
+    ASSERT_GL_NO_ERROR();
+
+    GLuint transformFeedbackBuffer[2] = {0};
+    // Allocate space for vec4
+    static const size_t transformFeedbackBufferSize = 16;
+    glGenBuffers(2, &transformFeedbackBuffer[0]);
+
+    // Bind buffers to the transform feedback binding points
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, transformFeedbackBuffer[0]);
+    glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, transformFeedbackBufferSize, NULL, GL_STATIC_DRAW);
+
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 1, transformFeedbackBuffer[1]);
+    glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, transformFeedbackBufferSize, NULL, GL_STATIC_DRAW);
+
+    // Process one point with transform feedback
+    glBeginTransformFeedback(GL_POINTS);
+    glDrawArrays(GL_POINTS, 0, 1);
+    glEndTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Second XFB buffer
+    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 1, transformFeedbackBuffer[1]);
+    void *mappedBuffer = glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0,
+                                          transformFeedbackBufferSize, GL_MAP_READ_BIT);
+    ASSERT_NE(nullptr, mappedBuffer);
+
+    float *mappedFloats = static_cast<float *>(mappedBuffer);
+    // Expect vec4(1, 2, 3, 4)
+    EXPECT_EQ(1, mappedFloats[0]);
+    ANGLE_UNSAFE_TODO({
+        EXPECT_EQ(2, mappedFloats[1]);
+        EXPECT_EQ(3, mappedFloats[2]);
+        EXPECT_EQ(4, mappedFloats[3]);
+    })
+
+    glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+    glDeleteBuffers(2, transformFeedbackBuffer);
+
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that resuming transform feedback after changing a pipeline shader stage results in
+// validation error.
+TEST_P(ProgramPipelineXFBTest31, ChangeShaderStageDuringPauseAndResume)
+{
+    // Only the Vulkan backend supports PPOs
+    ANGLE_SKIP_TEST_IF(!IsVulkan());
+
+    const char *kVS1 = R"(#version 310 es
+out float tfVarying10;
+out float tfVarying11;
+out float tfVarying12;
+out float tfVarying13;
+void main() {
+    tfVarying10 = 1.0;
+    tfVarying11 = 2.0;
+    tfVarying12 = 3.0;
+    tfVarying13 = 4.0;
+    gl_Position = vec4(0.0, 0.0, 0.0, 0.0);
+})";
+    const char *kVS2 = R"(#version 310 es
+out float tfVarying20;
+out float tfVarying21;
+void main() {
+    tfVarying20 = -1.0;
+    tfVarying21 = -2.0;
+    gl_Position = vec4(0.0, 0.0, 0.0, 0.0);
+})";
+
+    const char *tfVaryings1[] = {"tfVarying10", "tfVarying11", "tfVarying12", "tfVarying13"};
+    const char *tfVaryings2[] = {"tfVarying20", "tfVarying21"};
+
+    GLShader vs1(GL_VERTEX_SHADER);
+    GLuint vsProgram1 = glCreateProgram();
+    glShaderSource(vs1, 1, &kVS1, nullptr);
+    glCompileShader(vs1);
+    glProgramParameteri(vsProgram1, GL_PROGRAM_SEPARABLE, GL_TRUE);
+    glAttachShader(vsProgram1, vs1);
+    glTransformFeedbackVaryings(vsProgram1, 4, tfVaryings1, GL_SEPARATE_ATTRIBS);
+    glLinkProgram(vsProgram1);
+    EXPECT_GL_NO_ERROR();
+
+    GLShader vs2(GL_VERTEX_SHADER);
+    GLuint vsProgram2 = glCreateProgram();
+    glShaderSource(vs2, 1, &kVS2, nullptr);
+    glCompileShader(vs2);
+    glProgramParameteri(vsProgram2, GL_PROGRAM_SEPARABLE, GL_TRUE);
+    glAttachShader(vsProgram2, vs2);
+    glTransformFeedbackVaryings(vsProgram2, 2, tfVaryings2, GL_SEPARATE_ATTRIBS);
+    glLinkProgram(vsProgram2);
+
+    glEnable(GL_RASTERIZER_DISCARD);
+
+    // XFB buffers
+    GLBuffer xfbBuffers[4];
+    constexpr GLsizei kInitSize = 4 * 1024;
+    for (int i = 0; i < 4; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, kInitSize, nullptr, GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, i, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        ASSERT_GL_NO_ERROR();
+    }
+
+    // Use the first program which uses four buffers.
+    GLProgramPipeline pipeline;
+    glUseProgramStages(pipeline, GL_VERTEX_SHADER_BIT, vsProgram1);
+    glBindProgramPipeline(pipeline);
+    glUseProgram(0);
+
+    glBeginTransformFeedback(GL_POINTS);
+    glDrawArrays(GL_POINTS, 0, 1);
+    glEndTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Validate the XFB values for the first program.
+    for (int i = 0; i < 4; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        const float *bufferData = reinterpret_cast<float *>(
+            glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(GLfloat), GL_MAP_READ_BIT));
+        ASSERT_NE(nullptr, bufferData);
+        EXPECT_EQ(*bufferData, 1.0f + static_cast<float>(i));
+        glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+    }
+
+    // Update the pipeline to use the second program which only uses the first two buffers.
+    glUseProgramStages(pipeline, GL_VERTEX_SHADER_BIT, vsProgram2);
+    glBindProgramPipeline(pipeline);
+    glUseProgram(0);
+    glBeginTransformFeedback(GL_POINTS);
+    glPauseTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Resuming transform feedback after changing a shader stage should result in validation error.
+    glUseProgramStages(pipeline, GL_VERTEX_SHADER_BIT, vsProgram1);
+    glBindProgramPipeline(pipeline);
+    glUseProgram(0);
+    ASSERT_GL_NO_ERROR();
+    glResumeTransformFeedback();
+    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+    glDrawArrays(GL_POINTS, 0, 1);
+    ASSERT_GL_NO_ERROR();
+
+    // Resuming transform feedback with the same program from the beginning is OK.
+    glUseProgramStages(pipeline, GL_VERTEX_SHADER_BIT, vsProgram2);
+    glBindProgramPipeline(pipeline);
+    glUseProgram(0);
+    ASSERT_GL_NO_ERROR();
+    glResumeTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    glDrawArrays(GL_POINTS, 0, 1);
+    ASSERT_GL_NO_ERROR();
+
+    glEndTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Validate the XFB values for the second program.
+    for (int i = 0; i < 2; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        const float *bufferData = reinterpret_cast<float *>(
+            glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(GLfloat), GL_MAP_READ_BIT));
+        ASSERT_NE(nullptr, bufferData);
+        EXPECT_EQ(*bufferData, -(1.0f + static_cast<float>(i)));
+        glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+    }
+
+    glDeleteProgram(vsProgram1);
+    glDeleteProgram(vsProgram2);
+}
+
+// Test that resuming transform feedback after changing a pipeline shader stage results in
+// validation error, and using the original shader after updating the size of one of its buffers
+// works.
+TEST_P(ProgramPipelineXFBTest31, ChangeShaderStageDuringPauseAndResumeWithBufferChange)
+{
+    // Only the Vulkan backend supports PPOs
+    ANGLE_SKIP_TEST_IF(!IsVulkan());
+
+    const char *kVS1 = R"(#version 310 es
+out float tfVarying10;
+out float tfVarying11;
+out float tfVarying12;
+out float tfVarying13;
+void main() {
+    tfVarying10 = 1.0;
+    tfVarying11 = 2.0;
+    tfVarying12 = 3.0;
+    tfVarying13 = 4.0;
+    gl_Position = vec4(0.0, 0.0, 0.0, 0.0);
+})";
+    const char *kVS2 = R"(#version 310 es
+out float tfVarying20;
+out float tfVarying21;
+void main() {
+    tfVarying20 = -1.0;
+    tfVarying21 = -2.0;
+    gl_Position = vec4(0.0, 0.0, 0.0, 0.0);
+})";
+
+    const char *tfVaryings1[] = {"tfVarying10", "tfVarying11", "tfVarying12", "tfVarying13"};
+    const char *tfVaryings2[] = {"tfVarying20", "tfVarying21"};
+
+    GLShader vs1(GL_VERTEX_SHADER);
+    GLuint vsProgram1 = glCreateProgram();
+    glShaderSource(vs1, 1, &kVS1, nullptr);
+    glCompileShader(vs1);
+    glProgramParameteri(vsProgram1, GL_PROGRAM_SEPARABLE, GL_TRUE);
+    glAttachShader(vsProgram1, vs1);
+    glTransformFeedbackVaryings(vsProgram1, 4, tfVaryings1, GL_SEPARATE_ATTRIBS);
+    glLinkProgram(vsProgram1);
+    EXPECT_GL_NO_ERROR();
+
+    GLShader vs2(GL_VERTEX_SHADER);
+    GLuint vsProgram2 = glCreateProgram();
+    glShaderSource(vs2, 1, &kVS2, nullptr);
+    glCompileShader(vs2);
+    glProgramParameteri(vsProgram2, GL_PROGRAM_SEPARABLE, GL_TRUE);
+    glAttachShader(vsProgram2, vs2);
+    glTransformFeedbackVaryings(vsProgram2, 2, tfVaryings2, GL_SEPARATE_ATTRIBS);
+    glLinkProgram(vsProgram2);
+
+    glEnable(GL_RASTERIZER_DISCARD);
+
+    // XFB buffers
+    GLBuffer xfbBuffers[4];
+    constexpr GLsizei kInitSize = 4 * 1024;
+    for (int i = 0; i < 4; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, kInitSize, nullptr, GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, i, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        ASSERT_GL_NO_ERROR();
+    }
+
+    // Use the first program which uses four buffers.
+    GLProgramPipeline pipeline;
+    glUseProgramStages(pipeline, GL_VERTEX_SHADER_BIT, vsProgram1);
+    glBindProgramPipeline(pipeline);
+    glUseProgram(0);
+
+    glBeginTransformFeedback(GL_POINTS);
+    glDrawArrays(GL_POINTS, 0, 1);
+    glEndTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Validate the XFB values for the first program.
+    for (int i = 0; i < 4; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        const float *bufferData = reinterpret_cast<float *>(
+            glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(GLfloat), GL_MAP_READ_BIT));
+        ASSERT_NE(nullptr, bufferData);
+        EXPECT_EQ(*bufferData, 1.0f + static_cast<float>(i));
+        glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+    }
+
+    // One of the buffers that will not be used in the second program is expanded.
+    constexpr GLsizei kLargeSize = 8 * 1024 * 1024;
+    glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, xfbBuffers[2]);
+    glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, kLargeSize, nullptr, GL_DYNAMIC_DRAW);
+    ASSERT_GL_NO_ERROR();
+
+    // Update the pipeline to use the second program which only uses the first two buffers.
+    glUseProgramStages(pipeline, GL_VERTEX_SHADER_BIT, vsProgram2);
+    glBindProgramPipeline(pipeline);
+    glUseProgram(0);
+    glBeginTransformFeedback(GL_POINTS);
+    glPauseTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Resuming transform feedback after changing a shader stage should result in validation error.
+    glUseProgramStages(pipeline, GL_VERTEX_SHADER_BIT, vsProgram1);
+    glBindProgramPipeline(pipeline);
+    glUseProgram(0);
+    ASSERT_GL_NO_ERROR();
+    glResumeTransformFeedback();
+    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+    glDrawArrays(GL_POINTS, 0, 1);
+    ASSERT_GL_NO_ERROR();
+
+    // Resuming transform feedback with the same shaders from the beginning is OK.
+    glUseProgramStages(pipeline, GL_VERTEX_SHADER_BIT, vsProgram2);
+    glBindProgramPipeline(pipeline);
+    glUseProgram(0);
+    ASSERT_GL_NO_ERROR();
+    glResumeTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    glDrawArrays(GL_POINTS, 0, 1);
+    ASSERT_GL_NO_ERROR();
+
+    glEndTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Validate the XFB values for the second program.
+    for (int i = 0; i < 2; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        const float *bufferData = reinterpret_cast<float *>(
+            glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(GLfloat), GL_MAP_READ_BIT));
+        ASSERT_NE(nullptr, bufferData);
+        EXPECT_EQ(*bufferData, -(1.0f + static_cast<float>(i)));
+        glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+    }
+
+    // Use the original shaders again with the updated buffer.
+    glUseProgramStages(pipeline, GL_VERTEX_SHADER_BIT, vsProgram1);
+    glBeginTransformFeedback(GL_POINTS);
+    glDrawArrays(GL_POINTS, 0, 1);
+    glEndTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Validate the XFB values for the first PPO again.
+    for (int i = 0; i < 4; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        const float *bufferData = reinterpret_cast<float *>(
+            glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(GLfloat), GL_MAP_READ_BIT));
+        ASSERT_NE(nullptr, bufferData);
+        EXPECT_EQ(*bufferData, 1.0f + static_cast<float>(i));
+        glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+    }
+
+    glDeleteProgram(vsProgram1);
+    glDeleteProgram(vsProgram2);
+}
+
+// Test that resuming transform feedback with a different pipeline results in validation error.
+TEST_P(ProgramPipelineXFBTest31, PipelineSwitchDuringPauseAndResume)
+{
+    // Only the Vulkan backend supports PPOs
+    ANGLE_SKIP_TEST_IF(!IsVulkan());
+
+    const char *kVS1 = R"(#version 310 es
+out float tfVarying10;
+out float tfVarying11;
+out float tfVarying12;
+out float tfVarying13;
+void main() {
+    tfVarying10 = 1.0;
+    tfVarying11 = 2.0;
+    tfVarying12 = 3.0;
+    tfVarying13 = 4.0;
+    gl_Position = vec4(0.0, 0.0, 0.0, 0.0);
+})";
+    const char *kVS2 = R"(#version 310 es
+out float tfVarying20;
+out float tfVarying21;
+void main() {
+    tfVarying20 = -1.0;
+    tfVarying21 = -2.0;
+    gl_Position = vec4(0.0, 0.0, 0.0, 0.0);
+})";
+
+    const char *tfVaryings1[] = {"tfVarying10", "tfVarying11", "tfVarying12", "tfVarying13"};
+    const char *tfVaryings2[] = {"tfVarying20", "tfVarying21"};
+
+    GLShader vs1(GL_VERTEX_SHADER);
+    GLuint vsProgram1 = glCreateProgram();
+    glShaderSource(vs1, 1, &kVS1, nullptr);
+    glCompileShader(vs1);
+    glProgramParameteri(vsProgram1, GL_PROGRAM_SEPARABLE, GL_TRUE);
+    glAttachShader(vsProgram1, vs1);
+    glTransformFeedbackVaryings(vsProgram1, 4, tfVaryings1, GL_SEPARATE_ATTRIBS);
+    glLinkProgram(vsProgram1);
+    EXPECT_GL_NO_ERROR();
+
+    GLShader vs2(GL_VERTEX_SHADER);
+    GLuint vsProgram2 = glCreateProgram();
+    glShaderSource(vs2, 1, &kVS2, nullptr);
+    glCompileShader(vs2);
+    glProgramParameteri(vsProgram2, GL_PROGRAM_SEPARABLE, GL_TRUE);
+    glAttachShader(vsProgram2, vs2);
+    glTransformFeedbackVaryings(vsProgram2, 2, tfVaryings2, GL_SEPARATE_ATTRIBS);
+    glLinkProgram(vsProgram2);
+
+    glEnable(GL_RASTERIZER_DISCARD);
+
+    // XFB buffers
+    GLBuffer xfbBuffers[4];
+    constexpr GLsizei kInitSize = 4 * 1024;
+    for (int i = 0; i < 4; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, kInitSize, nullptr, GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, i, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        ASSERT_GL_NO_ERROR();
+    }
+
+    // Use the first pipeline with the first program which uses four buffers.
+    GLProgramPipeline pipeline1;
+    glUseProgramStages(pipeline1, GL_VERTEX_SHADER_BIT, vsProgram1);
+    glBindProgramPipeline(pipeline1);
+    glUseProgram(0);
+
+    glBeginTransformFeedback(GL_POINTS);
+    glDrawArrays(GL_POINTS, 0, 1);
+    glEndTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Validate the XFB values for the first pipeline.
+    for (int i = 0; i < 4; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        const float *bufferData = reinterpret_cast<float *>(
+            glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(GLfloat), GL_MAP_READ_BIT));
+        ASSERT_NE(nullptr, bufferData);
+        EXPECT_EQ(*bufferData, 1.0f + static_cast<float>(i));
+        glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+    }
+
+    // Use the second pipeline with the second program which only uses the first two buffers.
+    GLProgramPipeline pipeline2;
+    glUseProgramStages(pipeline2, GL_VERTEX_SHADER_BIT, vsProgram2);
+    glBindProgramPipeline(pipeline2);
+    glUseProgram(0);
+    glBeginTransformFeedback(GL_POINTS);
+    glPauseTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Resuming transform feedback with another pipeline should result in validation error.
+    glBindProgramPipeline(pipeline1);
+    glUseProgram(0);
+    ASSERT_GL_NO_ERROR();
+    glResumeTransformFeedback();
+    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+    glDrawArrays(GL_POINTS, 0, 1);
+    ASSERT_GL_NO_ERROR();
+
+    // Resuming transform feedback with the same pipeline from the beginning is OK.
+    glBindProgramPipeline(pipeline2);
+    glUseProgram(0);
+    ASSERT_GL_NO_ERROR();
+    glResumeTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    glDrawArrays(GL_POINTS, 0, 1);
+    ASSERT_GL_NO_ERROR();
+
+    glEndTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Validate the XFB values for the second pipeline.
+    for (int i = 0; i < 2; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        const float *bufferData = reinterpret_cast<float *>(
+            glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(GLfloat), GL_MAP_READ_BIT));
+        ASSERT_NE(nullptr, bufferData);
+        EXPECT_EQ(*bufferData, -(1.0f + static_cast<float>(i)));
+        glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+    }
+
+    glDeleteProgram(vsProgram1);
+    glDeleteProgram(vsProgram2);
+}
+
+// Test that resuming transform feedback after enabling a shader program on top of the PPO results
+// in validation error.
+TEST_P(ProgramPipelineXFBTest31, BindProgramDuringPauseAndResume)
+{
+    // Only the Vulkan backend supports PPOs
+    ANGLE_SKIP_TEST_IF(!IsVulkan());
+
+    const char *kVS1 = R"(#version 310 es
+out float tfVarying10;
+out float tfVarying11;
+out float tfVarying12;
+out float tfVarying13;
+void main() {
+    tfVarying10 = 1.0;
+    tfVarying11 = 2.0;
+    tfVarying12 = 3.0;
+    tfVarying13 = 4.0;
+    gl_Position = vec4(0.0, 0.0, 0.0, 0.0);
+})";
+    const char *kVS2 = R"(#version 310 es
+out float tfVarying20;
+out float tfVarying21;
+void main() {
+    tfVarying20 = -1.0;
+    tfVarying21 = -2.0;
+    gl_Position = vec4(0.0, 0.0, 0.0, 0.0);
+})";
+    const char *kFS  = R"(#version 310 es
+precision mediump float;
+out vec4 fragOut;
+void main() {
+    fragOut = vec4(1.0, 1.0, 1.0, 1.0);
+})";
+
+    const char *tfVaryings1[] = {"tfVarying10", "tfVarying11", "tfVarying12", "tfVarying13"};
+    std::vector<std::string> tfVaryings2 = {"tfVarying20", "tfVarying21"};
+
+    GLShader vs1(GL_VERTEX_SHADER);
+    GLuint vsProgram1 = glCreateProgram();
+    glShaderSource(vs1, 1, &kVS1, nullptr);
+    glCompileShader(vs1);
+    glProgramParameteri(vsProgram1, GL_PROGRAM_SEPARABLE, GL_TRUE);
+    glAttachShader(vsProgram1, vs1);
+    glTransformFeedbackVaryings(vsProgram1, 4, tfVaryings1, GL_SEPARATE_ATTRIBS);
+    glLinkProgram(vsProgram1);
+    EXPECT_GL_NO_ERROR();
+
+    GLuint program2 =
+        CompileProgramWithTransformFeedback(kVS2, kFS, tfVaryings2, GL_SEPARATE_ATTRIBS);
+    ASSERT_NE(0u, program2);
+
+    glEnable(GL_RASTERIZER_DISCARD);
+
+    // XFB buffers
+    GLBuffer xfbBuffers[4];
+    constexpr GLsizei kInitSize = 4 * 1024;
+    for (int i = 0; i < 4; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, kInitSize, nullptr, GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, i, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        ASSERT_GL_NO_ERROR();
+    }
+
+    // Use the first program which uses four buffers through the PPO.
+    GLProgramPipeline pipeline;
+    glUseProgramStages(pipeline, GL_VERTEX_SHADER_BIT, vsProgram1);
+    glBindProgramPipeline(pipeline);
+    glUseProgram(0);
+
+    glBeginTransformFeedback(GL_POINTS);
+    glDrawArrays(GL_POINTS, 0, 1);
+    glEndTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Validate the XFB values for the first program.
+    for (int i = 0; i < 4; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        const float *bufferData = reinterpret_cast<float *>(
+            glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(GLfloat), GL_MAP_READ_BIT));
+        ASSERT_NE(nullptr, bufferData);
+        EXPECT_EQ(*bufferData, 1.0f + static_cast<float>(i));
+        glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+    }
+
+    // Use the PPO again, but use the second program after pausing XFB.
+    glBeginTransformFeedback(GL_POINTS);
+    glPauseTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+    glUseProgram(program2);
+    ASSERT_GL_NO_ERROR();
+
+    // Resuming transform feedback after using the second program on top of the PPO should result in
+    // validation error.
+    glResumeTransformFeedback();
+    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+    glDrawArrays(GL_POINTS, 0, 1);
+    ASSERT_GL_NO_ERROR();
+
+    // Resuming transform feedback after resetting the program and using the pipeline from the
+    // beginning is OK.
+    glUseProgramStages(pipeline, GL_VERTEX_SHADER_BIT, vsProgram1);
+    glBindProgramPipeline(pipeline);
+    glUseProgram(0);
+    ASSERT_GL_NO_ERROR();
+    glResumeTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    glDrawArrays(GL_POINTS, 0, 1);
+    ASSERT_GL_NO_ERROR();
+
+    glEndTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Validate the XFB values for the first program.
+    for (int i = 0; i < 4; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        const float *bufferData = reinterpret_cast<float *>(
+            glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(GLfloat), GL_MAP_READ_BIT));
+        ASSERT_NE(nullptr, bufferData);
+        EXPECT_EQ(*bufferData, 1.0f + static_cast<float>(i));
+        glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+    }
+
+    glDeleteProgram(vsProgram1);
+    glDeleteProgram(program2);
+}
+
+// Test that using a program and PPO together, the transform feedback will use the program over the
+// PPO, and resuming after unbinding the program will result in validation error.
+TEST_P(ProgramPipelineXFBTest31, UseProgramAndPPOThenUnbindProgramAndResume)
+{
+    // Only the Vulkan backend supports PPOs
+    ANGLE_SKIP_TEST_IF(!IsVulkan());
+
+    const char *kVS1 = R"(#version 310 es
+out float tfVarying10;
+out float tfVarying11;
+out float tfVarying12;
+out float tfVarying13;
+void main() {
+    tfVarying10 = 1.0;
+    tfVarying11 = 2.0;
+    tfVarying12 = 3.0;
+    tfVarying13 = 4.0;
+    gl_Position = vec4(0.0, 0.0, 0.0, 0.0);
+})";
+    const char *kVS2 = R"(#version 310 es
+out float tfVarying20;
+out float tfVarying21;
+void main() {
+    tfVarying20 = -1.0;
+    tfVarying21 = -2.0;
+    gl_Position = vec4(0.0, 0.0, 0.0, 0.0);
+})";
+    const char *kFS  = R"(#version 310 es
+precision mediump float;
+out vec4 fragOut;
+void main() {
+    fragOut = vec4(1.0, 1.0, 1.0, 1.0);
+})";
+
+    std::vector<std::string> tfVaryings1 = {"tfVarying10", "tfVarying11", "tfVarying12",
+                                            "tfVarying13"};
+    const char *tfVaryings2[]            = {"tfVarying20", "tfVarying21"};
+
+    GLuint program1 =
+        CompileProgramWithTransformFeedback(kVS1, kFS, tfVaryings1, GL_SEPARATE_ATTRIBS);
+    ASSERT_NE(0u, program1);
+
+    GLShader vs2(GL_VERTEX_SHADER);
+    GLuint vsProgram2 = glCreateProgram();
+    glShaderSource(vs2, 1, &kVS2, nullptr);
+    glCompileShader(vs2);
+    glProgramParameteri(vsProgram2, GL_PROGRAM_SEPARABLE, GL_TRUE);
+    glAttachShader(vsProgram2, vs2);
+    glTransformFeedbackVaryings(vsProgram2, 2, tfVaryings2, GL_SEPARATE_ATTRIBS);
+    glLinkProgram(vsProgram2);
+    EXPECT_GL_NO_ERROR();
+
+    glEnable(GL_RASTERIZER_DISCARD);
+
+    // XFB buffers
+    GLBuffer xfbBuffers[4];
+    constexpr GLsizei kInitSize = 4 * 1024;
+    for (int i = 0; i < 4; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER, kInitSize, nullptr, GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, i, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        ASSERT_GL_NO_ERROR();
+    }
+
+    // Use the first program and the PPO using the second program together.
+    glUseProgram(program1);
+    GLProgramPipeline pipeline;
+    glUseProgramStages(pipeline, GL_VERTEX_SHADER_BIT, vsProgram2);
+    glBindProgramPipeline(pipeline);
+
+    glBeginTransformFeedback(GL_POINTS);
+    glDrawArrays(GL_POINTS, 0, 1);
+    ASSERT_GL_NO_ERROR();
+
+    // Pausing, unbinding the program and resuming should result in validation error.
+    glPauseTransformFeedback();
+    glUseProgram(0);
+    glResumeTransformFeedback();
+    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+
+    glUseProgram(program1);
+    glResumeTransformFeedback();
+    glEndTransformFeedback();
+    ASSERT_GL_NO_ERROR();
+
+    // Validate the XFB values, which should align with the bound program and not the PPO.
+    for (int i = 0; i < 4; ++i)
+    {
+        glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER, ANGLE_UNSAFE_TODO(xfbBuffers[i]));
+        const float *bufferData = reinterpret_cast<float *>(
+            glMapBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(GLfloat), GL_MAP_READ_BIT));
+        ASSERT_NE(nullptr, bufferData);
+        EXPECT_EQ(*bufferData, 1.0f + static_cast<float>(i));
+        glUnmapBuffer(GL_TRANSFORM_FEEDBACK_BUFFER);
+    }
+
+    glDeleteProgram(program1);
+    glDeleteProgram(vsProgram2);
 }
 
 // Test modifying a shader and re-linking it updates the PPO too
@@ -1897,8 +2916,8 @@ void main()
 
     // Only set up three of the five offsets. The other two must be present, but unused.
     GLColor32F *binding0 = reinterpret_cast<GLColor32F *>(mappedBuffer);
-    GLColor32F *binding1 = reinterpret_cast<GLColor32F *>(mappedBuffer + 256);
-    GLColor32F *binding4 = reinterpret_cast<GLColor32F *>(mappedBuffer + 1024);
+    GLColor32F *binding1 = reinterpret_cast<GLColor32F *>(ANGLE_UNSAFE_TODO(mappedBuffer + 256));
+    GLColor32F *binding4 = reinterpret_cast<GLColor32F *>(ANGLE_UNSAFE_TODO(mappedBuffer + 1024));
     *binding0            = kFloatRed;
     *binding1            = kFloatGreen;
     *binding4            = kFloatBlue;
@@ -1938,6 +2957,50 @@ void main()
     // We should now have green+blue=cyan
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::cyan);
     EXPECT_GL_NO_ERROR();
+}
+
+// Test that GetProgramPipelineivf works.
+TEST_P(ProgramPipelineTest31, ProgramPipelineivTest)
+{
+    GLuint pipeline;
+    GLint log_length = -1;
+    glGenProgramPipelines(1, &pipeline);
+    glGetProgramPipelineiv(pipeline, GL_INFO_LOG_LENGTH, &log_length);
+    glGetProgramPipelineInfoLog(pipeline, 0, NULL, NULL);
+    EXPECT_GL_NO_ERROR();
+    glDeleteProgramPipelines(1, &pipeline);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that shader interface matching does not accidentally match by name
+// when location is specified in separable programs.
+TEST_P(ProgramPipelineTest31, ShaderInterfaceMatchingTest)
+{
+    ANGLE_SKIP_TEST_IF(!IsVulkan());
+
+    const GLchar *vertString = R"(#version 310 es
+precision highp float;
+in vec4 a_position;
+layout(location = 0) flat out uvec3 u3;
+layout(location = 1) out float f[2];
+void main()
+{
+    gl_Position = a_position;
+})";
+
+    const GLchar *fragString = R"(#version 310 es
+precision highp float;
+layout(location = 0) flat in uvec3 f;
+layout(location = 1) in float u3[2];
+out vec4 my_FragColor;
+void main()
+{
+    my_FragColor = vec4(1.0, 1.0, 0.0, 1.0);
+})";
+    bindProgramPipeline(vertString, fragString);
+
+    drawQuadWithPPO("a_position", 0.5f, 1.0f);
+    ASSERT_GL_NO_ERROR();
 }
 
 class ProgramPipelineTest32 : public ProgramPipelineTest

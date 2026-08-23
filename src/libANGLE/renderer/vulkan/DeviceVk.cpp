@@ -8,6 +8,7 @@
 //
 
 #include "libANGLE/renderer/vulkan/DeviceVk.h"
+#include "common/unsafe_buffers.h"
 
 #include <stdint.h>
 
@@ -15,7 +16,7 @@
 #include "common/vulkan/vulkan_icd.h"
 #include "libANGLE/Display.h"
 #include "libANGLE/renderer/vulkan/DisplayVk.h"
-#include "libANGLE/renderer/vulkan/RendererVk.h"
+#include "libANGLE/renderer/vulkan/vk_renderer.h"
 
 namespace rx
 {
@@ -58,7 +59,7 @@ egl::Error DeviceVk::initialize()
 
 egl::Error DeviceVk::getAttribute(const egl::Display *display, EGLint attribute, void **outValue)
 {
-    RendererVk *renderer =
+    vk::Renderer *renderer =
         static_cast<rx::DisplayVk *>(display->getImplementation())->getRenderer();
     ASSERT(mRenderer == nullptr || mRenderer == renderer);
     mRenderer = renderer;
@@ -87,11 +88,6 @@ egl::Error DeviceVk::getAttribute(const egl::Display *display, EGLint attribute,
         }
         case EGL_VULKAN_QUEUE_ANGLE:
         {
-            // Usage of the Vulkan queue by the application is incompatible with the
-            // asyncCommandQueue feature; there is no way for the application to synchronize with
-            // the async thread's usage of the queue.
-            ASSERT(!mRenderer->getFeatures().asyncCommandQueue.enabled);
-
             // egl::ContextPriority::Medium is the default context priority.
             *outValue = mRenderer->getQueue(egl::ContextPriority::Medium);
             return egl::NoError();
@@ -129,13 +125,8 @@ egl::Error DeviceVk::getAttribute(const egl::Display *display, EGLint attribute,
             return egl::NoError();
         }
         default:
-            return egl::EglBadAccess();
+            return egl::Error(EGL_BAD_ACCESS);
     }
-}
-
-EGLint DeviceVk::getType()
-{
-    return EGL_VULKAN_DEVICE_ANGLE;
 }
 
 void DeviceVk::generateExtensions(egl::DeviceExtensions *outExtensions) const
@@ -150,7 +141,7 @@ DeviceVk::WrappedCreateInstance(const VkInstanceCreateInfo *pCreateInfo,
                                 VkInstance *pInstance)
 {
     ScopedEnv scopedEnv;
-    return vkCreateInstance(pCreateInfo, pAllocator, pInstance);
+    return VK_CALL(vkCreateInstance, pCreateInfo, pAllocator, pInstance);
 }
 
 // static
@@ -160,7 +151,7 @@ DeviceVk::WrappedEnumerateInstanceExtensionProperties(const char *pLayerName,
                                                       VkExtensionProperties *pProperties)
 {
     ScopedEnv scopedEnv;
-    return vkEnumerateInstanceExtensionProperties(pLayerName, pPropertyCount, pProperties);
+    return VK_CALL(vkEnumerateInstanceExtensionProperties, pLayerName, pPropertyCount, pProperties);
 }
 
 // static
@@ -169,59 +160,59 @@ DeviceVk::WrappedEnumerateInstanceLayerProperties(uint32_t *pPropertyCount,
                                                   VkLayerProperties *pProperties)
 {
     ScopedEnv scopedEnv;
-    return vkEnumerateInstanceLayerProperties(pPropertyCount, pProperties);
+    return VK_CALL(vkEnumerateInstanceLayerProperties, pPropertyCount, pProperties);
 }
 
 // static
 VKAPI_ATTR VkResult VKAPI_CALL DeviceVk::WrappedEnumerateInstanceVersion(uint32_t *pApiVersion)
 {
     ScopedEnv scopedEnv;
-    return vkEnumerateInstanceVersion(pApiVersion);
+    return VK_CALL(vkEnumerateInstanceVersion, pApiVersion);
 }
 
 // static
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL DeviceVk::WrappedGetInstanceProcAddr(VkInstance instance,
                                                                               const char *pName)
 {
-    if (!pName || pName[0] != 'v' || pName[1] != 'k')
+    if (!pName || pName[0] != 'v' || ANGLE_UNSAFE_TODO(pName[1]) != 'k')
     {
         return nullptr;
     }
 
     if (instance != VK_NULL_HANDLE)
     {
-        return vkGetInstanceProcAddr(instance, pName);
+        return VK_CALL(vkGetInstanceProcAddr, instance, pName);
     }
 
-    if (!strcmp(pName, "vkCreateInstance"))
+    if (!ANGLE_UNSAFE_TODO(strcmp(pName, "vkCreateInstance")))
     {
         return reinterpret_cast<PFN_vkVoidFunction>(DeviceVk::WrappedCreateInstance);
     }
-    if (!strcmp(pName, "vkEnumerateInstanceExtensionProperties"))
+    if (!ANGLE_UNSAFE_TODO(strcmp(pName, "vkEnumerateInstanceExtensionProperties")))
     {
         return reinterpret_cast<PFN_vkVoidFunction>(
             DeviceVk::WrappedEnumerateInstanceExtensionProperties);
     }
-    if (!strcmp(pName, "vkEnumerateInstanceLayerProperties"))
+    if (!ANGLE_UNSAFE_TODO(strcmp(pName, "vkEnumerateInstanceLayerProperties")))
     {
         return reinterpret_cast<PFN_vkVoidFunction>(
             DeviceVk::WrappedEnumerateInstanceLayerProperties);
     }
-    if (!strcmp(pName, "vkEnumerateInstanceVersion"))
+    if (!ANGLE_UNSAFE_TODO(strcmp(pName, "vkEnumerateInstanceVersion")))
     {
-        if (!vkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceVersion"))
+        if (!VK_CALL(vkGetInstanceProcAddr, nullptr, "vkEnumerateInstanceVersion"))
         {
             // Vulkan 1.0 doesn't have vkEnumerateInstanceVersion.
             return nullptr;
         }
         return reinterpret_cast<PFN_vkVoidFunction>(DeviceVk::WrappedEnumerateInstanceVersion);
     }
-    if (!strcmp(pName, "vkGetInstanceProcAddr"))
+    if (!ANGLE_UNSAFE_TODO(strcmp(pName, "vkGetInstanceProcAddr")))
     {
         return reinterpret_cast<PFN_vkVoidFunction>(DeviceVk::WrappedGetInstanceProcAddr);
     }
 
-    return vkGetInstanceProcAddr(instance, pName);
+    return VK_CALL(vkGetInstanceProcAddr, instance, pName);
 }
 
 }  // namespace rx

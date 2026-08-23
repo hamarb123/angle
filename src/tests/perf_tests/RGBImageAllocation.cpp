@@ -8,6 +8,7 @@
 //
 
 #include "ANGLEPerfTest.h"
+#include "common/unsafe_buffers.h"
 
 #include <iostream>
 #include <random>
@@ -107,7 +108,7 @@ void RGBImageAllocationBenchmark::drawBenchmark()
 {
     // Copy the next color data.
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, mTextureSize, mTextureSize, GL_RGB, GL_UNSIGNED_BYTE,
-                    mColors.data() + mOffset);
+                    ANGLE_UNSAFE_TODO(mColors.data() + mOffset));
     glFinish();
     ASSERT_GL_NO_ERROR();
 }

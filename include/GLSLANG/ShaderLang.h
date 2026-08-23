@@ -26,7 +26,7 @@
 
 // Version number for shader translation API.
 // It is incremented every time the API changes.
-#define ANGLE_SH_VERSION 344
+#define ANGLE_SH_VERSION 421
 
 enum ShShaderSpec
 {
@@ -37,43 +37,39 @@ enum ShShaderSpec
     SH_WEBGL2_SPEC,
 
     SH_GLES3_1_SPEC,
-    SH_WEBGL3_SPEC,
 
     SH_GLES3_2_SPEC,
-
-    SH_GL_CORE_SPEC,
-    SH_GL_COMPATIBILITY_SPEC,
 };
 
 enum ShShaderOutput
 {
+    // NULL output for testing.
+    SH_NULL_OUTPUT,
+
     // ESSL output only supported in some configurations.
-    SH_ESSL_OUTPUT = 0x8B45,
+    SH_ESSL_OUTPUT,
 
     // GLSL output only supported in some configurations.
-    SH_GLSL_COMPATIBILITY_OUTPUT = 0x8B46,
-    // Note: GL introduced core profiles in 1.5.
-    SH_GLSL_130_OUTPUT      = 0x8B47,
-    SH_GLSL_140_OUTPUT      = 0x8B80,
-    SH_GLSL_150_CORE_OUTPUT = 0x8B81,
-    SH_GLSL_330_CORE_OUTPUT = 0x8B82,
-    SH_GLSL_400_CORE_OUTPUT = 0x8B83,
-    SH_GLSL_410_CORE_OUTPUT = 0x8B84,
-    SH_GLSL_420_CORE_OUTPUT = 0x8B85,
-    SH_GLSL_430_CORE_OUTPUT = 0x8B86,
-    SH_GLSL_440_CORE_OUTPUT = 0x8B87,
-    SH_GLSL_450_CORE_OUTPUT = 0x8B88,
+    SH_GLSL_150_CORE_OUTPUT,
+    SH_GLSL_330_CORE_OUTPUT,
+    SH_GLSL_400_CORE_OUTPUT,
+    SH_GLSL_410_CORE_OUTPUT,
+    SH_GLSL_420_CORE_OUTPUT,
+    SH_GLSL_430_CORE_OUTPUT,
+    SH_GLSL_440_CORE_OUTPUT,
+    SH_GLSL_450_CORE_OUTPUT,
 
-    // Prefer using these to specify HLSL output type:
-    SH_HLSL_3_0_OUTPUT       = 0x8B48,  // D3D 9
-    SH_HLSL_4_1_OUTPUT       = 0x8B49,  // D3D 11
-    SH_HLSL_4_0_FL9_3_OUTPUT = 0x8B4A,  // D3D 11 feature level 9_3
+    // Prefer using this to specify HLSL output type:
+    SH_HLSL_4_1_OUTPUT,  // D3D 11
 
     // Output SPIR-V for the Vulkan backend.
-    SH_SPIRV_VULKAN_OUTPUT = 0x8B4B,
+    SH_SPIRV_VULKAN_OUTPUT,
 
     // Output for MSL
-    SH_MSL_METAL_OUTPUT = 0x8B4D,
+    SH_MSL_METAL_OUTPUT,
+
+    // Output for WGSL
+    SH_WGSL_OUTPUT,
 };
 
 struct ShCompileOptionsMetal
@@ -81,13 +77,17 @@ struct ShCompileOptionsMetal
     // Direct-to-metal backend constants:
 
     // Binding index for driver uniforms:
-    int driverUniformsBindingIndex;
+    int driverUniformsBindingIndex = 0;
     // Binding index for default uniforms:
-    int defaultUniformsBindingIndex;
+    int defaultUniformsBindingIndex = 0;
     // Binding index for UBO's argument buffer
-    int UBOArgumentBufferBindingIndex;
+    int UBOArgumentBufferBindingIndex = 0;
 
-    bool generateShareableShaders;
+    bool generateShareableShaders = false;
+
+    // Insert asm("") instructions into loop bodies, telling the compiler that all loops have side
+    // effects and cannot be optimized out.
+    bool injectAsmStatementIntoLoopBodies = false;
 };
 
 // For ANGLE_shader_pixel_local_storage.
@@ -97,7 +97,27 @@ enum class ShPixelLocalStorageType : uint8_t
     NotSupported,
     ImageLoadStore,
     FramebufferFetch,
-    PixelLocalStorageEXT,  // GL_EXT_shader_pixel_local_storage.
+};
+
+// For ANGLE_shader_pixel_local_storage.
+// Used to track the formats of PLS bindings.
+enum class ShPixelLocalStorageFormat : uint8_t
+{
+    NotPLS,  // Indicates that no PLS uniform was declared at the binding index in question.
+    RGBA8,
+    RGBA8I,
+    RGBA8UI,
+    R32F,
+    R32I,
+    R32UI,
+};
+
+// For ANGLE_shader_pixel_local_storage.
+// Used to track the PLS layout information at each binding index in a shader.
+struct ShPixelLocalStorageLayout
+{
+    ShPixelLocalStorageFormat format = ShPixelLocalStorageFormat::NotPLS;
+    bool noncoherent                 = false;
 };
 
 // For ANGLE_shader_pixel_local_storage_coherent.
@@ -127,14 +147,14 @@ struct ShPixelLocalStorageOptions
     // For ANGLE_shader_pixel_local_storage_coherent.
     ShFragmentSynchronizationType fragmentSyncType = ShFragmentSynchronizationType::NotSupported;
 
+    // Apple Silicon doesn't support image memory barriers, and many GL devices don't support
+    // noncoherent framebuffer fetch. On these platforms, we simply ignore the "noncoherent" PLS
+    // qualifier.
+    bool supportsNoncoherent = false;
+
     // ShPixelLocalStorageType::ImageLoadStore only: Can we use rgba8/rgba8i/rgba8ui image formats?
     // Or do we need to manually pack and unpack from r32i/r32ui?
     bool supportsNativeRGBA8ImageFormats = false;
-
-    // anglebug.com/7792 -- Metal [[raster_order_group()]] does not work for read_write textures on
-    // AMD when the render pass doesn't have a color attachment on slot 0. To work around this we
-    // attach one of the PLS textures to GL_COLOR_ATTACHMENT0, if there isn't one already.
-    bool renderPassNeedsAMDRasterOrderGroupsWorkaround = false;
 };
 
 struct ShCompileOptions
@@ -159,10 +179,8 @@ struct ShCompileOptions
     // If requested, validates the AST after every transformation.  Useful for debugging.
     uint64_t validateAST : 1;
 
-    // Validates loop and indexing in the shader to ensure that they do not exceed the minimum
-    // functionality mandated in GLSL 1.0 spec, Appendix A, Section 4 and 5.  There is no need to
-    // specify this parameter when compiling for WebGL - it is implied.
-    uint64_t validateLoopIndexing : 1;
+    // Limit the number of output varyings allowed in vertex shaders to work around driver bugs.
+    uint64_t limitOutputVaryingsTo256 : 1;
 
     // Emits #line directives in HLSL.
     uint64_t lineDirectives : 1;
@@ -184,11 +202,8 @@ struct ShCompileOptions
     // This flag works around bug in Intel Mac drivers related to abs(i) where i is an integer.
     uint64_t emulateAbsIntFunction : 1;
 
-    // Enforce the GLSL 1.017 Appendix A section 7 packing restrictions.  This flag only enforces
-    // (and can only enforce) the packing restrictions for uniform variables in both vertex and
-    // fragment shaders. ShCheckVariablesWithinPackingLimits() lets embedders enforce the packing
-    // restrictions for varying variables during program link time.
-    uint64_t enforcePackingRestrictions : 1;
+    // Whether SPV_EXT_demote_to_helper_invocation can be used.
+    uint64_t useDemoteToHelperInvocation : 1;
 
     // This flag ensures all indirect (expression-based) array indexing is clamped to the bounds of
     // the array. This ensures, for example, that you cannot read off the end of a uniform, whether
@@ -213,20 +228,16 @@ struct ShCompileOptions
     uint64_t unfoldShortCircuit : 1;
 
     // This flag initializes output variables to 0 at the beginning of main().  It is to avoid
-    // undefined behaviors.
+    // undefined behaviors. Additionally, it is intended as a workaround for drivers which get
+    // context lost if gl_FragColor is not written.
     uint64_t initOutputVariables : 1;
 
     // This flag scalarizes vec/ivec/bvec/mat constructor args.  It is intended as a workaround for
     // Linux/Mac driver bugs.
     uint64_t scalarizeVecAndMatConstructorArgs : 1;
 
-    // This flag overwrites a struct name with a unique prefix.  It is intended as a workaround for
-    // drivers that do not handle struct scopes correctly, including all Mac drivers and Linux AMD.
+    // This flag is a no-op and will be removed once chromium code no longer references it.
     uint64_t regenerateStructNames : 1;
-
-    // This flag works around bugs in Mac drivers related to do-while by transforming them into an
-    // other construct.
-    uint64_t rewriteDoWhileLoops : 1;
 
     // This flag works around a bug in the HLSL compiler optimizer that folds certain constant pow
     // expressions incorrectly. Only applies to the HLSL back-end. It works by expanding the integer
@@ -265,10 +276,6 @@ struct ShCompileOptions
     // of a named uniform block declared with a shared or std140 layout qualifier to be considered
     // active. The uniform block itself is also considered active.
     uint64_t useUnusedStandardSharedBlocks : 1;
-
-    // This flag works around a bug in unary minus operator on float numbers on Intel Mac OSX 10.11
-    // drivers. It works by translating -float into 0.0 - float.
-    uint64_t rewriteFloatUnaryMinusOperator : 1;
 
     // This flag works around a bug in evaluating atan(y, x) on some NVIDIA OpenGL drivers.  It
     // works by using an expression to emulate this function.
@@ -331,23 +338,17 @@ struct ShCompileOptions
     // read undefined values that could be coming from another webpage/application.
     uint64_t initSharedVariables : 1;
 
-    // Forces the value returned from an atomic operations to be always be resolved. This is
-    // targeted to workaround a bug in NVIDIA D3D driver where the return value from
-    // RWByteAddressBuffer.InterlockedAdd does not get resolved when used in the .yzw components of
-    // a RWByteAddressBuffer.Store operation. Only has an effect on HLSL translation.
-    // http://anglebug.com/3246
-    uint64_t forceAtomicValueResolution : 1;
+    // For MSL, non-const global variables cannot have an initializer, even if the initializer is
+    // constant.  Initialization of these variables is deferred to the beginning of main.
+    uint64_t forceDeferNonConstGlobalInitializers : 1;
 
     // Rewrite gl_BaseVertex and gl_BaseInstance as uniform int
     uint64_t emulateGLBaseVertexBaseInstance : 1;
 
-    // Emulate seamful cube map sampling for OpenGL ES2.0.  Currently only applies to the Vulkan
-    // backend, as is done after samplers are moved out of structs.  Can likely be made to work on
-    // the other backends as well.
-    uint64_t emulateSeamfulCubeMapSampling : 1;
+    // Workaround for a driver bug with nested switches.
+    uint64_t wrapSwitchInIfTrue : 1;
 
-    // This flag controls how to translate WEBGL_video_texture sampling function.
-    uint64_t takeVideoTextureAsExternalOES : 1;
+    uint64_t unused4 : 1;
 
     // This flag works around a inconsistent behavior in Mac AMD driver where gl_VertexID doesn't
     // include base vertex value. It replaces gl_VertexID with (gl_VertexID + angle_BaseVertex) when
@@ -379,10 +380,9 @@ struct ShCompileOptions
     // VK_EXT_depth_clip_control is supported, this code is not generated, saving a uniform look up.
     uint64_t addVulkanDepthCorrection : 1;
 
-    uint64_t forceShaderPrecisionHighpToMediump : 1;
-
-    // Allow compiler to use specialization constant to do pre-rotation and y flip.
-    uint64_t useSpecializationConstant : 1;
+    // Validate that the count of uniform blocks is within the GL_MAX_*_UNIFORM_BLOCKS limits. These
+    // limits must be supplied in the BuiltinResources.
+    uint64_t validatePerStageMaxUniformBlocks : 1;
 
     // Ask compiler to generate Vulkan transform feedback emulation support code.
     uint64_t addVulkanXfbEmulationSupportCode : 1;
@@ -391,32 +391,26 @@ struct ShCompileOptions
     // VK_EXT_transform_feedback extension.
     uint64_t addVulkanXfbExtensionSupportCode : 1;
 
-    // This flag initializes fragment shader's output variables to zero at the beginning of the
-    // fragment shader's main(). It is intended as a workaround for drivers which get context lost
-    // if gl_FragColor is not written.
-    uint64_t initFragmentOutputVariables : 1;
+    // Reject shaders with variables that go above set limits; 2GB for uniform buffer objects, 64KB
+    // for private variables and 16MB for the total size of private variables.
+    uint64_t rejectWebglShadersWithLargeVariables : 1;
 
     // Always write explicit location layout qualifiers for fragment outputs.
     uint64_t explicitFragmentLocations : 1;
 
-    // Insert explicit casts for float/double/unsigned/signed int on macOS 10.15 with Intel driver
-    uint64_t addExplicitBoolCasts : 1;
+    uint64_t unused : 1;
 
-    // Add round() after applying dither.  This works around a Qualcomm quirk where values can get
-    // ceil()ed instead.
-    uint64_t roundOutputAfterDithering : 1;
+    // Avoid complex expressions in struct constructors to work around driver bugs.
+    uint64_t avoidComplexExpressionsInStructConstructor : 1;
 
-    // issuetracker.google.com/274859104 add OpQuantizeToF16 instruction to cast
-    // mediump floating-point values to 16 bit. ARM compiler utilized RelaxedPrecision
-    // to minimize type case and keep a mediump float as 32 bit when assigning it with
-    // a highp floating-point value. It is possible that GLSL shader code is comparing
-    // two meiump values, but ARM compiler is comparing a 32 bit value with a 16 bit value,
-    // causing the comparison to fail.
-    uint64_t castMediumpFloatTo16Bit : 1;
+    // Whether |#extension ... : disable| is allowed after non-preprocessor tokens in WebGL.
+    // WebGL1 deviates from GLSL by allowing |#extension| directives after non-preprocessor tokens.
+    // This option restricts this deviation to non-disable behaviors.
+    uint64_t allowExtensionDisableAfterNonPPTokensInWebGL : 1;
 
-    // anglebug.com/7527: packUnorm4x8 fails on Pixel 4 if it is not passed a highp vec4.
-    // TODO(anglebug.com/7527): This workaround is currently only applied for pixel local storage.
-    // We may want to apply it generally.
+    // anglebug.com/42265995: packUnorm4x8 fails on Pixel 4 if it is not passed a highp vec4.
+    // TODO(anglebug.com/42265995): This workaround is currently only applied for pixel local
+    // storage. We may want to apply it generally.
     uint64_t passHighpToPackUnormSnormBuiltins : 1;
 
     // Use an integer uniform to pass a bitset of enabled clip distances.
@@ -437,6 +431,50 @@ struct ShCompileOptions
 
     // Pre-transform explicit cubemap derivatives for Apple GPUs.
     uint64_t preTransformTextureCubeGradDerivatives : 1;
+
+    // Workaround for a driver bug with the use of the OpSelect SPIR-V instruction.
+    uint64_t avoidOpSelectWithMismatchingRelaxedPrecision : 1;
+
+    // Whether SPIR-V 1.4 can be emitted.  If not set, SPIR-V 1.3 is emitted.
+    uint64_t emitSPIRV14 : 1;
+
+    // Reject shaders with obvious undefined behavior:
+    //
+    // - Shader contains easy-to-detect infinite loops
+    //
+    uint64_t rejectWebglShadersWithUndefinedBehavior : 1;
+
+    // Emulate r32f image with an r32ui image
+    uint64_t emulateR32fImageAtomicExchange : 1;
+
+    // Rewrite for and while loops to loop normal form.
+    uint64_t simplifyLoopConditions : 1;
+
+    // Specify struct in one statement, declare instance in other.
+    uint64_t separateCompoundStructDeclarations : 1;
+
+    // Whether to preserve denorm floats in the lexer or convert to zero
+    uint64_t preserveDenorms : 1;
+
+    // Whether inactive shader variables should be removed from the output.  For some backends,
+    // inactive fragment outputs should still be retained.
+    uint64_t removeInactiveVariables : 1;
+    uint64_t retainInactiveFragmentOutputs : 1;
+
+    // Ensure all loops execute side-effects or terminate.
+    uint64_t ensureLoopForwardProgress : 1;
+
+    // Do not preform any shader validation or perform any shader transformations. Shader state can
+    // still be reflected.
+    uint64_t skipAllValidationAndTransforms : 1;
+
+    uint64_t transformFloatUniformTo16Bits : 1;
+
+    // Whether the ANGLE IR should be used.  Ineffective if ANGLE is built without IR support.
+    uint64_t useIR : 1;
+
+    // Whether ESSL300 fragment outputs should be expanded to vec4s.
+    uint64_t expandFragmentOutputsToVec4 : 1;
 
     ShCompileOptionsMetal metal;
     ShPixelLocalStorageOptions pls;
@@ -465,6 +503,10 @@ struct ShBuiltInResources
     int MaxTextureImageUnits;
     int MaxFragmentUniformVectors;
     int MaxDrawBuffers;
+    int ShadingRateFlag2VerticalPixelsEXT;
+    int ShadingRateFlag4VerticalPixelsEXT;
+    int ShadingRateFlag2HorizontalPixelsEXT;
+    int ShadingRateFlag4HorizontalPixelsEXT;
 
     // Extensions.
     // Set to 1 to enable the extension, else 0.
@@ -480,35 +522,40 @@ struct ShBuiltInResources
     int EXT_shader_texture_lod;
     int EXT_shader_framebuffer_fetch;
     int EXT_shader_framebuffer_fetch_non_coherent;
-    int NV_shader_framebuffer_fetch;
     int NV_shader_noperspective_interpolation;
     int ARM_shader_framebuffer_fetch;
+    int ARM_shader_framebuffer_fetch_depth_stencil;
     int OVR_multiview;
     int OVR_multiview2;
     int EXT_multisampled_render_to_texture;
     int EXT_multisampled_render_to_texture2;
+    int EXT_fragment_shading_rate;
+    int EXT_fragment_shading_rate_primitive;
     int EXT_YUV_target;
     int EXT_geometry_shader;
     int OES_geometry_shader;
     int OES_shader_io_blocks;
     int EXT_shader_io_blocks;
     int EXT_gpu_shader5;
+    int OES_gpu_shader5;
     int EXT_shader_non_constant_global_initializers;
     int OES_texture_storage_multisample_2d_array;
     int OES_texture_3D;
     int ANGLE_shader_pixel_local_storage;
     int ANGLE_texture_multisample;
     int ANGLE_multi_draw;
-    // TODO(angleproject:3402) remove after chromium side removal to pass compilation
+    // TODO(http://anglebug.com/40096583) remove after chromium side removal to pass compilation
     int ANGLE_base_vertex_base_instance;
-    int WEBGL_video_texture;
     int APPLE_clip_distance;
     int OES_texture_cube_map_array;
     int EXT_texture_cube_map_array;
+    int EXT_texture_query_lod;
+    int EXT_texture_shadow_lod;
     int EXT_shadow_samplers;
     int OES_shader_multisample_interpolation;
     int OES_shader_image_atomic;
     int EXT_tessellation_shader;
+    int OES_tessellation_shader;
     int OES_texture_buffer;
     int EXT_texture_buffer;
     int OES_sample_variables;
@@ -527,10 +574,7 @@ struct ShBuiltInResources
     // function. This applies to Tegra K1 devices.
     int NV_draw_buffers;
 
-    // Set to 1 if highp precision is supported in the ESSL 1.00 version of the
-    // fragment language. Does not affect versions of the language where highp
-    // support is mandatory.
-    // Default is 0.
+    // Unused, highp support is always assumed.
     int FragmentPrecisionHigh;
 
     // GLSL ES 3.0 constants.
@@ -538,6 +582,12 @@ struct ShBuiltInResources
     int MaxFragmentInputVectors;
     int MinProgramTexelOffset;
     int MaxProgramTexelOffset;
+
+    // GL_MAX_FRAGMENT_UNIFORM_BLOCKS
+    int MaxFragmentUniformBlocks;
+
+    // GL_MAX_VERTEX_UNIFORM_BLOCKS
+    int MaxVertexUniformBlocks;
 
     // Extension constants.
 
@@ -554,8 +604,27 @@ struct ShBuiltInResources
     // Default is NULL.
     ShHashFunction64 HashFunction;
 
+    // User defined variables are prefixed with '_' and UserVariableNamePrefix. If UserVariableName
+    // is the null character, no prefixing is done and collisions between user variables and
+    // variables introduced during translation is possible.
+    //
+    // Can't prefix with just _ because then we might introduce a double underscore, which is not
+    // safe in GLSL (ESSL 3.00.6 section 3.8: All identifiers containing a double underscore are
+    // reserved for use by the underlying implementation).
+    //
+    // Defaults to 'u' for user-defined.
+    char UserVariableNamePrefix;
+    // To avoid collision with structs of the same name, block names are prefixed instead with '_'
+    // and UserBlockNamePrefix.
+    //
+    // Default to 'b' for block.
+    char UserBlockNamePrefix;
+
     // The maximum complexity an expression can be when limitExpressionComplexity is turned on.
     int MaxExpressionComplexity;
+
+    // The maximum depth of certain nestable statements (while, switch);
+    int MaxStatementDepth;
 
     // The maximum depth a call stack can be.
     int MaxCallStackDepth;
@@ -648,9 +717,11 @@ struct ShBuiltInResources
     // maximum point size (higher limit from ALIASED_POINT_SIZE_RANGE)
     float MaxPointSize;
 
+    // GL_MAX_COMPUTE_UNIFORM_BLOCKS
+    int MaxComputeUniformBlocks;
+
     // EXT_geometry_shader constants
     int MaxGeometryUniformComponents;
-    int MaxGeometryUniformBlocks;
     int MaxGeometryInputComponents;
     int MaxGeometryOutputComponents;
     int MaxGeometryOutputVertices;
@@ -658,9 +729,9 @@ struct ShBuiltInResources
     int MaxGeometryTextureImageUnits;
     int MaxGeometryAtomicCounterBuffers;
     int MaxGeometryAtomicCounters;
-    int MaxGeometryShaderStorageBlocks;
     int MaxGeometryShaderInvocations;
     int MaxGeometryImageUniforms;
+    int MaxGeometryUniformBlocks;
 
     // EXT_tessellation_shader constants
     int MaxTessControlInputComponents;
@@ -671,6 +742,7 @@ struct ShBuiltInResources
     int MaxTessControlImageUniforms;
     int MaxTessControlAtomicCounters;
     int MaxTessControlAtomicCounterBuffers;
+    int MaxTessControlUniformBlocks;
 
     int MaxTessPatchComponents;
     int MaxPatchVertices;
@@ -683,9 +755,7 @@ struct ShBuiltInResources
     int MaxTessEvaluationImageUniforms;
     int MaxTessEvaluationAtomicCounters;
     int MaxTessEvaluationAtomicCounterBuffers;
-
-    // Subpixel bits used in rasterization.
-    int SubPixelBits;
+    int MaxTessEvaluationUniformBlocks;
 
     // APPLE_clip_distance / EXT_clip_cull_distance / ANGLE_clip_cull_distance constants
     int MaxClipDistances;
@@ -694,7 +764,6 @@ struct ShBuiltInResources
 
     // ANGLE_shader_pixel_local_storage.
     int MaxPixelLocalStoragePlanes;
-    int MaxColorAttachmentsWithActivePixelLocalStorage;
     int MaxCombinedDrawBuffersAndPixelLocalStoragePlanes;
 };
 
@@ -751,7 +820,7 @@ const std::string &GetBuiltInResourcesString(const ShHandle handle);
 // type: Specifies the type of shader - GL_FRAGMENT_SHADER or GL_VERTEX_SHADER.
 // spec: Specifies the language spec the compiler must conform to - SH_GLES2_SPEC or SH_WEBGL_SPEC.
 // output: Specifies the output code type - for example SH_ESSL_OUTPUT, SH_GLSL_OUTPUT,
-//         SH_HLSL_3_0_OUTPUT or SH_HLSL_4_1_OUTPUT. Note: Each output type may only
+//         or SH_HLSL_4_1_OUTPUT. Note: Each output type may only
 //         be supported in some configurations.
 // resources: Specifies the built-in resources.
 ShHandle ConstructCompiler(sh::GLenum type,
@@ -834,12 +903,9 @@ sh::WorkGroupSize GetComputeShaderLocalGroupSize(const ShHandle handle);
 // Returns the number of views specified through the num_views layout qualifier. If num_views is
 // not set, the function returns -1.
 int GetVertexShaderNumViews(const ShHandle handle);
-// Returns true if the shader has specified the |sample| qualifier, implying that per-sample shading
-// should be enabled
-bool EnablesPerSampleShading(const ShHandle handle);
-
-// Returns specialization constant usage bits
-uint32_t GetShaderSpecConstUsageBits(const ShHandle handle);
+// Returns the pixel local storage uniform format at each binding index, or "NotPLS" if there is
+// not one.
+const std::vector<ShPixelLocalStorageLayout> *GetPixelLocalStorageLayouts(const ShHandle handle);
 
 // Returns true if the passed in variables pack in maxVectors followingthe packing rules from the
 // GLSL 1.017 spec, Appendix A, section 7.
@@ -849,17 +915,6 @@ uint32_t GetShaderSpecConstUsageBits(const ShHandle handle);
 // variables: an array of variables.
 bool CheckVariablesWithinPackingLimits(int maxVectors,
                                        const std::vector<sh::ShaderVariable> &variables);
-
-// Gives the compiler-assigned register for a shader storage block.
-// The method writes the value to the output variable "indexOut".
-// Returns true if it found a valid shader storage block, false otherwise.
-// Parameters:
-// handle: Specifies the compiler
-// shaderStorageBlockName: Specifies the shader storage block
-// indexOut: output variable that stores the assigned register
-bool GetShaderStorageBlockRegister(const ShHandle handle,
-                                   const std::string &shaderStorageBlockName,
-                                   unsigned int *indexOut);
 
 // Gives the compiler-assigned register for a uniform block.
 // The method writes the value to the output variable "indexOut".
@@ -895,15 +950,6 @@ const std::set<std::string> *GetUsedImage2DFunctionNames(const ShHandle handle);
 
 uint8_t GetClipDistanceArraySize(const ShHandle handle);
 uint8_t GetCullDistanceArraySize(const ShHandle handle);
-bool HasClipDistanceInVertexShader(const ShHandle handle);
-bool HasDiscardInFragmentShader(const ShHandle handle);
-bool HasValidGeometryShaderInputPrimitiveType(const ShHandle handle);
-bool HasValidGeometryShaderOutputPrimitiveType(const ShHandle handle);
-bool HasValidGeometryShaderMaxVertices(const ShHandle handle);
-bool HasValidTessGenMode(const ShHandle handle);
-bool HasValidTessGenSpacing(const ShHandle handle);
-bool HasValidTessGenVertexOrder(const ShHandle handle);
-bool HasValidTessGenPointMode(const ShHandle handle);
 GLenum GetGeometryShaderInputPrimitiveType(const ShHandle handle);
 GLenum GetGeometryShaderOutputPrimitiveType(const ShHandle handle);
 int GetGeometryShaderInvocations(const ShHandle handle);
@@ -915,6 +961,9 @@ GLenum GetTessGenSpacing(const ShHandle handle);
 GLenum GetTessGenVertexOrder(const ShHandle handle);
 GLenum GetTessGenPointMode(const ShHandle handle);
 
+// Returns a bitset of sh::MetadataFlags.  This bundles various bits purely for convenience.
+uint32_t GetMetadataFlags(const ShHandle handle);
+
 // Returns the blend equation list supported in the fragment shader.  This is a bitset of
 // gl::BlendEquationType, and can only include bits from KHR_blend_equation_advanced.
 uint32_t GetAdvancedBlendEquations(const ShHandle handle);
@@ -924,47 +973,47 @@ uint32_t GetAdvancedBlendEquations(const ShHandle handle);
 //
 inline bool IsWebGLBasedSpec(ShShaderSpec spec)
 {
-    return (spec == SH_WEBGL_SPEC || spec == SH_WEBGL2_SPEC || spec == SH_WEBGL3_SPEC);
+    return (spec == SH_WEBGL_SPEC || spec == SH_WEBGL2_SPEC);
 }
 
-//
-// Helper function to identify DesktopGL specs
-//
-inline bool IsDesktopGLSpec(ShShaderSpec spec)
+enum class MetadataFlags
 {
-    return spec == SH_GL_CORE_SPEC || spec == SH_GL_COMPATIBILITY_SPEC;
-}
+    // Applicable to vertex shaders (technically all pre-rasterization shaders could use this flag,
+    // but the current and only user is GL, which does not support geometry/tessellation).
+    HasClipDistance,
+    // Applicable to fragment shaders
+    HasDiscard,
+    HasFragCoord,
+    EnablesPerSampleShading,
+    HasInputAttachment0,
+    // Flag for attachment i is HasInputAttachment0 + i
+    HasInputAttachment7 = HasInputAttachment0 + 7,
+    HasDepthInputAttachment,
+    HasStencilInputAttachment,
+    // Applicable to geometry shaders
+    HasValidGeometryShaderInputPrimitiveType,
+    HasValidGeometryShaderOutputPrimitiveType,
+    HasValidGeometryShaderMaxVertices,
+    // Applicable to tessellation shaders
+    HasValidTessGenMode,
+    HasValidTessGenSpacing,
+    HasValidTessGenVertexOrder,
+    HasValidTessGenPointMode,
 
-// Can't prefix with just _ because then we might introduce a double underscore, which is not safe
-// in GLSL (ESSL 3.00.6 section 3.8: All identifiers containing a double underscore are reserved for
-// use by the underlying implementation). u is short for user-defined.
-extern const char kUserDefinedNamePrefix[];
+    InvalidEnum,
+    EnumCount = InvalidEnum,
+};
+
+// If samplers are extracted from structs, their names will be <prefix><N>, where <N> is a
+// zero-based index assigned in DFS-order of declaration.
+extern const char kExtractedSamplerNamePrefix[];
 
 namespace vk
 {
 
-// Specialization constant ids
-enum class SpecializationConstantId : uint32_t
-{
-    SurfaceRotation = 0,
-    Dither          = 1,
-
-    InvalidEnum = 2,
-    EnumCount   = InvalidEnum,
-};
-
-enum class SpecConstUsage : uint32_t
-{
-    Rotation = 0,
-    Dither   = 1,
-
-    InvalidEnum = 2,
-    EnumCount   = InvalidEnum,
-};
-
 enum ColorAttachmentDitherControl
 {
-    // See comments in ContextVk::updateDither and EmulateDithering.cpp
+    // See comments in ContextVk::updateDither
     kDitherControlNoDither   = 0,
     kDitherControlDither4444 = 1,
     kDitherControlDither5551 = 2,
@@ -998,6 +1047,7 @@ constexpr uint32_t kNonSemanticInstructionMask       = 0xF;
 constexpr uint32_t kOverviewHasSampleRateShadingMask = 0x10;
 constexpr uint32_t kOverviewHasSampleIDMask          = 0x20;
 constexpr uint32_t kOverviewHasOutputPerVertexMask   = 0x40;
+constexpr uint32_t kOverviewHasFragCoordMask         = 0x80;
 
 enum ReservedIds
 {
@@ -1009,6 +1059,7 @@ enum ReservedIds
 
     // Global information
     kIdNonSemanticInstructionSet,
+    kIdGlslStdInstructionSet,
     kIdEntryPoint,
 
     // Basic types
@@ -1021,6 +1072,7 @@ enum ReservedIds
     kIdMat3,
     kIdMat4,
     kIdInt,
+    kIdIVec2,
     kIdIVec4,
     kIdUint,
 
@@ -1029,10 +1081,21 @@ enum ReservedIds
     kIdIntOne,
     kIdIntTwo,
     kIdIntThree,
+    kIdIntFour,
+    kIdIntFive,
+    kIdIntSix,
+    kIdIntSeven,
+
+    kIdFloatTwo,
+
+    kIdVec4Zero,
+    kIdIVec4Zero,
 
     // Type pointers
     kIdIntInputTypePointer,
+    kIdVec4InputTypePointer,
     kIdVec4OutputTypePointer,
+    kIdVec3OutputTypePointer,
     kIdIVec4FunctionTypePointer,
     kIdOutputPerVertexTypePointer,
 
@@ -1052,6 +1115,9 @@ enum ReservedIds
 
     // Multisampling support
     kIdSampleID,
+
+    // Dithering emulation
+    kIdFragCoord,
 
     // =============================================================================================
     // ANGLE internal shader variables, which are not produced as ShaderVariables.
@@ -1077,6 +1143,20 @@ enum ReservedIds
     kIdXfbEmulationBufferBlockThree,
     // Additional varying added to hold untransformed gl_Position for transform feedback capture
     kIdXfbExtensionPosition,
+    // Input attachments used for framebuffer fetch and advanced blend emulation
+    kIdInputAttachment0,
+    kIdInputAttachment7 = kIdInputAttachment0 + 7,
+    kIdDepthInputAttachment,
+    kIdStencilInputAttachment,
+
+    // 16-bit storage extension
+    kIdFloat16,
+    kIdFloat16Vec2,
+    kIdFloat16Vec3,
+    kIdFloat16Vec4,
+    kIdFloat16Mat2,
+    kIdFloat16Mat3,
+    kIdFloat16Mat4,
 
     kIdFirstUnreserved,
 };
@@ -1089,7 +1169,8 @@ enum ReservedIds
 // - 8 bits for enabled clip planes
 // - 1 bit for whether depth should be transformed to Vulkan clip space
 // - 1 bit for whether alpha to coverage is enabled
-// - 10 bits unused
+// - 1 bit for whether the framebuffer is layered
+// - 9 bits unused
 constexpr uint32_t kDriverUniformsMiscSwapXYMask                  = 0x1;
 constexpr uint32_t kDriverUniformsMiscAdvancedBlendEquationOffset = 1;
 constexpr uint32_t kDriverUniformsMiscAdvancedBlendEquationMask   = 0x1F;
@@ -1101,6 +1182,8 @@ constexpr uint32_t kDriverUniformsMiscTransformDepthOffset        = 20;
 constexpr uint32_t kDriverUniformsMiscTransformDepthMask          = 0x1;
 constexpr uint32_t kDriverUniformsMiscAlphaToCoverageOffset       = 21;
 constexpr uint32_t kDriverUniformsMiscAlphaToCoverageMask         = 0x1;
+constexpr uint32_t kDriverUniformsMiscLayeredFramebufferOffset    = 22;
+constexpr uint32_t kDriverUniformsMiscLayeredFramebufferMask      = 0x1;
 }  // namespace vk
 
 namespace mtl
@@ -1116,6 +1199,12 @@ extern const char kDepthWriteEnabledConstName[];
 
 // Specialization constant to enable alpha to coverage.
 extern const char kEmulateAlphaToCoverageConstName[];
+
+// Specialization constant to write helper sample mask output.
+extern const char kWriteHelperSampleMaskConstName[];
+
+// Specialization constant to enable sample mask output.
+extern const char kSampleMaskWriteEnabledConstName[];
 }  // namespace mtl
 
 }  // namespace sh

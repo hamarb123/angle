@@ -4,6 +4,7 @@
 // found in the LICENSE file.
 //
 
+#include "common/unsafe_buffers.h"
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
 
@@ -31,12 +32,14 @@ class BlendIntegerTest : public ANGLETest<>
                      std::is_same<T, int32_t>::value ? GL_INT : GL_UNSIGNED_INT, pixel);
         for (size_t componentIdx = 0; componentIdx < components; componentIdx++)
         {
-            EXPECT_EQ(value[componentIdx], pixel[componentIdx])
+            ANGLE_UNSAFE_TODO(EXPECT_EQ(value[componentIdx], pixel[componentIdx]))
                 << " componentIdx=" << componentIdx << std::endl
                 << " " << name << "[0]=" << value[0] << " pixel[0]=" << pixel[0] << std::endl
-                << " " << name << "[1]=" << value[1] << " pixel[1]=" << pixel[1] << std::endl
-                << " " << name << "[2]=" << value[2] << " pixel[2]=" << pixel[2] << std::endl
-                << " " << name << "[3]=" << value[3] << " pixel[3]=" << pixel[3];
+                << " " << name << "[1]=" << ANGLE_UNSAFE_TODO(value[1]) << " pixel[1]=" << pixel[1]
+                << std::endl
+                << " " << name << "[2]=" << ANGLE_UNSAFE_TODO(value[2]) << " pixel[2]=" << pixel[2]
+                << std::endl
+                << " " << name << "[3]=" << ANGLE_UNSAFE_TODO(value[3]) << " pixel[3]=" << pixel[3];
         }
     }
 
@@ -300,13 +303,10 @@ TEST_P(BlendIntegerTest, RGB10_A2UI)
 // Test that blending does not cancel draws on signed integer attachments.
 TEST_P(BlendIntegerTest, MRTSigned)
 {
-    // http://anglebug.com/5071
+    // http://anglebug.com/42263640
     ANGLE_SKIP_TEST_IF(IsVulkan() && IsWindows() && IsIntel());
 
-    // http://anglebug.com/5125
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsMac() && IsIntel());
-
-    // http://anglebug.com/5126
+    // http://anglebug.com/42263689
     ANGLE_SKIP_TEST_IF(IsVulkan() && IsAdreno());
 
     runTestMRT<true>();
@@ -315,13 +315,10 @@ TEST_P(BlendIntegerTest, MRTSigned)
 // Test that blending does not cancel draws on unsigned integer attachments.
 TEST_P(BlendIntegerTest, MRTUnsigned)
 {
-    // http://anglebug.com/5071
+    // http://anglebug.com/42263640
     ANGLE_SKIP_TEST_IF(IsVulkan() && IsWindows() && IsIntel());
 
-    // http://anglebug.com/5125
-    ANGLE_SKIP_TEST_IF(IsOpenGL() && IsMac() && IsIntel());
-
-    // http://anglebug.com/5126
+    // http://anglebug.com/42263689
     ANGLE_SKIP_TEST_IF(IsVulkan() && IsAdreno());
 
     runTestMRT<false>();

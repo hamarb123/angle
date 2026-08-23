@@ -8,6 +8,7 @@
 //
 
 #include "ANGLEPerfTest.h"
+#include "common/unsafe_buffers.h"
 
 #include <iostream>
 #include <random>
@@ -113,7 +114,7 @@ BindingsBenchmark::BindingsBenchmark() : ANGLERenderTest("Bindings", GetParam())
 {
     if (GetParam().eglParameters.renderer == EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE)
     {
-        skipTest("http://anglebug.com/6264 Flaky on OpenGL");
+        skipTest("http://anglebug.com/42264783 Flaky on OpenGL");
     }
 }
 
@@ -192,8 +193,8 @@ void BindingsBenchmark::drawBenchmark()
         size_t bindingIndex         = it % bindingPointsSize;
         for (GLuint bufferIdx = 0; bufferIdx < buffersSize; bufferIdx++)
         {
-            GLenum binding = bindingPoints[bindingIndex];
-            glBindBuffer(binding, buffers[bufferIdx]);
+            GLenum binding = ANGLE_UNSAFE_TODO(bindingPoints[bindingIndex]);
+            glBindBuffer(binding, ANGLE_UNSAFE_TODO(buffers[bufferIdx]));
 
             // Instead of doing a costly division to get an index in the range [0,bindingPointsSize)
             // do a bounds-check and reset the index.
@@ -228,7 +229,7 @@ BindingsParams D3D11Params(AllocationStyle allocationStyle)
 BindingsParams OpenGLOrGLESParams(AllocationStyle allocationStyle)
 {
     BindingsParams params;
-    params.eglParameters   = egl_platform::OPENGL_OR_GLES_NULL();
+    params.eglParameters   = egl_platform::OPENGL_OR_GLES();
     params.allocationStyle = allocationStyle;
     return params;
 }

@@ -3,10 +3,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// DXTSRGBCompressedTextureTest.cpp
+// DXTSRGBCompressedTextureTest.cpp:
 //   Tests for sRGB DXT textures (GL_EXT_texture_compression_s3tc_srgb)
 //
 
+#include "common/unsafe_buffers.h"
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
 
@@ -74,11 +75,12 @@ class DXTSRGBCompressedTextureTest : public ANGLETest<>
         {
             for (GLsizei x = 0; x < test.width; ++x)
             {
-                GLColor exp = reinterpret_cast<const GLColor *>(test.expected)[y * test.width + x];
+                GLColor exp = ANGLE_UNSAFE_TODO(
+                    reinterpret_cast<const GLColor *>(test.expected)[y * test.width + x]);
                 size_t x_actual = (x * kWindowSize + kWindowSize / 2) / test.width;
                 size_t y_actual =
                     ((test.height - y - 1) * kWindowSize + kWindowSize / 2) / test.height;
-                GLColor act = actual[y_actual * kWindowSize + x_actual];
+                GLColor act = ANGLE_UNSAFE_TODO(actual[y_actual * kWindowSize + x_actual]);
                 EXPECT_COLOR_NEAR(exp, act, 2.0);
             }
         }
@@ -91,7 +93,7 @@ class DXTSRGBCompressedTextureTest : public ANGLETest<>
         const TestCase &test = kTests.at(format);
 
         GLTexture texture;
-        glBindTexture(GL_TEXTURE_2D, texture.get());
+        glBindTexture(GL_TEXTURE_2D, texture);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);

@@ -12,7 +12,6 @@
 #include "common/debug.h"
 
 #include "libANGLE/Context.h"
-#include "libANGLE/renderer/OverlayImpl.h"
 #include "libANGLE/renderer/null/BufferNULL.h"
 #include "libANGLE/renderer/null/CompilerNULL.h"
 #include "libANGLE/renderer/null/DisplayNULL.h"
@@ -91,6 +90,7 @@ ContextNULL::ContextNULL(const gl::State &state,
 
     mExtensions.textureStorageEXT               = true;
     mExtensions.rgb8Rgba8OES                    = true;
+    mExtensions.colorBufferFloatEXT             = state.getClientVersion() >= gl::Version(3, 0);
     mExtensions.textureCompressionDxt1EXT       = true;
     mExtensions.textureCompressionDxt3ANGLE     = true;
     mExtensions.textureCompressionDxt5ANGLE     = true;
@@ -100,7 +100,6 @@ ContextNULL::ContextNULL(const gl::State &state,
     mExtensions.textureCompressionAstcOES       = true;
     mExtensions.compressedETC1RGB8TextureOES    = true;
     mExtensions.compressedETC1RGB8SubTextureEXT = true;
-    mExtensions.lossyEtcDecodeANGLE             = true;
     mExtensions.geometryShaderEXT               = true;
     mExtensions.geometryShaderOES               = true;
     mExtensions.multiDrawIndirectEXT            = true;
@@ -118,14 +117,15 @@ ContextNULL::ContextNULL(const gl::State &state,
 
     if (mExtensions.shaderPixelLocalStorageANGLE)
     {
-        mPLSOptions.type             = ShPixelLocalStorageType::FramebufferFetch;
-        mPLSOptions.fragmentSyncType = ShFragmentSynchronizationType::Automatic;
+        mPLSOptions.type                = ShPixelLocalStorageType::FramebufferFetch;
+        mPLSOptions.fragmentSyncType    = ShFragmentSynchronizationType::Automatic;
+        mPLSOptions.supportsNoncoherent = true;
     }
 }
 
 ContextNULL::~ContextNULL() {}
 
-angle::Result ContextNULL::initialize()
+angle::Result ContextNULL::initialize(const angle::ImageLoadContext &imageLoadContext)
 {
     return angle::Result::Continue;
 }
@@ -464,9 +464,10 @@ BufferImpl *ContextNULL::createBuffer(const gl::BufferState &state)
     return new BufferNULL(state, mAllocationTracker);
 }
 
-VertexArrayImpl *ContextNULL::createVertexArray(const gl::VertexArrayState &data)
+VertexArrayImpl *ContextNULL::createVertexArray(const gl::VertexArrayState &data,
+                                                const gl::VertexArrayBuffers &vertexArrayBuffers)
 {
-    return new VertexArrayNULL(data);
+    return new VertexArrayNULL(data, vertexArrayBuffers);
 }
 
 QueryImpl *ContextNULL::createQuery(gl::QueryType type)
@@ -509,11 +510,6 @@ SemaphoreImpl *ContextNULL::createSemaphore()
 {
     UNREACHABLE();
     return nullptr;
-}
-
-OverlayImpl *ContextNULL::createOverlay(const gl::OverlayState &state)
-{
-    return new OverlayImpl(state);
 }
 
 angle::Result ContextNULL::dispatchCompute(const gl::Context *context,

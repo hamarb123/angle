@@ -52,13 +52,13 @@ class TextureStorage : public angle::Subject
     virtual bool supportsNativeMipmapFunction() const = 0;
     virtual int getLevelCount() const                 = 0;
 
+    virtual bool isMultiplanar(const gl::Context *context) = 0;
+
     virtual angle::Result findRenderTarget(const gl::Context *context,
                                            const gl::ImageIndex &index,
-                                           GLsizei samples,
                                            RenderTargetD3D **outRT) const = 0;
     virtual angle::Result getRenderTarget(const gl::Context *context,
                                           const gl::ImageIndex &index,
-                                          GLsizei samples,
                                           RenderTargetD3D **outRT)        = 0;
     virtual angle::Result generateMipmap(const gl::Context *context,
                                          const gl::ImageIndex &sourceIndex,
@@ -74,17 +74,7 @@ class TextureStorage : public angle::Subject
                                   const gl::PixelUnpackState &unpack,
                                   const uint8_t *pixelData)          = 0;
 
-    // This is a no-op for most implementations of TextureStorage. Some (e.g. TextureStorage11_2D)
-    // might override it.
-    virtual angle::Result useLevelZeroWorkaroundTexture(const gl::Context *context,
-                                                        bool useLevelZeroTexture);
-
     virtual void invalidateTextures() {}
-
-    // RenderToTexture methods
-    virtual angle::Result releaseMultisampledTexStorageForLevel(size_t level);
-    virtual angle::Result resolveTexture(const gl::Context *context);
-    virtual GLsizei getRenderToTextureSamples() const;
 
     // Called by outer object when label has changed via KHR_debug extension
     void setLabel(const std::string &newLabel);
@@ -99,27 +89,6 @@ class TextureStorage : public angle::Subject
 inline angle::Result TextureStorage::onDestroy(const gl::Context *context)
 {
     return angle::Result::Continue;
-}
-
-inline angle::Result TextureStorage::useLevelZeroWorkaroundTexture(const gl::Context *context,
-                                                                   bool useLevelZeroTexture)
-{
-    return angle::Result::Continue;
-}
-
-inline angle::Result TextureStorage::releaseMultisampledTexStorageForLevel(size_t level)
-{
-    return angle::Result::Continue;
-}
-
-inline angle::Result TextureStorage::resolveTexture(const gl::Context *context)
-{
-    return angle::Result::Continue;
-}
-
-inline GLsizei TextureStorage::getRenderToTextureSamples() const
-{
-    return 0;
 }
 
 inline void TextureStorage::setLabel(const std::string &newLabel)

@@ -7,6 +7,7 @@
 
 #include <vector>
 #include "common/debug.h"
+#include "common/unsafe_buffers.h"
 
 namespace testing
 {
@@ -36,7 +37,7 @@ std::vector<Rgba> makeCheckerboard(int width, int height)
     {
         for (int x = 0; x < width; ++x)
         {
-            result.push_back(colors[colorIndex]);
+            result.push_back(ANGLE_UNSAFE_TODO(colors[colorIndex]));
             colorIndex ^= 1UL;  // toggle the last bit, so we alternate between 0 and 1;
         }
         colorIndex ^= 1UL;

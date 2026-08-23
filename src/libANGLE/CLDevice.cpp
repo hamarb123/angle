@@ -4,19 +4,28 @@
 // found in the LICENSE file.
 //
 // CLDevice.cpp: Implements the cl::Device class.
+//
 
+#include "common/unsafe_buffers.h"
+
+#include <angle_cl.h>
+
+#include "libANGLE/CLBitField.h"
 #include "libANGLE/CLDevice.h"
-
 #include "libANGLE/CLPlatform.h"
-
-#include "common/string_utils.h"
+#include "libANGLE/cl_types.h"
+#include "libANGLE/cl_utils.h"
 
 #include <cstring>
+#include <string>
 
 namespace cl
 {
 
-cl_int Device::getInfo(DeviceInfo name, size_t valueSize, void *value, size_t *valueSizeRet) const
+angle::Result Device::getInfo(DeviceInfo name,
+                              size_t valueSize,
+                              void *value,
+                              size_t *valueSizeRet) const
 {
     static_assert(std::is_same<cl_uint, cl_bool>::value &&
                       std::is_same<cl_uint, cl_device_mem_cache_type>::value &&
@@ -40,7 +49,6 @@ cl_int Device::getInfo(DeviceInfo name, size_t valueSize, void *value, size_t *v
 
     const void *copyValue = nullptr;
     size_t copySize       = 0u;
-    cl_int result         = CL_SUCCESS;
 
     // The info names are sorted within their type group in the order they appear in the OpenCL
     // specification, so it is easier to compare them side-by-side when looking for changes.
@@ -98,7 +106,7 @@ cl_int Device::getInfo(DeviceInfo name, size_t valueSize, void *value, size_t *v
         case DeviceInfo::WorkGroupCollectiveFunctionsSupport:
         case DeviceInfo::GenericAddressSpaceSupport:
         case DeviceInfo::PipeSupport:
-            result    = mImpl->getInfoUInt(name, &valUInt);
+            ANGLE_TRY(mImpl->getInfoUInt(name, &valUInt));
             copyValue = &valUInt;
             copySize  = sizeof(valUInt);
             break;
@@ -118,7 +126,7 @@ cl_int Device::getInfo(DeviceInfo name, size_t valueSize, void *value, size_t *v
         case DeviceInfo::AtomicFenceCapabilities:
         case DeviceInfo::DeviceEnqueueCapabilities:
         case DeviceInfo::HalfFpConfig:
-            result    = mImpl->getInfoULong(name, &valULong);
+            ANGLE_TRY(mImpl->getInfoULong(name, &valULong));
             copyValue = &valULong;
             copySize  = sizeof(valULong);
             break;
@@ -131,7 +139,7 @@ cl_int Device::getInfo(DeviceInfo name, size_t valueSize, void *value, size_t *v
         case DeviceInfo::ProfilingTimerResolution:
         case DeviceInfo::PrintfBufferSize:
         case DeviceInfo::PreferredWorkGroupSizeMultiple:
-            result    = mImpl->getInfoSizeT(name, &valSizeT);
+            ANGLE_TRY(mImpl->getInfoSizeT(name, &valSizeT));
             copyValue = &valSizeT;
             copySize  = sizeof(valSizeT);
             break;
@@ -143,16 +151,21 @@ cl_int Device::getInfo(DeviceInfo name, size_t valueSize, void *value, size_t *v
         case DeviceInfo::Profile:
         case DeviceInfo::OpenCL_C_Version:
         case DeviceInfo::LatestConformanceVersionPassed:
-            result = mImpl->getInfoStringLength(name, &copySize);
-            if (result != CL_SUCCESS)
-            {
-                return result;
-            }
+            ANGLE_TRY(mImpl->getInfoStringLength(name, &copySize));
             valString.resize(copySize, '\0');
-            result    = mImpl->getInfoString(name, copySize, valString.data());
+            ANGLE_TRY(mImpl->getInfoString(name, copySize, valString.data()));
             copyValue = valString.data();
             break;
-
+        case DeviceInfo::ExternalMemoryImportHandleTypes:
+            copyValue = mInfo.externalMemoryHandleSupportList.data();
+            copySize  = mInfo.externalMemoryHandleSupportList.size() *
+                        sizeof(*mInfo.externalMemoryHandleSupportList.data());
+            break;
+        case DeviceInfo::ExternalMemoryLinearImagesHandleTypes:
+            copyValue = mInfo.externalMemoryLinearImagesHandleSupportList.data();
+            copySize  = mInfo.externalMemoryLinearImagesHandleSupportList.size() *
+                        sizeof(cl_external_memory_handle_type_khr);
+            break;
         // Handle all cached values
         case DeviceInfo::Type:
             copyValue = &mInfo.type;
@@ -166,7 +179,7 @@ cl_int Device::getInfo(DeviceInfo name, size_t valueSize, void *value, size_t *v
         case DeviceInfo::MaxWorkItemSizes:
             copyValue = mInfo.maxWorkItemSizes.data();
             copySize  = mInfo.maxWorkItemSizes.size() *
-                       sizeof(decltype(mInfo.maxWorkItemSizes)::value_type);
+                        sizeof(decltype(mInfo.maxWorkItemSizes)::value_type);
             break;
         case DeviceInfo::MaxMemAllocSize:
             copyValue = &mInfo.maxMemAllocSize;
@@ -240,7 +253,7 @@ cl_int Device::getInfo(DeviceInfo name, size_t valueSize, void *value, size_t *v
         case DeviceInfo::BuiltInKernelsWithVersion:
             copyValue = mInfo.builtInKernelsWithVersion.data();
             copySize  = mInfo.builtInKernelsWithVersion.size() *
-                       sizeof(decltype(mInfo.builtInKernelsWithVersion)::value_type);
+                        sizeof(decltype(mInfo.builtInKernelsWithVersion)::value_type);
             break;
         case DeviceInfo::Version:
             copyValue = mInfo.versionStr.c_str();
@@ -253,12 +266,12 @@ cl_int Device::getInfo(DeviceInfo name, size_t valueSize, void *value, size_t *v
         case DeviceInfo::OpenCL_C_AllVersions:
             copyValue = mInfo.OpenCL_C_AllVersions.data();
             copySize  = mInfo.OpenCL_C_AllVersions.size() *
-                       sizeof(decltype(mInfo.OpenCL_C_AllVersions)::value_type);
+                        sizeof(decltype(mInfo.OpenCL_C_AllVersions)::value_type);
             break;
         case DeviceInfo::OpenCL_C_Features:
             copyValue = mInfo.OpenCL_C_Features.data();
             copySize  = mInfo.OpenCL_C_Features.size() *
-                       sizeof(decltype(mInfo.OpenCL_C_Features)::value_type);
+                        sizeof(decltype(mInfo.OpenCL_C_Features)::value_type);
             break;
         case DeviceInfo::Extensions:
             copyValue = mInfo.extensions.c_str();
@@ -267,17 +280,30 @@ cl_int Device::getInfo(DeviceInfo name, size_t valueSize, void *value, size_t *v
         case DeviceInfo::ExtensionsWithVersion:
             copyValue = mInfo.extensionsWithVersion.data();
             copySize  = mInfo.extensionsWithVersion.size() *
-                       sizeof(decltype(mInfo.extensionsWithVersion)::value_type);
+                        sizeof(decltype(mInfo.extensionsWithVersion)::value_type);
             break;
         case DeviceInfo::PartitionProperties:
             copyValue = mInfo.partitionProperties.data();
             copySize  = mInfo.partitionProperties.size() *
-                       sizeof(decltype(mInfo.partitionProperties)::value_type);
+                        sizeof(decltype(mInfo.partitionProperties)::value_type);
             break;
         case DeviceInfo::PartitionType:
             copyValue = mInfo.partitionType.data();
             copySize =
                 mInfo.partitionType.size() * sizeof(decltype(mInfo.partitionType)::value_type);
+            break;
+        case DeviceInfo::IntegerDotProductCapabilities:
+            copyValue = &mInfo.integerDotProductCapabilities;
+            copySize  = sizeof(mInfo.integerDotProductCapabilities);
+            break;
+        case DeviceInfo::IntegerDotProductAccelerationProperties8bit:
+            copyValue = &mInfo.integerDotProductAccelerationProperties8Bit;
+            copySize  = sizeof(mInfo.integerDotProductAccelerationProperties8Bit);
+            break;
+
+        case DeviceInfo::IntegerDotProductAccelerationProperties4x8bitPacked:
+            copyValue = &mInfo.integerDotProductAccelerationProperties4x8BitPacked;
+            copySize  = sizeof(mInfo.integerDotProductAccelerationProperties4x8BitPacked);
             break;
 
         // Handle all mapped values
@@ -299,68 +325,60 @@ cl_int Device::getInfo(DeviceInfo name, size_t valueSize, void *value, size_t *v
 
         default:
             ASSERT(false);
-            return CL_INVALID_VALUE;
+            ANGLE_CL_RETURN_ERROR(CL_INVALID_VALUE);
     }
 
-    if (result != CL_SUCCESS)
-    {
-        return result;
-    }
     if (value != nullptr)
     {
         // CL_INVALID_VALUE if size in bytes specified by param_value_size is < size of return
         // type as specified in the Device Queries table and param_value is not a NULL value
         if (valueSize < copySize)
         {
-            return CL_INVALID_VALUE;
+            ANGLE_CL_RETURN_ERROR(CL_INVALID_VALUE);
         }
         if (copyValue != nullptr)
         {
-            std::memcpy(value, copyValue, copySize);
+            ANGLE_UNSAFE_TODO(std::memcpy(value, copyValue, copySize));
         }
     }
     if (valueSizeRet != nullptr)
     {
         *valueSizeRet = copySize;
     }
-    return CL_SUCCESS;
+    return angle::Result::Continue;
 }
 
-cl_int Device::createSubDevices(const cl_device_partition_property *properties,
-                                cl_uint numDevices,
-                                cl_device_id *subDevices,
-                                cl_uint *numDevicesRet)
+angle::Result Device::createSubDevices(const cl_device_partition_property *properties,
+                                       cl_uint numDevices,
+                                       cl_device_id *subDevices,
+                                       cl_uint *numDevicesRet)
 {
     if (subDevices == nullptr)
     {
         numDevices = 0u;
     }
     rx::CLDeviceImpl::CreateFuncs subDeviceCreateFuncs;
-    const cl_int errorCode =
-        mImpl->createSubDevices(properties, numDevices, subDeviceCreateFuncs, numDevicesRet);
-    if (errorCode == CL_SUCCESS)
+    ANGLE_TRY(mImpl->createSubDevices(properties, numDevices, subDeviceCreateFuncs, numDevicesRet));
+    cl::DeviceType type = mInfo.type;
+    type.clear(CL_DEVICE_TYPE_DEFAULT);
+    DevicePtrs devices;
+    devices.reserve(subDeviceCreateFuncs.size());
+    while (!subDeviceCreateFuncs.empty())
     {
-        cl::DeviceType type = mInfo.type;
-        type.clear(CL_DEVICE_TYPE_DEFAULT);
-        DevicePtrs devices;
-        devices.reserve(subDeviceCreateFuncs.size());
-        while (!subDeviceCreateFuncs.empty())
+        devices.emplace_back(
+            DevicePtr::Create(mPlatform, this, type, subDeviceCreateFuncs.front()));
+
+        if (!devices.back()->mInfo.isValid())
         {
-            devices.emplace_back(new Device(mPlatform, this, type, subDeviceCreateFuncs.front()));
-            // Release initialization reference, lifetime controlled by RefPointer.
-            devices.back()->release();
-            if (!devices.back()->mInfo.isValid())
-            {
-                return CL_INVALID_VALUE;
-            }
-            subDeviceCreateFuncs.pop_front();
+            return angle::Result::Stop;
         }
-        for (DevicePtr &subDevice : devices)
-        {
-            *subDevices++ = subDevice.release();
-        }
+        subDeviceCreateFuncs.pop_front();
     }
-    return errorCode;
+    for (DevicePtr &subDevice : devices)
+    {
+        *ANGLE_UNSAFE_TODO(subDevices++) = subDevice.release();
+    }
+    return angle::Result::Continue;
 }
 
 Device::~Device() = default;
@@ -423,6 +441,31 @@ bool Device::supportsImageDimensions(const ImageDescriptor &desc) const
             break;
     }
     return false;
+}
+
+bool Device::hasDeviceEnqueueCaps() const
+{
+    return mInfo.queueOnDeviceMaxSize > 0;
+}
+
+bool Device::supportsNonUniformWorkGroups() const
+{
+    cl_bool support = false;
+
+    if (getPlatform().isVersionOrNewer(3, 0))
+    {
+        if (IsError(mImpl->getInfoUInt(DeviceInfo::NonUniformWorkGroupSupport, &support)))
+        {
+            UNREACHABLE();
+        }
+    }
+    else
+    {
+        // Check older platforms support via device extension
+        support = getInfo().armNonUniformWorkGroupSize;
+    }
+
+    return support;
 }
 
 Device::Device(Platform &platform,

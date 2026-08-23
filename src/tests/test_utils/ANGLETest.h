@@ -13,14 +13,17 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <array>
+#include "common/unsafe_buffers.h"
 
 #include "RenderDoc.h"
 #include "angle_test_configs.h"
 #include "angle_test_platform.h"
 #include "common/angleutils.h"
+#include "common/platform_helpers.h"
 #include "common/system_utils.h"
 #include "common/vector_utils.h"
 #include "platform/PlatformMethods.h"
+#include "test_expectations/GPUTestConfig.h"
 #include "util/EGLWindow.h"
 #include "util/shader_utils.h"
 #include "util/util_gl.h"
@@ -100,6 +103,9 @@ struct GLColorRGB
     static const GLColorRGB green;
     static const GLColorRGB red;
     static const GLColorRGB yellow;
+    static const GLColorRGB magenta;
+    static const GLColorRGB cyan;
+    static const GLColorRGB white;
 };
 
 struct GLColorRG
@@ -136,9 +142,9 @@ struct GLColor
 
     angle::Vector4 toNormalizedVector() const;
 
-    GLubyte &operator[](size_t index) { return (&R)[index]; }
+    GLubyte &operator[](size_t index) { return ANGLE_UNSAFE_TODO((&R)[index]); }
 
-    const GLubyte &operator[](size_t index) const { return (&R)[index]; }
+    const GLubyte &operator[](size_t index) const { return ANGLE_UNSAFE_TODO((&R)[index]); }
 
     const GLubyte *data() const { return &R; }
     GLubyte *data() { return &R; }
@@ -169,7 +175,7 @@ struct GLColorT
     T R, G, B, A;
 };
 
-using GLColor16UI = GLColorT<uint16_t>;
+using GLColor16   = GLColorT<uint16_t>;
 using GLColor32F  = GLColorT<float>;
 using GLColor32I  = GLColorT<int32_t>;
 using GLColor32UI = GLColorT<uint32_t>;
@@ -231,6 +237,13 @@ constexpr std::array<GLenum, 6> kCubeFaces = {
 void LoadEntryPointsWithUtilLoader(angle::GLESDriverType driver);
 
 bool IsFormatEmulated(GLenum target);
+
+GPUTestConfig::API GetTestConfigAPIFromRenderer(angle::GLESDriverType driverType,
+                                                EGLenum renderer,
+                                                EGLenum deviceType);
+
+EGLenum GetEglPlatform();
+EGLenum GetPbufferOnlyDefaultPlatformType();
 }  // namespace angle
 
 #define EXPECT_PIXEL_EQ(x, y, r, g, b, a) \
@@ -243,6 +256,9 @@ bool IsFormatEmulated(GLenum target);
     EXPECT_EQ(angle::MakeGLColor32F(r, g, b, a), angle::ReadColor32F(x, y))
 
 #define EXPECT_PIXEL_ALPHA_EQ(x, y, a) EXPECT_EQ(a, angle::ReadColor(x, y).A)
+
+#define EXPECT_PIXEL_ALPHA_NEAR(x, y, a, abs_error) \
+    EXPECT_NEAR(a, angle::ReadColor(x, y).A, abs_error);
 
 #define EXPECT_PIXEL_ALPHA32F_EQ(x, y, a) EXPECT_EQ(a, angle::ReadColor32F(x, y).A)
 
@@ -302,6 +318,9 @@ bool IsFormatEmulated(GLenum target);
 #define EXPECT_PIXEL_NEAR(x, y, r, g, b, a, abs_error) \
     EXPECT_PIXEL_NEAR_HELPER(x, y, r, g, b, a, abs_error, GLubyte, GL_RGBA, GL_UNSIGNED_BYTE)
 
+#define EXPECT_PIXEL_16_NEAR(x, y, r, g, b, a, abs_error) \
+    EXPECT_PIXEL_NEAR_HELPER(x, y, r, g, b, a, abs_error, GLushort, GL_RGBA, GL_UNSIGNED_SHORT)
+
 #define EXPECT_PIXEL_8S_NEAR(x, y, r, g, b, a, abs_error) \
     EXPECT_PIXEL_NEAR_HELPER(x, y, r, g, b, a, abs_error, GLbyte, GL_RGBA, GL_BYTE)
 
@@ -317,15 +336,24 @@ bool IsFormatEmulated(GLenum target);
 #define EXPECT_PIXEL_8UI(x, y, r, g, b, a) \
     EXPECT_PIXEL_EQ_HELPER(x, y, r, g, b, a, GLubyte, GL_RGBA_INTEGER, GL_UNSIGNED_BYTE)
 
-#define EXPECT_PIXEL_16UI(x, y, r, g, b, a) \
-    EXPECT_PIXEL_EQ_HELPER(x, y, r, g, b, a, GLushort, GL_RGBA, GL_UNSIGNED_SHORT)
+#define EXPECT_PIXEL_32UI(x, y, r, g, b, a) \
+    EXPECT_PIXEL_EQ_HELPER(x, y, r, g, b, a, GLuint, GL_RGBA_INTEGER, GL_UNSIGNED_INT)
 
-#define EXPECT_PIXEL_16UI_COLOR(x, y, color) \
-    EXPECT_PIXEL_16UI(x, y, color.R, color.G, color.B, color.A)
+#define EXPECT_PIXEL_32I(x, y, r, g, b, a) \
+    EXPECT_PIXEL_EQ_HELPER(x, y, r, g, b, a, GLint, GL_RGBA_INTEGER, GL_INT)
+
+#define EXPECT_PIXEL_32UI_COLOR(x, y, color) \
+    EXPECT_PIXEL_32UI(x, y, color.R, color.G, color.B, color.A)
+
+#define EXPECT_PIXEL_32I_COLOR(x, y, color) \
+    EXPECT_PIXEL_32I(x, y, color.R, color.G, color.B, color.A)
 
 // TODO(jmadill): Figure out how we can use GLColor's nice printing with EXPECT_NEAR.
 #define EXPECT_PIXEL_COLOR_NEAR(x, y, angleColor, abs_error) \
     EXPECT_PIXEL_NEAR(x, y, angleColor.R, angleColor.G, angleColor.B, angleColor.A, abs_error)
+
+#define EXPECT_PIXEL_COLOR16_NEAR(x, y, angleColor, abs_error) \
+    EXPECT_PIXEL_16_NEAR(x, y, angleColor.R, angleColor.G, angleColor.B, angleColor.A, abs_error)
 
 #define EXPECT_PIXEL_COLOR32F_NEAR(x, y, angleColor, abs_error) \
     EXPECT_PIXEL32F_NEAR(x, y, angleColor.R, angleColor.G, angleColor.B, angleColor.A, abs_error)
@@ -375,7 +403,7 @@ struct TestPlatformContext final : private angle::NonCopyable
     ANGLETestBase *currentTest = nullptr;
 };
 
-class ANGLETestBase
+class ANGLETestBase : public ::testing::Test
 {
   protected:
     ANGLETestBase(const angle::PlatformParameters &params);
@@ -397,10 +425,15 @@ class ANGLETestBase
         return mCurrentParams->eglParameters.debugLayersEnabled != EGL_FALSE;
     }
 
+    void *operator new(size_t size);
+    void operator delete(void *ptr);
+
   protected:
     void ANGLETestSetUp();
+    void ANGLETestSetUpCL();
     void ANGLETestPreTearDown();
     void ANGLETestTearDown();
+    void ANGLETestTearDownCL();
 
     virtual void swapBuffers();
 
@@ -469,6 +502,12 @@ class ANGLETestBase
                             bool useVertexBuffer,
                             float layer);
 
+    // The layer parameter chooses the 2DArray texture layer to sample from.
+    void draw2DArrayTexturedQuad(GLfloat positionAttribZ,
+                                 GLfloat positionAttribXYScale,
+                                 bool useVertexBuffer,
+                                 float layer);
+
     void setWindowWidth(int width);
     void setWindowHeight(int height);
     void setConfigRedBits(int bits);
@@ -477,17 +516,20 @@ class ANGLETestBase
     void setConfigAlphaBits(int bits);
     void setConfigDepthBits(int bits);
     void setConfigStencilBits(int bits);
+    void setConfigColorSpace(EGLenum colorSpace);
     void setConfigComponentType(EGLenum componentType);
     void setMultisampleEnabled(bool enabled);
     void setSamples(EGLint samples);
     void setDebugEnabled(bool enabled);
     void setNoErrorEnabled(bool enabled);
     void setWebGLCompatibilityEnabled(bool webglCompatibility);
+    void setHardenedContextEnabled(bool hardenedContext);
     void setExtensionsEnabled(bool extensionsEnabled);
     void setRobustAccess(bool enabled);
     void setBindGeneratesResource(bool bindGeneratesResource);
     void setClientArraysEnabled(bool enabled);
     void setRobustResourceInit(bool enabled);
+    void setPbuffer(bool enabled);
     void setMutableRenderBuffer(bool enabled);
     void setContextProgramCacheEnabled(bool enabled);
     void setContextResetStrategy(EGLenum resetStrategy);
@@ -498,6 +540,7 @@ class ANGLETestBase
 
     int getClientMajorVersion() const;
     int getClientMinorVersion() const;
+    bool isAtLeastClientVersion(int major, int minor) const;
 
     GLWindowBase *getGLWindow() const;
     EGLWindow *getEGLWindow() const;
@@ -514,6 +557,9 @@ class ANGLETestBase
 
     // Has a float uniform "u_layer" to choose the 3D texture layer.
     GLuint get3DTexturedQuadProgram();
+
+    // Has a float uniform "u_layer" to choose the 2DArray texture layer.
+    GLuint get2DArrayTexturedQuadProgram();
 
     class [[nodiscard]] ScopedIgnorePlatformMessages : angle::NonCopyable
     {
@@ -549,12 +595,25 @@ class ANGLETestBase
                mCurrentParams->isSwiftshader();
     }
 
+    bool isMetalRenderer() const
+    {
+        return mCurrentParams->getRenderer() == EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE;
+    }
+
+    bool isDriverSystemEgl() const
+    {
+        return mCurrentParams->driver == angle::GLESDriverType::SystemEGL;
+    }
+
+    angle::GLESDriverType getDriverType() const { return mCurrentParams->driver; }
+
     bool platformSupportsMultithreading() const;
 
     bool mIsSetUp = false;
 
   private:
     void checkD3D11SDKLayersMessages();
+    void checkUnsupportedExtensions();
 
     void drawQuad(GLuint program,
                   const std::string &positionAttribName,
@@ -591,6 +650,7 @@ class ANGLETestBase
     // Used for texture rendering.
     GLuint m2DTexturedQuadProgram;
     GLuint m3DTexturedQuadProgram;
+    GLuint m2DArrayTexturedQuadProgram;
 
     bool mDeferContextInit;
     bool mAlwaysForceNewDisplay;
@@ -621,7 +681,7 @@ class ANGLETestBase
 };
 
 template <typename Params = angle::PlatformParameters>
-class ANGLETest : public ANGLETestBase, public ::testing::TestWithParam<Params>
+class ANGLETest : public ANGLETestBase, public ::testing::WithParamInterface<Params>
 {
   protected:
     ANGLETest();
@@ -639,6 +699,7 @@ class ANGLETest : public ANGLETestBase, public ::testing::TestWithParam<Params>
     void SetUp() final
     {
         ANGLETestBase::ANGLETestSetUp();
+
         if (mIsSetUp)
         {
             testSetUp();
@@ -654,6 +715,14 @@ class ANGLETest : public ANGLETestBase, public ::testing::TestWithParam<Params>
         }
         ANGLETestBase::ANGLETestTearDown();
     }
+};
+
+enum class APIExtensionVersion
+{
+    Core,
+    OES,
+    EXT,
+    KHR,
 };
 
 template <typename Params>
@@ -689,5 +758,7 @@ class ANGLETestEnvironment : public testing::Environment
 };
 
 extern angle::PlatformMethods gDefaultPlatformMethods;
+
+int GetTestStartDelaySeconds();
 
 #endif  // ANGLE_TESTS_ANGLE_TEST_H_

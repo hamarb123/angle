@@ -5,12 +5,14 @@
 //
 // VulkanPipelineCachePerf:
 //   Performance benchmark for the Vulkan Pipeline cache.
+//
 
 #include "ANGLEPerfTest.h"
+#include "common/unsafe_buffers.h"
 
-#include "libANGLE/renderer/vulkan/RendererVk.h"
 #include "libANGLE/renderer/vulkan/vk_cache_utils.h"
 #include "libANGLE/renderer/vulkan/vk_helpers.h"
+#include "libANGLE/renderer/vulkan/vk_renderer.h"
 #include "util/random_utils.h"
 
 using namespace rx;
@@ -69,7 +71,7 @@ void VulkanPipelineCachePerfTest::SetUp()
         {
             mCacheHits.push_back(desc);
         }
-        mCache.populate(desc, std::move(pipeline));
+        mCache.populate(desc, std::move(pipeline), nullptr);
     }
 
     for (int missCount = 0; missCount < 10000; ++missCount)
@@ -84,7 +86,7 @@ void VulkanPipelineCachePerfTest::randomizeDesc(vk::GraphicsPipelineDesc *desc)
 {
     std::vector<uint8_t> bytes(sizeof(vk::GraphicsPipelineDesc));
     FillVectorWithRandomUBytes(&mRNG, &bytes);
-    memcpy(desc, bytes.data(), sizeof(vk::GraphicsPipelineDesc));
+    ANGLE_UNSAFE_TODO(memcpy(desc, bytes.data(), sizeof(vk::GraphicsPipelineDesc)));
 
     desc->setSupportsDynamicStateForTest(GetParam().withDynamicState);
 }
@@ -95,25 +97,20 @@ void VulkanPipelineCachePerfTest::step()
     vk::PipelineLayout pl;
     vk::PipelineCache pc;
     vk::PipelineCacheAccess spc;
-    vk::RefCounted<vk::ShaderModule> vsRefCounted;
-    vk::RefCounted<vk::ShaderModule> fsRefCounted;
+    vk::ShaderModulePtr vs = vk::ShaderModulePtr::MakeShared(VK_NULL_HANDLE);
+    vk::ShaderModulePtr fs = vk::ShaderModulePtr::MakeShared(VK_NULL_HANDLE);
     vk::ShaderModuleMap ssm;
     const vk::GraphicsPipelineDesc *desc = nullptr;
     vk::PipelineHelper *result           = nullptr;
 
     // The Vulkan handle types are difficult to cast to without #ifdefs.
-    VkShaderModule vs = (VkShaderModule)1;
-    VkShaderModule fs = (VkShaderModule)2;
+    vs->setHandle((VkShaderModule)1);
+    fs->setHandle((VkShaderModule)2);
 
-    vsRefCounted.get().setHandle(vs);
-    fsRefCounted.get().setHandle(fs);
-
-    ssm[gl::ShaderType::Vertex].set(&vsRefCounted);
-    ssm[gl::ShaderType::Fragment].set(&fsRefCounted);
+    ssm[gl::ShaderType::Vertex]   = vs;
+    ssm[gl::ShaderType::Fragment] = fs;
 
     spc.init(&pc, nullptr);
-
-    vk::SpecializationConstants defaultSpecConsts{};
 
     for (unsigned int iteration = 0; iteration < kIterationsPerStep; ++iteration)
     {
@@ -121,7 +118,7 @@ void VulkanPipelineCachePerfTest::step()
         {
             if (!mCache.getPipeline(hit, &desc, &result))
             {
-                (void)mCache.createPipeline(VK_NULL_HANDLE, &spc, rp, pl, ssm, defaultSpecConsts,
+                (void)mCache.createPipeline(VK_NULL_HANDLE, &spc, rp, pl, {&ssm},
                                             PipelineSource::Draw, hit, &desc, &result);
             }
         }
@@ -133,13 +130,13 @@ void VulkanPipelineCachePerfTest::step()
         const auto &miss = mCacheMisses[mMissIndex];
         if (!mCache.getPipeline(miss, &desc, &result))
         {
-            (void)mCache.createPipeline(VK_NULL_HANDLE, &spc, rp, pl, ssm, defaultSpecConsts,
-                                        PipelineSource::Draw, miss, &desc, &result);
+            (void)mCache.createPipeline(VK_NULL_HANDLE, &spc, rp, pl, {&ssm}, PipelineSource::Draw,
+                                        miss, &desc, &result);
         }
     }
 
-    vsRefCounted.get().setHandle(VK_NULL_HANDLE);
-    fsRefCounted.get().setHandle(VK_NULL_HANDLE);
+    vs->setHandle(VK_NULL_HANDLE);
+    fs->setHandle(VK_NULL_HANDLE);
 }
 
 }  // anonymous namespace

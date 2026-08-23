@@ -14,6 +14,7 @@
 
 #import "common/debug.h"
 #import "common/gl/cgl/FunctionsCGL.h"
+#include "common/unsafe_buffers.h"
 #import "libANGLE/Context.h"
 #import "libANGLE/renderer/gl/FramebufferGL.h"
 #import "libANGLE/renderer/gl/RendererGL.h"
@@ -193,10 +194,10 @@ WindowSurfaceCGL::~WindowSurfaceCGL()
 
     for (size_t i = 0; i < ArraySize(mSwapState.textures); ++i)
     {
-        if (mSwapState.textures[i].texture != 0)
+        if (ANGLE_UNSAFE_TODO(mSwapState.textures[i].texture) != 0)
         {
-            mStateManager->deleteTexture(mSwapState.textures[i].texture);
-            mSwapState.textures[i].texture = 0;
+            mStateManager->deleteTexture(ANGLE_UNSAFE_TODO(mSwapState.textures[i].texture));
+            ANGLE_UNSAFE_TODO(mSwapState.textures[i].texture) = 0;
         }
     }
 }
@@ -205,18 +206,20 @@ egl::Error WindowSurfaceCGL::initialize(const egl::Display *display)
 {
     EnsureCGLContextIsCurrent ensureContextCurrent(mContext);
 
-    unsigned width  = getWidth();
-    unsigned height = getHeight();
+    gl::Extents size = getSize();
+    unsigned width   = size.width;
+    unsigned height  = size.height;
 
     for (size_t i = 0; i < ArraySize(mSwapState.textures); ++i)
     {
-        mFunctions->genTextures(1, &mSwapState.textures[i].texture);
-        mStateManager->bindTexture(gl::TextureType::_2D, mSwapState.textures[i].texture);
+        mFunctions->genTextures(1, ANGLE_UNSAFE_TODO(&mSwapState.textures[i].texture));
+        mStateManager->bindTexture(gl::TextureType::_2D,
+                                   ANGLE_UNSAFE_TODO(mSwapState.textures[i].texture));
         mFunctions->texImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
                                GL_UNSIGNED_BYTE, nullptr);
-        mSwapState.textures[i].width  = width;
-        mSwapState.textures[i].height = height;
-        mSwapState.textures[i].swapId = 0;
+        ANGLE_UNSAFE_TODO(mSwapState.textures[i].width)  = width;
+        ANGLE_UNSAFE_TODO(mSwapState.textures[i].height) = height;
+        ANGLE_UNSAFE_TODO(mSwapState.textures[i].swapId) = 0;
     }
     mSwapState.beingRendered  = &mSwapState.textures[0];
     mSwapState.lastRendered   = &mSwapState.textures[1];
@@ -240,7 +243,7 @@ egl::Error WindowSurfaceCGL::makeCurrent(const gl::Context *context)
     return egl::Error(EGL_SUCCESS);
 }
 
-egl::Error WindowSurfaceCGL::swap(const gl::Context *context)
+egl::Error WindowSurfaceCGL::swap(const gl::Context *context, SurfaceSwapFeedback *feedback)
 {
     const FunctionsGL *functions = GetFunctionsGL(context);
     StateManagerGL *stateManager = GetStateManagerGL(context);
@@ -254,9 +257,10 @@ egl::Error WindowSurfaceCGL::swap(const gl::Context *context)
     }
     pthread_mutex_unlock(&mSwapState.mutex);
 
-    unsigned width  = getWidth();
-    unsigned height = getHeight();
-    auto &texture   = *mSwapState.beingRendered;
+    gl::Extents size = getSize();
+    unsigned width   = size.width;
+    unsigned height  = size.height;
+    auto &texture    = *mSwapState.beingRendered;
 
     if (texture.width != width || texture.height != height)
     {
@@ -310,19 +314,34 @@ egl::Error WindowSurfaceCGL::releaseTexImage(const gl::Context *context, EGLint 
     return egl::Error(EGL_SUCCESS);
 }
 
-void WindowSurfaceCGL::setSwapInterval(EGLint interval)
+void WindowSurfaceCGL::setSwapInterval(const egl::Display *display, EGLint interval)
 {
     // TODO(cwallez) investigate implementing swap intervals other than 0
 }
 
-EGLint WindowSurfaceCGL::getWidth() const
+gl::Extents WindowSurfaceCGL::getSize() const
 {
-    return static_cast<EGLint>(CGRectGetWidth([mLayer frame]) * [mLayer contentsScale]);
+    EGLint width, height;
+    egl::Error error = WindowSurfaceCGL::getUserSize(nullptr, &width, &height);
+    ASSERT(!error.isError());
+    return gl::Extents(width, height, 1);
 }
 
-EGLint WindowSurfaceCGL::getHeight() const
+egl::Error WindowSurfaceCGL::getUserSize(const egl::Display *display,
+                                         EGLint *width,
+                                         EGLint *height) const
 {
-    return static_cast<EGLint>(CGRectGetHeight([mLayer frame]) * [mLayer contentsScale]);
+    CGRect frame  = [mLayer frame];
+    CGFloat scale = [mLayer contentsScale];
+    if (width != nullptr)
+    {
+        *width = static_cast<EGLint>(CGRectGetWidth(frame) * scale);
+    }
+    if (height != nullptr)
+    {
+        *height = static_cast<EGLint>(CGRectGetHeight(frame) * scale);
+    }
+    return egl::NoError();
 }
 
 EGLint WindowSurfaceCGL::isPostSubBufferSupported() const

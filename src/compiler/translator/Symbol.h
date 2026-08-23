@@ -10,6 +10,7 @@
 #define COMPILER_TRANSLATOR_SYMBOL_H_
 
 #include "common/angleutils.h"
+#include "common/unsafe_buffers.h"
 #include "compiler/translator/ExtensionBehavior.h"
 #include "compiler/translator/ImmutableString.h"
 #include "compiler/translator/IntermNode.h"
@@ -46,6 +47,10 @@ class TSymbol : angle::NonCopyable
     ImmutableString name() const;
     // Don't call getMangledName() for empty symbols (symbolType == SymbolType::Empty).
     ImmutableString getMangledName() const;
+
+    // Return whether this will generate a temporary name in `name()`.  Not to be confused with
+    // SymbolType::Empty, which shouldn't call `name()`.
+    bool isNameless() const { return mSymbolType == SymbolType::AngleInternal && mName.empty(); }
 
     bool isFunction() const { return mSymbolClass == SymbolClass::Function; }
     bool isVariable() const { return mSymbolClass == SymbolClass::Variable; }
@@ -168,15 +173,17 @@ class TStructure : public TSymbol, public TFieldListCollection
                const TFieldList *fields,
                SymbolType symbolType);
 
-    // The char arrays passed in must be pool allocated or static.
-    void createSamplerSymbols(const char *namePrefix,
-                              const TString &apiNamePrefix,
-                              TVector<const TVariable *> *outputSymbols,
-                              TMap<const TVariable *, TString> *outputSymbolsToAPINames,
-                              TSymbolTable *symbolTable) const;
-
     void setAtGlobalScope(bool atGlobalScope) { mAtGlobalScope = atGlobalScope; }
     bool atGlobalScope() const { return mAtGlobalScope; }
+
+    // This function is temporary while transition to IR is happening.  It allows the AST to promote
+    // structs to the global scope at the end of parse.  Do not use.
+    void setName(const ImmutableString &name);
+    // This function is temporary while transition to IR is happening.  Used by
+    // ReduceInterfaceBlocks to indicate that this struct used to be an interface block.  This
+    // information is used to disambiguate the prefix.
+    void setImplementingInterfaceBlock() { mImplementingInterfaceBlock = true; }
+    bool isImplementingInterfaceBlock() const { return mImplementingInterfaceBlock; }
 
   private:
     friend class TSymbolTable;
@@ -190,7 +197,9 @@ class TStructure : public TSymbol, public TFieldListCollection
                   SymbolType::BuiltIn,
                   std::array<TExtension, 1u>{{extension}},
                   SymbolClass::Struct),
-          TFieldListCollection(fields)
+          TFieldListCollection(fields),
+          mAtGlobalScope(true),
+          mImplementingInterfaceBlock(false)
     {}
 
     template <size_t ExtensionCount>
@@ -199,16 +208,13 @@ class TStructure : public TSymbol, public TFieldListCollection
                const std::array<TExtension, ExtensionCount> &extensions,
                const TFieldList *fields)
         : TSymbol(id, name, SymbolType::BuiltIn, extensions, SymbolClass::Struct),
-          TFieldListCollection(fields)
+          TFieldListCollection(fields),
+          mAtGlobalScope(true),
+          mImplementingInterfaceBlock(false)
     {}
 
-    // TODO(zmo): Find a way to get rid of the const_cast in function
-    // setName().  At the moment keep this function private so only
-    // friend class RegenerateStructNames may call it.
-    friend class RegenerateStructNamesTraverser;
-    void setName(const ImmutableString &name);
-
     bool mAtGlobalScope;
+    bool mImplementingInterfaceBlock;
 };
 
 // Interface block. Note that this contains the block name, not the instance name. Interface block
@@ -232,6 +238,12 @@ class TInterfaceBlock : public TSymbol, public TFieldListCollection
 
     TLayoutBlockStorage blockStorage() const { return mBlockStorage; }
     int blockBinding() const { return mBinding; }
+    bool isDefaultUniformBlock() const { return mIsDefaultUniformBlock; }
+    void setDefaultUniformBlock() { mIsDefaultUniformBlock = true; }
+
+    // For IR->AST translation only
+    void setBlockStorage(TLayoutBlockStorage blockStorage) { mBlockStorage = blockStorage; }
+    void setBlockBinding(int binding) { mBinding = binding; }
 
   private:
     friend class TSymbolTable;
@@ -263,6 +275,7 @@ class TInterfaceBlock : public TSymbol, public TFieldListCollection
 
     TLayoutBlockStorage mBlockStorage;
     int mBinding;
+    bool mIsDefaultUniformBlock;
 
     // Note that we only record matrix packing on a per-field granularity.
 };
@@ -276,15 +289,14 @@ struct TParameter
     const TVariable *createVariable(TSymbolTable *symbolTable)
     {
         const ImmutableString constName(name);
-        const TType *constType = type;
+        const TType *constType = new TType(type);
         name                   = nullptr;
-        type                   = nullptr;
         return new TVariable(symbolTable, constName, constType,
                              constName.empty() ? SymbolType::Empty : SymbolType::UserDefined);
     }
 
     const char *name;  // either pool allocated or static.
-    TType *type;
+    TPublicType type;
 };
 
 // The function sub-class of a symbol.
@@ -323,7 +335,7 @@ class TFunction : public TSymbol
     bool hasVoidParameter() const { return mHasVoidParameter; }
 
     size_t getParamCount() const { return mParamCount; }
-    const TVariable *getParam(size_t i) const { return mParameters[i]; }
+    const TVariable *getParam(size_t i) const { return ANGLE_UNSAFE_TODO(mParameters[i]); }
 
     bool isKnownToNotHaveSideEffects() const { return mKnownToNotHaveSideEffects; }
 

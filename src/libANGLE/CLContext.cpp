@@ -4,23 +4,37 @@
 // found in the LICENSE file.
 //
 // CLContext.cpp: Implements the cl::Context class.
+//
 
-#include "libANGLE/CLContext.h"
+#include "common/unsafe_buffers.h"
 
+#include <angle_cl.h>
+
+#include "libANGLE/CLBitField.h"
 #include "libANGLE/CLBuffer.h"
 #include "libANGLE/CLCommandQueue.h"
+#include "libANGLE/CLContext.h"
+#include "libANGLE/CLDevice.h"
 #include "libANGLE/CLEvent.h"
 #include "libANGLE/CLImage.h"
 #include "libANGLE/CLMemory.h"
+#include "libANGLE/CLObject.h"
+#include "libANGLE/CLPlatform.h"
 #include "libANGLE/CLProgram.h"
 #include "libANGLE/CLSampler.h"
+#include "libANGLE/cl_types.h"
+#include "libANGLE/cl_utils.h"
 
 #include <cstring>
+#include <string>
 
 namespace cl
 {
 
-cl_int Context::getInfo(ContextInfo name, size_t valueSize, void *value, size_t *valueSizeRet) const
+angle::Result Context::getInfo(ContextInfo name,
+                               size_t valueSize,
+                               void *value,
+                               size_t *valueSizeRet) const
 {
     std::vector<cl_device_id> devices;
     cl_uint valUInt       = 0u;
@@ -54,7 +68,7 @@ cl_int Context::getInfo(ContextInfo name, size_t valueSize, void *value, size_t 
             break;
         default:
             ASSERT(false);
-            return CL_INVALID_VALUE;
+            ANGLE_CL_RETURN_ERROR(CL_INVALID_VALUE);
     }
 
     if (value != nullptr)
@@ -63,73 +77,96 @@ cl_int Context::getInfo(ContextInfo name, size_t valueSize, void *value, size_t 
         // as specified in the Context Attributes table and param_value is not a NULL value.
         if (valueSize < copySize)
         {
-            return CL_INVALID_VALUE;
+            ANGLE_CL_RETURN_ERROR(CL_INVALID_VALUE);
         }
         if (copyValue != nullptr)
         {
-            std::memcpy(value, copyValue, copySize);
+            ANGLE_UNSAFE_TODO(std::memcpy(value, copyValue, copySize));
         }
     }
     if (valueSizeRet != nullptr)
     {
         *valueSizeRet = copySize;
     }
-    return CL_SUCCESS;
+    return angle::Result::Continue;
+}
+
+angle::Result Context::setDestructorCallback(ContextCB pfnNotify, void *userData)
+{
+    mDestructorCallbacks->emplace(pfnNotify, userData);
+    return angle::Result::Continue;
 }
 
 cl_command_queue Context::createCommandQueueWithProperties(cl_device_id device,
-                                                           const cl_queue_properties *properties,
-                                                           cl_int &errorCode)
+                                                           const cl_queue_properties *properties)
 {
     CommandQueue::PropArray propArray;
     CommandQueueProperties props;
     cl_uint size = CommandQueue::kNoSize;
+    // If CL_QUEUE_PRIORITY_KHR is not specified, the default priority CL_QUEUE_PRIORITY_MED_KHR is
+    // used.
+    CommandQueue::Priority priority = CL_QUEUE_PRIORITY_MED_KHR;
     if (properties != nullptr)
     {
         const cl_queue_properties *propIt = properties;
         while (*propIt != 0)
         {
-            switch (*propIt++)
+            switch (*ANGLE_UNSAFE_TODO(propIt++))
             {
                 case CL_QUEUE_PROPERTIES:
-                    props = static_cast<cl_command_queue_properties>(*propIt++);
+                    props = static_cast<cl_command_queue_properties>(*ANGLE_UNSAFE_TODO(propIt++));
                     break;
                 case CL_QUEUE_SIZE:
-                    size = static_cast<decltype(size)>(*propIt++);
+                    size = static_cast<decltype(size)>(*ANGLE_UNSAFE_TODO(propIt++));
+                    break;
+                case CL_QUEUE_PRIORITY_KHR:
+                    priority = static_cast<cl_queue_priority_khr>(*ANGLE_UNSAFE_TODO(propIt++));
                     break;
             }
         }
         // Include the trailing zero
-        ++propIt;
+        ANGLE_UNSAFE_TODO(++propIt);
         propArray.reserve(propIt - properties);
         propArray.insert(propArray.cend(), properties, propIt);
     }
-    return Object::Create<CommandQueue>(errorCode, *this, device->cast<Device>(),
-                                        std::move(propArray), props, size);
+    return Object::Create<CommandQueue>(*this, device->cast<Device>(), std::move(propArray),
+                                        priority, props, size);
 }
 
-cl_command_queue Context::createCommandQueue(cl_device_id device,
-                                             CommandQueueProperties properties,
-                                             cl_int &errorCode)
+cl_command_queue Context::createCommandQueue(cl_device_id device, CommandQueueProperties properties)
 {
-    return Object::Create<CommandQueue>(errorCode, *this, device->cast<Device>(), properties);
+    return Object::Create<CommandQueue>(*this, device->cast<Device>(), properties);
 }
 
 cl_mem Context::createBuffer(const cl_mem_properties *properties,
                              MemFlags flags,
                              size_t size,
-                             void *hostPtr,
-                             cl_int &errorCode)
+                             void *hostPtr)
 {
-    return Object::Create<Buffer>(errorCode, *this, Memory::PropArray{}, flags, size, hostPtr);
+    // If the properties argument specified in clCreateBufferWithProperties or
+    // clCreateImageWithProperties used to create memobj was not NULL, the implementation must
+    // return the values specified in the properties argument in the same order and without
+    // including additional properties. So pass them as is.
+    Memory::PropArray propArray;
+    if (properties != nullptr)
+    {
+        const cl_mem_properties *propIt = properties;
+        while (*propIt != 0)
+        {
+            propArray.push_back(*propIt);
+            ANGLE_UNSAFE_TODO(++propIt);
+        }
+        // there is at least one property - special property 0
+        propArray.push_back(0);
+    }
+    return Object::Create<Buffer>(*this, std::move(propArray), flags, size, hostPtr);
 }
 
 cl_mem Context::createImage(const cl_mem_properties *properties,
                             MemFlags flags,
                             const cl_image_format *format,
                             const cl_image_desc *desc,
-                            void *hostPtr,
-                            cl_int &errorCode)
+                            void *hostPtr)
 {
     const ImageDescriptor imageDesc = {FromCLenum<MemObjectType>(desc->image_type),
                                        desc->image_width,
@@ -140,7 +177,24 @@ cl_mem Context::createImage(const cl_mem_properties *properties,
                                        desc->image_slice_pitch,
                                        desc->num_mip_levels,
                                        desc->num_samples};
-    return Object::Create<Image>(errorCode, *this, Memory::PropArray{}, flags, *format, imageDesc,
+    Memory::PropArray propArray;
+
+    // If the properties argument specified in clCreateBufferWithProperties or
+    // clCreateImageWithProperties used to create memobj was not NULL, the implementation must
+    // return the values specified in the properties argument in the same order and without
+    // including additional properties. So Pass them as is.
+    if (properties != nullptr)
+    {
+        const cl_mem_properties *propIt = properties;
+        while (*propIt != 0)
+        {
+            propArray.push_back(*propIt);
+            ANGLE_UNSAFE_TODO(++propIt);
+        }
+        // there is at least one property - special property 0
+        propArray.push_back(0);
+    }
+    return Object::Create<Image>(*this, std::move(propArray), flags, *format, imageDesc,
                                  Memory::Cast(desc->buffer), hostPtr);
 }
 
@@ -149,13 +203,12 @@ cl_mem Context::createImage2D(MemFlags flags,
                               size_t width,
                               size_t height,
                               size_t rowPitch,
-                              void *hostPtr,
-                              cl_int &errorCode)
+                              void *hostPtr)
 {
-    const ImageDescriptor imageDesc = {
-        MemObjectType::Image2D, width, height, 0u, 0u, rowPitch, 0u, 0u, 0u};
-    return Object::Create<Image>(errorCode, *this, Memory::PropArray{}, flags, *format, imageDesc,
-                                 nullptr, hostPtr);
+    const ImageDescriptor imageDesc(MemObjectType::Image2D, width, height, 0u, 0u, rowPitch, 0u, 0u,
+                                    0u);
+    return Object::Create<Image>(*this, Memory::PropArray{}, flags, *format, imageDesc, nullptr,
+                                 hostPtr);
 }
 
 cl_mem Context::createImage3D(MemFlags flags,
@@ -165,27 +218,25 @@ cl_mem Context::createImage3D(MemFlags flags,
                               size_t depth,
                               size_t rowPitch,
                               size_t slicePitch,
-                              void *hostPtr,
-                              cl_int &errorCode)
+                              void *hostPtr)
 {
-    const ImageDescriptor imageDesc = {
-        MemObjectType::Image3D, width, height, depth, 0u, rowPitch, slicePitch, 0u, 0u};
-    return Object::Create<Image>(errorCode, *this, Memory::PropArray{}, flags, *format, imageDesc,
-                                 nullptr, hostPtr);
+    const ImageDescriptor imageDesc(MemObjectType::Image3D, width, height, depth, 0u, rowPitch,
+                                    slicePitch, 0u, 0u);
+    return Object::Create<Image>(*this, Memory::PropArray{}, flags, *format, imageDesc, nullptr,
+                                 hostPtr);
 }
 
-cl_int Context::getSupportedImageFormats(MemFlags flags,
-                                         MemObjectType imageType,
-                                         cl_uint numEntries,
-                                         cl_image_format *imageFormats,
-                                         cl_uint *numImageFormats)
+angle::Result Context::getSupportedImageFormats(MemFlags flags,
+                                                MemObjectType imageType,
+                                                cl_uint numEntries,
+                                                cl_image_format *imageFormats,
+                                                cl_uint *numImageFormats) const
 {
     return mImpl->getSupportedImageFormats(flags, imageType, numEntries, imageFormats,
                                            numImageFormats);
 }
 
-cl_sampler Context::createSamplerWithProperties(const cl_sampler_properties *properties,
-                                                cl_int &errorCode)
+cl_sampler Context::createSamplerWithProperties(const cl_sampler_properties *properties)
 {
     Sampler::PropArray propArray;
     cl_bool normalizedCoords      = CL_TRUE;
@@ -197,49 +248,50 @@ cl_sampler Context::createSamplerWithProperties(const cl_sampler_properties *pro
         const cl_sampler_properties *propIt = properties;
         while (*propIt != 0)
         {
-            switch (*propIt++)
+            switch (*ANGLE_UNSAFE_TODO(propIt++))
             {
                 case CL_SAMPLER_NORMALIZED_COORDS:
-                    normalizedCoords = static_cast<decltype(normalizedCoords)>(*propIt++);
+                    normalizedCoords =
+                        static_cast<decltype(normalizedCoords)>(*ANGLE_UNSAFE_TODO(propIt++));
                     break;
                 case CL_SAMPLER_ADDRESSING_MODE:
-                    addressingMode = FromCLenum<AddressingMode>(static_cast<CLenum>(*propIt++));
+                    addressingMode = FromCLenum<AddressingMode>(
+                        static_cast<CLenum>(*ANGLE_UNSAFE_TODO(propIt++)));
                     break;
                 case CL_SAMPLER_FILTER_MODE:
-                    filterMode = FromCLenum<FilterMode>(static_cast<CLenum>(*propIt++));
+                    filterMode =
+                        FromCLenum<FilterMode>(static_cast<CLenum>(*ANGLE_UNSAFE_TODO(propIt++)));
                     break;
             }
         }
         // Include the trailing zero
-        ++propIt;
+        ANGLE_UNSAFE_TODO(++propIt);
         propArray.reserve(propIt - properties);
         propArray.insert(propArray.cend(), properties, propIt);
     }
 
-    return Object::Create<Sampler>(errorCode, *this, std::move(propArray), normalizedCoords,
-                                   addressingMode, filterMode);
+    return Object::Create<Sampler>(*this, std::move(propArray), normalizedCoords, addressingMode,
+                                   filterMode);
 }
 
 cl_sampler Context::createSampler(cl_bool normalizedCoords,
                                   AddressingMode addressingMode,
-                                  FilterMode filterMode,
-                                  cl_int &errorCode)
+                                  FilterMode filterMode)
 {
-    return Object::Create<Sampler>(errorCode, *this, Sampler::PropArray{}, normalizedCoords,
-                                   addressingMode, filterMode);
+    return Object::Create<Sampler>(*this, Sampler::PropArray{}, normalizedCoords, addressingMode,
+                                   filterMode);
 }
 
 cl_program Context::createProgramWithSource(cl_uint count,
                                             const char **strings,
-                                            const size_t *lengths,
-                                            cl_int &errorCode)
+                                            const size_t *lengths)
 {
     std::string source;
     if (lengths == nullptr)
     {
         while (count-- != 0u)
         {
-            source.append(*strings++);
+            source.append(*ANGLE_UNSAFE_TODO(strings++));
         }
     }
     else
@@ -248,52 +300,49 @@ cl_program Context::createProgramWithSource(cl_uint count,
         {
             if (*lengths != 0u)
             {
-                source.append(*strings++, *lengths);
+                source.append(*ANGLE_UNSAFE_TODO(strings++), *lengths);
             }
             else
             {
-                source.append(*strings++);
+                source.append(*ANGLE_UNSAFE_TODO(strings++));
             }
-            ++lengths;
+            ANGLE_UNSAFE_TODO(++lengths);
         }
     }
-    return Object::Create<Program>(errorCode, *this, std::move(source));
+    return Object::Create<Program>(*this, std::move(source));
 }
 
-cl_program Context::createProgramWithIL(const void *il, size_t length, cl_int &errorCode)
+cl_program Context::createProgramWithIL(const void *il, size_t length)
 {
-    return Object::Create<Program>(errorCode, *this, il, length);
+    return Object::Create<Program>(*this, il, length);
 }
 
 cl_program Context::createProgramWithBinary(cl_uint numDevices,
                                             const cl_device_id *devices,
                                             const size_t *lengths,
                                             const unsigned char **binaries,
-                                            cl_int *binaryStatus,
-                                            cl_int &errorCode)
+                                            cl_int *binaryStatus)
 {
     DevicePtrs devs;
     devs.reserve(numDevices);
     while (numDevices-- != 0u)
     {
-        devs.emplace_back(&(*devices++)->cast<Device>());
+        devs.emplace_back(&(*ANGLE_UNSAFE_TODO(devices++))->cast<Device>());
     }
-    return Object::Create<Program>(errorCode, *this, std::move(devs), lengths, binaries,
-                                   binaryStatus);
+    return Object::Create<Program>(*this, std::move(devs), lengths, binaries, binaryStatus);
 }
 
 cl_program Context::createProgramWithBuiltInKernels(cl_uint numDevices,
                                                     const cl_device_id *devices,
-                                                    const char *kernelNames,
-                                                    cl_int &errorCode)
+                                                    const char *kernelNames)
 {
     DevicePtrs devs;
     devs.reserve(numDevices);
     while (numDevices-- != 0u)
     {
-        devs.emplace_back(&(*devices++)->cast<Device>());
+        devs.emplace_back(&(*ANGLE_UNSAFE_TODO(devices++))->cast<Device>());
     }
-    return Object::Create<Program>(errorCode, *this, std::move(devs), kernelNames);
+    return Object::Create<Program>(*this, std::move(devs), kernelNames);
 }
 
 cl_program Context::linkProgram(cl_uint numDevices,
@@ -302,36 +351,49 @@ cl_program Context::linkProgram(cl_uint numDevices,
                                 cl_uint numInputPrograms,
                                 const cl_program *inputPrograms,
                                 ProgramCB pfnNotify,
-                                void *userData,
-                                cl_int &errorCode)
+                                void *userData)
 {
     DevicePtrs devices;
     devices.reserve(numDevices);
     while (numDevices-- != 0u)
     {
-        devices.emplace_back(&(*deviceList++)->cast<Device>());
+        devices.emplace_back(&(*ANGLE_UNSAFE_TODO(deviceList++))->cast<Device>());
     }
     ProgramPtrs programs;
     programs.reserve(numInputPrograms);
     while (numInputPrograms-- != 0u)
     {
-        programs.emplace_back(&(*inputPrograms++)->cast<Program>());
+        programs.emplace_back(&(*ANGLE_UNSAFE_TODO(inputPrograms++))->cast<Program>());
     }
-    return Object::Create<Program>(errorCode, *this, devices, options, programs, pfnNotify,
-                                   userData);
+    return Object::Create<Program>(*this, devices, options, programs, pfnNotify, userData);
 }
 
-cl_event Context::createUserEvent(cl_int &errorCode)
+cl_event Context::createUserEvent()
 {
-    return Object::Create<Event>(errorCode, *this);
+    cl_event event = Object::Create<Event>(*this);
+    ANGLE_CL_IMPL_TRY(event->cast<Event>().initBackend(rx::CLEventImpl::CreateFunc{}));
+    return event;
 }
 
-cl_int Context::waitForEvents(cl_uint numEvents, const cl_event *eventList)
+angle::Result Context::waitForEvents(cl_uint numEvents, const cl_event *eventList)
 {
     return mImpl->waitForEvents(Event::Cast(numEvents, eventList));
 }
 
-Context::~Context() = default;
+Context::~Context()
+{
+    // TODO(aannestrand): make dtor callback handling a "helper" util and reuse for CLMemory dtor
+    // http://anglebug.com/496408119
+    std::stack<CallbackData> callbacks;
+    mDestructorCallbacks->swap(callbacks);
+    while (!callbacks.empty())
+    {
+        const ContextCB callback = callbacks.top().first;
+        void *const userData     = callbacks.top().second;
+        callbacks.pop();
+        callback(this, userData);
+    }
+}
 
 void Context::ErrorCallback(const char *errinfo, const void *privateInfo, size_t cb, void *userData)
 {
@@ -347,34 +409,80 @@ void Context::ErrorCallback(const char *errinfo, const void *privateInfo, size_t
     }
 }
 
+Memory::PropArray Context::ConvertArmMemPropToMemProp(const cl_import_properties_arm *properties,
+                                                      const void *handle)
+{
+    Memory::PropArray convertedProperties;
+    const NameValueProperty *propertiesIterator =
+        reinterpret_cast<const NameValueProperty *>(properties);
+
+    if (propertiesIterator != nullptr)
+    {
+        for (; propertiesIterator->name != 0; ANGLE_UNSAFE_TODO(propertiesIterator++))
+        {
+            if (propertiesIterator->name == CL_IMPORT_TYPE_ARM)
+            {
+                switch (propertiesIterator->value)
+                {
+                    case CL_IMPORT_TYPE_DMA_BUF_ARM:
+                        convertedProperties.push_back(CL_EXTERNAL_MEMORY_HANDLE_DMA_BUF_KHR);
+                        // cl_khr_external_memory expects DMA_BUF to be an integral type
+                        convertedProperties.push_back(
+                            static_cast<cl_mem_properties>(*static_cast<const int32_t *>(handle)));
+                        break;
+                    case CL_IMPORT_TYPE_HOST_ARM:
+                    case CL_IMPORT_TYPE_ANDROID_HARDWARE_BUFFER_ARM:
+                        // currently no equivalents for HOST or AHB types
+                    default:
+                        UNIMPLEMENTED();
+                        continue;
+                }
+            }
+            else if (propertiesIterator->name == CL_IMPORT_TYPE_PROTECTED_ARM)
+            {
+                // currently no equivalent for cl_khr_external_memory
+                UNIMPLEMENTED();
+                continue;
+            }
+        }
+    }
+    convertedProperties.push_back(0);  // zero-terminator
+
+    return convertedProperties;
+}
+
 Context::Context(Platform &platform,
                  PropArray &&properties,
                  DevicePtrs &&devices,
                  ContextErrorCB notify,
                  void *userData,
-                 bool userSync,
-                 cl_int &errorCode)
+                 bool userSync)
     : mPlatform(platform),
       mProperties(std::move(properties)),
       mNotify(notify),
       mUserData(userData),
-      mImpl(platform.getImpl().createContext(*this, devices, userSync, errorCode)),
+      mImpl(nullptr),
       mDevices(std::move(devices))
-{}
+{
+    ANGLE_CL_IMPL_TRY(platform.getImpl().createContext(*this, mDevices, userSync, &mImpl));
+}
 
 Context::Context(Platform &platform,
                  PropArray &&properties,
                  DeviceType deviceType,
                  ContextErrorCB notify,
                  void *userData,
-                 bool userSync,
-                 cl_int &errorCode)
+                 bool userSync)
     : mPlatform(platform),
       mProperties(std::move(properties)),
       mNotify(notify),
       mUserData(userData),
-      mImpl(platform.getImpl().createContextFromType(*this, deviceType, userSync, errorCode)),
-      mDevices(mImpl ? mImpl->getDevices(errorCode) : DevicePtrs{})
-{}
+      mImpl(nullptr)
+{
+    if (!IsError(platform.getImpl().createContextFromType(*this, deviceType, userSync, &mImpl)))
+    {
+        ANGLE_CL_IMPL_TRY(mImpl->getDevices(&mDevices));
+    }
+}
 
 }  // namespace cl

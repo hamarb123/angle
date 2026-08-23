@@ -4,6 +4,7 @@
 // found in the LICENSE file.
 //
 
+#include "common/unsafe_buffers.h"
 #include "test_utils/ANGLETest.h"
 
 using namespace angle;
@@ -99,13 +100,13 @@ void main()
         EXPECT_EQ(alignment, readbackAlignment);
 
         GLubyte buf[1024];
-        memset(buf, 0, sizeof(buf));
+        ANGLE_UNSAFE_TODO(memset(buf, 0, sizeof(buf)));
 
         unsigned int pixelSize;
         getPixelSize(format, type, &pixelSize);
         for (unsigned int i = 0; i < pixelSize; i++)
         {
-            buf[offset + i] = 0xFF;
+            ANGLE_UNSAFE_TODO(buf[offset + i]) = 0xFF;
         }
 
         GLuint tex;

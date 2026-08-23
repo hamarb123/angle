@@ -9,12 +9,9 @@
 
 #include "libANGLE/renderer/vulkan/linux/wayland/WindowSurfaceVkWayland.h"
 
-#include "libANGLE/Context.h"
-#include "libANGLE/Display.h"
-#include "libANGLE/renderer/vulkan/ContextVk.h"
-#include "libANGLE/renderer/vulkan/DisplayVk.h"
-#include "libANGLE/renderer/vulkan/RendererVk.h"
+#include "libANGLE/renderer/vulkan/vk_renderer.h"
 
+#include <wayland-client.h>
 #include <wayland-egl-backend.h>
 
 namespace rx
@@ -24,21 +21,14 @@ void WindowSurfaceVkWayland::ResizeCallback(wl_egl_window *eglWindow, void *payl
 {
     WindowSurfaceVkWayland *windowSurface = reinterpret_cast<WindowSurfaceVkWayland *>(payload);
 
-    if (windowSurface->mExtents.width != eglWindow->width ||
-        windowSurface->mExtents.height != eglWindow->height)
-    {
-        windowSurface->mExtents.width  = eglWindow->width;
-        windowSurface->mExtents.height = eglWindow->height;
-
-        // Trigger swapchain resize
-        windowSurface->mResized = true;
-    }
+    windowSurface->mExtents.width  = eglWindow->width;
+    windowSurface->mExtents.height = eglWindow->height;
 }
 
 WindowSurfaceVkWayland::WindowSurfaceVkWayland(const egl::SurfaceState &surfaceState,
                                                EGLNativeWindowType window,
-                                               wl_display *display)
-    : WindowSurfaceVk(surfaceState, window), mWaylandDisplay(display)
+                                               wl_display *waylandDisplay)
+    : WindowSurfaceVk(surfaceState, window), mWaylandDisplay(waylandDisplay)
 {
     wl_egl_window *eglWindow   = reinterpret_cast<wl_egl_window *>(window);
     eglWindow->resize_callback = WindowSurfaceVkWayland::ResizeCallback;
@@ -47,62 +37,55 @@ WindowSurfaceVkWayland::WindowSurfaceVkWayland(const egl::SurfaceState &surfaceS
     mExtents = gl::Extents(eglWindow->width, eglWindow->height, 1);
 }
 
-angle::Result WindowSurfaceVkWayland::createSurfaceVk(vk::Context *context, gl::Extents *extentsOut)
+WindowSurfaceVkWayland::~WindowSurfaceVkWayland()
 {
-    ANGLE_VK_CHECK(context,
-                   vkGetPhysicalDeviceWaylandPresentationSupportKHR(
-                       context->getRenderer()->getPhysicalDevice(),
-                       context->getRenderer()->getQueueFamilyIndex(), mWaylandDisplay),
-                   VK_ERROR_INITIALIZATION_FAILED);
-
+    // The wl_egl_window is owned by the application and can outlive this surface.
+    // Unregister our callback so a later resize cannot dispatch ResizeCallback into
+    // this destroyed object. Only clear if we are still the registered owner.
     wl_egl_window *eglWindow = reinterpret_cast<wl_egl_window *>(mNativeWindowType);
+    if (eglWindow != nullptr && eglWindow->driver_private == this)
+    {
+        eglWindow->resize_callback = nullptr;
+        eglWindow->driver_private  = nullptr;
+    }
+}
+
+angle::Result WindowSurfaceVkWayland::createSurfaceVk(vk::ErrorContext *context)
+{
+    wl_egl_window *eglWindow = reinterpret_cast<wl_egl_window *>(mNativeWindowType);
+
+    // VkWaylandSurfaceCreateInfoKHR::display and ::surface must share a
+    // wl_display connection -- vkCreateSwapchainKHR calls wl_proxy_set_queue
+    // which asserts proxy->display == queue->display. mWaylandDisplay is the
+    // connection the EGL display was initialized with, and it owns the app's
+    // wl_surface, so the two match. Using it (instead of wl_proxy_get_display,
+    // which was only added in libwayland 1.20) keeps the build working against
+    // older system wayland headers -- see https://anglebug.com/534371626.
+    wl_display *surfaceDisplay = mWaylandDisplay;
+
+    ANGLE_VK_CHECK(context,
+                   VK_CALL(vkGetPhysicalDeviceWaylandPresentationSupportKHR,
+                           context->getRenderer()->getPhysicalDevice(),
+                           context->getRenderer()->getQueueFamilyIndex(), surfaceDisplay),
+                   VK_ERROR_INITIALIZATION_FAILED);
 
     VkWaylandSurfaceCreateInfoKHR createInfo = {};
 
     createInfo.sType   = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
     createInfo.flags   = 0;
-    createInfo.display = mWaylandDisplay;
+    createInfo.display = surfaceDisplay;
     createInfo.surface = eglWindow->surface;
-    ANGLE_VK_TRY(context, vkCreateWaylandSurfaceKHR(context->getRenderer()->getInstance(),
-                                                    &createInfo, nullptr, &mSurface));
+    ANGLE_VK_TRY(context, VK_CALL(vkCreateWaylandSurfaceKHR, context->getRenderer()->getInstance(),
+                                  &createInfo, nullptr, &mSurface));
 
-    return getCurrentWindowSize(context, extentsOut);
-}
-
-angle::Result WindowSurfaceVkWayland::getCurrentWindowSize(vk::Context *context,
-                                                           gl::Extents *extentsOut)
-{
-    *extentsOut = mExtents;
     return angle::Result::Continue;
 }
 
-egl::Error WindowSurfaceVkWayland::getUserWidth(const egl::Display *display, EGLint *value) const
+angle::Result WindowSurfaceVkWayland::getCurrentWindowSize(vk::ErrorContext *context,
+                                                           gl::Extents *extentsOut) const
 {
-    *value = getWidth();
-    return egl::NoError();
-}
-
-egl::Error WindowSurfaceVkWayland::getUserHeight(const egl::Display *display, EGLint *value) const
-{
-    *value = getHeight();
-    return egl::NoError();
-}
-
-angle::Result WindowSurfaceVkWayland::getAttachmentRenderTarget(
-    const gl::Context *context,
-    GLenum binding,
-    const gl::ImageIndex &imageIndex,
-    GLsizei samples,
-    FramebufferAttachmentRenderTarget **rtOut)
-{
-    if (mResized)
-    {
-        // A wl_egl_window_resize() should take effect on the next operation which provokes a
-        // backbuffer to be pulled
-        ANGLE_TRY(doDeferredAcquireNextImage(context, true));
-        mResized = false;
-    }
-    return WindowSurfaceVk::getAttachmentRenderTarget(context, binding, imageIndex, samples, rtOut);
+    *extentsOut = mExtents;
+    return angle::Result::Continue;
 }
 
 }  // namespace rx

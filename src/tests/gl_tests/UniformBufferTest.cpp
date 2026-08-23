@@ -4,6 +4,10 @@
 // found in the LICENSE file.
 //
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
 #include "util/random_utils.h"
@@ -76,6 +80,106 @@ TEST_P(UniformBufferTest, Simple)
 
     ASSERT_GL_NO_ERROR();
     EXPECT_PIXEL_NEAR(0, 0, 128, 191, 64, 255, 1);
+}
+
+// Test that binding a range larger than the buffer size works when only valid ranges are accessed
+// in the shader.
+TEST_P(UniformBufferTest, BindLargerThanSize)
+{
+    constexpr size_t iterationCount = 10;
+
+    GLint alignment;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
+
+    // Buffer filed with 0.5 floats enough for `iterationCount` different multiples of alignment. 4
+    // extra padding values are added since the shader always reads 4 floats.
+    const std::vector<float> floatData((iterationCount * alignment) + 4, 0.5f);
+    const size_t bufferSize = sizeof(float) * floatData.size();
+    glBindBuffer(GL_UNIFORM_BUFFER, mUniformBuffer);
+    glBufferData(GL_UNIFORM_BUFFER, bufferSize, floatData.data(), GL_STATIC_DRAW);
+
+    glClear(GL_COLOR_BUFFER_BIT);
+    for (size_t i = 0; i < iterationCount; i++)
+    {
+        // Each iteration, offset further into the buffer and use large (different) binding sizes.
+        size_t offset      = i * alignment * sizeof(float);
+        size_t bindingSize = (i + 1) * bufferSize;
+        glBindBufferRange(GL_UNIFORM_BUFFER, 0, mUniformBuffer, offset, bindingSize);
+
+        glUniformBlockBinding(mProgram, mUniformBufferIndex, 0);
+        drawQuad(mProgram, essl3_shaders::PositionAttrib(), 0.5f);
+
+        ASSERT_GL_NO_ERROR();
+        EXPECT_PIXEL_NEAR(0, 0, 128, 128, 128, 128, 1);
+    }
+}
+
+// Test a scenario that draws then update UBO (using bufferData or bufferSubData or mapBuffer) then
+// draws with updated data.
+TEST_P(UniformBufferTest, DrawThenUpdateThenDraw)
+{
+    constexpr char kVS[] = R"(#version 300 es
+precision highp float;
+
+void main()
+{
+    vec2 position = vec2(float(gl_VertexID >> 1), float(gl_VertexID & 1));
+    position = 2.0 * position - 1.0;
+    gl_Position = vec4(position.x, position.y, 0.0, 1.0);
+})";
+
+    enum class BufferUpdateMethod
+    {
+        BUFFER_DATA,
+        BUFFER_SUB_DATA,
+        MAP_BUFFER,
+    };
+
+    ANGLE_GL_PROGRAM(program, kVS, mkFS);
+    GLint uniformBufferIndex = glGetUniformBlockIndex(program, "uni");
+    ASSERT_NE(uniformBufferIndex, -1);
+
+    for (BufferUpdateMethod method :
+         {BufferUpdateMethod::BUFFER_DATA, BufferUpdateMethod::BUFFER_SUB_DATA,
+          BufferUpdateMethod::MAP_BUFFER})
+    {
+        glClear(GL_COLOR_BUFFER_BIT);
+        float floatData1[4] = {0.25f, 0.75f, 0.125f, 1.0f};
+
+        GLBuffer uniformBuffer;
+        glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer);
+        glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * 4, floatData1, GL_DYNAMIC_DRAW);
+
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniformBuffer);
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE);
+
+        glUniformBlockBinding(program, uniformBufferIndex, 0);
+        glUseProgram(program);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        float floatData2[4] = {0.25f, 0.0f, 0.125f, 0.0f};
+        switch (method)
+        {
+            case BufferUpdateMethod::BUFFER_DATA:
+                glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * 4, floatData2, GL_DYNAMIC_DRAW);
+                break;
+            case BufferUpdateMethod::BUFFER_SUB_DATA:
+                glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(float) * 4, floatData2);
+                break;
+            case BufferUpdateMethod::MAP_BUFFER:
+                void *mappedBuffer =
+                    glMapBufferRange(GL_UNIFORM_BUFFER, 0, sizeof(float) * 4, GL_MAP_WRITE_BIT);
+                memcpy(mappedBuffer, floatData2, sizeof(floatData2));
+                glUnmapBuffer(GL_UNIFORM_BUFFER);
+                break;
+        }
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+        ASSERT_GL_NO_ERROR();
+        EXPECT_PIXEL_NEAR(0, 0, 128, 191, 64, 255, 1);
+    }
 }
 
 // Test that using a UBO with a non-zero offset and size actually works.
@@ -192,13 +296,123 @@ TEST_P(UniformBufferTest, UniformBufferBindings)
     EXPECT_PIXEL_EQ(px, py, 10, 20, 30, 40);
 }
 
+// Test when the only change between draw calls is the change in the uniform binding range.
+TEST_P(UniformBufferTest, BufferBindingRangeChange)
+{
+    constexpr GLsizei kVec4Size = 4 * sizeof(float);
+
+    GLint alignment;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
+    if (alignment < kVec4Size)
+    {
+        alignment = kVec4Size;
+    }
+    ASSERT_EQ(alignment % 4, 0);
+
+    // Put two colors in the uniform buffer, the sum of which is yellow.
+    // Note: |alignment| is in bytes, so we can place each uniform in |alignment/4| floats.
+    std::vector<float> colors(alignment / 2);
+    // Half red
+    colors[0] = 0.55;
+    colors[1] = 0.0;
+    colors[2] = 0.0;
+    colors[3] = 0.35;
+    // Greenish yellow
+    colors[alignment / 4 + 0] = 0.55;
+    colors[alignment / 4 + 1] = 1.0;
+    colors[alignment / 4 + 2] = 0.0;
+    colors[alignment / 4 + 3] = 0.75;
+
+    glBindBuffer(GL_UNIFORM_BUFFER, mUniformBuffer);
+    glBufferData(GL_UNIFORM_BUFFER, alignment * 2, colors.data(), GL_STATIC_DRAW);
+
+    const GLint positionLoc = glGetAttribLocation(mProgram, essl3_shaders::PositionAttrib());
+    setupQuadVertexBuffer(0.5f, 1.0f);
+    glEnableVertexAttribArray(positionLoc);
+    glVertexAttribPointer(positionLoc, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+    // Enable blending
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw twice, binding the uniform buffer to a different range each time
+    glUseProgram(mProgram);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, mUniformBuffer, 0, kVec4Size);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, mUniformBuffer, alignment, kVec4Size);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_RECT_EQ(0, 0, getWindowWidth(), getWindowHeight(), GLColor::yellow);
+}
+
+// Test when glUniformBlockBinding is called between draws while the program is not current.
+// Regression test for a missing dirty bit bug in this scenario.
+TEST_P(UniformBufferTest, BufferBlockBindingChange)
+{
+    constexpr GLsizei kVec4Size = 4 * sizeof(float);
+
+    GLint alignment;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
+    if (alignment < kVec4Size)
+    {
+        alignment = kVec4Size;
+    }
+    ASSERT_EQ(alignment % 4, 0);
+
+    // Put two colors in the uniform buffer, the sum of which is yellow.
+    // Note: |alignment| is in bytes, so we can place each uniform in |alignment/4| floats.
+    std::vector<float> colors(alignment / 2);
+    // Half red
+    colors[0] = 0.55;
+    colors[1] = 0.0;
+    colors[2] = 0.0;
+    colors[3] = 0.35;
+    // Greenish yellow
+    colors[alignment / 4 + 0] = 0.55;
+    colors[alignment / 4 + 1] = 1.0;
+    colors[alignment / 4 + 2] = 0.0;
+    colors[alignment / 4 + 3] = 0.75;
+
+    glBindBuffer(GL_UNIFORM_BUFFER, mUniformBuffer);
+    glBufferData(GL_UNIFORM_BUFFER, alignment * 2, colors.data(), GL_STATIC_DRAW);
+
+    const GLint positionLoc = glGetAttribLocation(mProgram, essl3_shaders::PositionAttrib());
+    setupQuadVertexBuffer(0.5f, 1.0f);
+    glEnableVertexAttribArray(positionLoc);
+    glVertexAttribPointer(positionLoc, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+    // Enable blending
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw twice, binding the uniform buffer to a different range each time
+    glUseProgram(mProgram);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, mUniformBuffer, 0, kVec4Size);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    // Change the block binding while the program is not current
+    glUseProgram(0);
+    glUniformBlockBinding(mProgram, 0, 1);
+    glUseProgram(mProgram);
+
+    glBindBufferRange(GL_UNIFORM_BUFFER, 1, mUniformBuffer, alignment, kVec4Size);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_RECT_EQ(0, 0, getWindowWidth(), getWindowHeight(), GLColor::yellow);
+}
+
 // Update a UBO many time and verify that ANGLE uses the latest version of the data.
 // https://code.google.com/p/angleproject/issues/detail?id=965
 TEST_P(UniformBufferTest, UniformBufferManyUpdates)
 {
-    // TODO(jmadill): Figure out why this fails on OSX Intel OpenGL.
-    ANGLE_SKIP_TEST_IF(IsIntel() && IsMac() && IsOpenGL());
-
     int px = getWindowWidth() / 2;
     int py = getWindowHeight() / 2;
 
@@ -423,11 +637,11 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
 
     // Note that the packed |blockName3| might (or might not) be optimized out.
     GLint activeUniforms;
-    glGetProgramiv(program.get(), GL_ACTIVE_UNIFORMS, &activeUniforms);
+    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &activeUniforms);
     EXPECT_GE(activeUniforms, 11);
 
     GLint activeUniformBlocks;
-    glGetProgramiv(program.get(), GL_ACTIVE_UNIFORM_BLOCKS, &activeUniformBlocks);
+    glGetProgramiv(program, GL_ACTIVE_UNIFORM_BLOCKS, &activeUniformBlocks);
     EXPECT_GE(activeUniformBlocks, 3);
 
     GLint maxLength, size;
@@ -435,14 +649,14 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
     GLsizei length;
     GLuint index;
     const GLchar *uniformNames[1];
-    glGetProgramiv(program.get(), GL_ACTIVE_UNIFORM_MAX_LENGTH, &maxLength);
+    glGetProgramiv(program, GL_ACTIVE_UNIFORM_MAX_LENGTH, &maxLength);
     std::vector<GLchar> strBuffer(maxLength + 1, 0);
 
     uniformNames[0] = "s0.a";
     glGetUniformIndices(program, 1, uniformNames, &index);
     EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strBuffer[0]);
     EXPECT_EQ(1, size);
     EXPECT_EQ("s0.a", std::string(&strBuffer[0]));
 
@@ -450,7 +664,7 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
     glGetUniformIndices(program, 1, uniformNames, &index);
     EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(4, size);
     EXPECT_EQ("s0.b[0]", std::string(&strBuffer[0]));
@@ -459,7 +673,7 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
     glGetUniformIndices(program, 1, uniformNames, &index);
     EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("v0", std::string(&strBuffer[0]));
@@ -468,7 +682,7 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
     glGetUniformIndices(program, 1, uniformNames, &index);
     EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("s1[0].a", std::string(&strBuffer[0]));
@@ -477,7 +691,7 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
     glGetUniformIndices(program, 1, uniformNames, &index);
     EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(4, size);
     EXPECT_EQ("s1[0].b[0]", std::string(&strBuffer[0]));
@@ -486,7 +700,7 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
     glGetUniformIndices(program, 1, uniformNames, &index);
     EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("s1[1].a", std::string(&strBuffer[0]));
@@ -495,7 +709,7 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
     glGetUniformIndices(program, 1, uniformNames, &index);
     EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(4, size);
     EXPECT_EQ("s1[1].b[0]", std::string(&strBuffer[0]));
@@ -504,7 +718,7 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
     glGetUniformIndices(program, 1, uniformNames, &index);
     EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("u0", std::string(&strBuffer[0]));
@@ -513,7 +727,7 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
     glGetUniformIndices(program, 1, uniformNames, &index);
     EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("blockName1.f1", std::string(&strBuffer[0]));
@@ -522,7 +736,7 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
     glGetUniformIndices(program, 1, uniformNames, &index);
     EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("blockName1.b1", std::string(&strBuffer[0]));
@@ -531,7 +745,7 @@ TEST_P(UniformBufferTest, ActiveUniformNumberAndName)
     glGetUniformIndices(program, 1, uniformNames, &index);
     EXPECT_NE(GL_INVALID_INDEX, index);
     ASSERT_GL_NO_ERROR();
-    glGetActiveUniform(program.get(), index, maxLength, &length, &size, &type, &strBuffer[0]);
+    glGetActiveUniform(program, index, maxLength, &length, &size, &type, &strBuffer[0]);
     ASSERT_GL_NO_ERROR();
     EXPECT_EQ(1, size);
     EXPECT_EQ("f2", std::string(&strBuffer[0]));
@@ -605,7 +819,7 @@ TEST_P(UniformBufferTest, VeryLargeReadback)
 // block before larger one.
 TEST_P(UniformBufferTest, MultipleSizesSmallBeforeBig)
 {
-    constexpr size_t kSizeOfVec4  = 4 * sizeof(float);
+    constexpr GLint kSizeOfVec4   = 4 * sizeof(float);
     constexpr char kUniformName[] = "uni";
     constexpr char kFS1[]         = R"(#version 300 es
 precision highp float;
@@ -632,8 +846,9 @@ void main() {
 
     GLint offsetAlignmentInBytes;
     glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &offsetAlignmentInBytes);
-    ASSERT_EQ(offsetAlignmentInBytes % kSizeOfVec4, 0U);
-    GLint offsetAlignmentInVec4 = offsetAlignmentInBytes / kSizeOfVec4;
+    ASSERT_TRUE(offsetAlignmentInBytes < kSizeOfVec4 || offsetAlignmentInBytes % kSizeOfVec4 == 0);
+    GLint offsetAlignmentInVec4 =
+        offsetAlignmentInBytes < kSizeOfVec4 ? 1 : offsetAlignmentInBytes / kSizeOfVec4;
 
     // Insert padding required by implementation to have first unform block at a non-zero
     // offset.
@@ -779,12 +994,12 @@ TEST_P(UniformBufferTest31, UniformBufferBindings)
     first[2] = 30.f / 255.f;
     first[3] = 40.f / 255.f;
 
-    glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer.get());
+    glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer);
     glBufferData(GL_UNIFORM_BUFFER, vec4Size, v.data(), GL_STATIC_DRAW);
 
     EXPECT_GL_NO_ERROR();
 
-    glBindBufferBase(GL_UNIFORM_BUFFER, 2, uniformBuffer.get());
+    glBindBufferBase(GL_UNIFORM_BUFFER, 2, uniformBuffer);
     drawQuad(program, "position", 0.5f);
     EXPECT_GL_NO_ERROR();
     EXPECT_PIXEL_EQ(px, py, 10, 20, 30, 40);
@@ -796,7 +1011,7 @@ TEST_P(UniformBufferTest31, UniformBufferBindings)
 
     // Try to bind the buffer to another binding point
     glUniformBlockBinding(program, uniformBufferIndex, 5);
-    glBindBufferBase(GL_UNIFORM_BUFFER, 5, uniformBuffer.get());
+    glBindBufferBase(GL_UNIFORM_BUFFER, 5, uniformBuffer);
     drawQuad(program, "position", 0.5f);
     EXPECT_GL_NO_ERROR();
     EXPECT_PIXEL_EQ(px, py, 10, 20, 30, 40);
@@ -835,15 +1050,15 @@ TEST_P(UniformBufferTest31, ConsecutiveBindingsForBlockArray)
     first[2] = 30.f / 255.f;
     first[3] = 40.f / 255.f;
 
-    glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffers[0].get());
+    glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffers[0]);
     glBufferData(GL_UNIFORM_BUFFER, vec4Size, v.data(), GL_STATIC_DRAW);
     EXPECT_GL_NO_ERROR();
-    glBindBufferBase(GL_UNIFORM_BUFFER, 2, uniformBuffers[0].get());
+    glBindBufferBase(GL_UNIFORM_BUFFER, 2, uniformBuffers[0]);
     ASSERT_GL_NO_ERROR();
-    glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffers[1].get());
+    glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffers[1]);
     glBufferData(GL_UNIFORM_BUFFER, vec4Size, v.data(), GL_STATIC_DRAW);
     EXPECT_GL_NO_ERROR();
-    glBindBufferBase(GL_UNIFORM_BUFFER, 3, uniformBuffers[1].get());
+    glBindBufferBase(GL_UNIFORM_BUFFER, 3, uniformBuffers[1]);
 
     drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f);
     EXPECT_GL_NO_ERROR();
@@ -883,10 +1098,10 @@ TEST_P(UniformBufferTest31, BindingMustBeBothSpecified)
 // Test that uploading data to buffer that's in use then using it as indirect buffer works.
 TEST_P(UniformBufferTest31, UseAsUBOThenUpdateThenDrawIndirect)
 {
-    // http://anglebug.com/5826
+    // http://anglebug.com/42264362
     ANGLE_SKIP_TEST_IF(IsD3D11());
 
-    // http://anglebug.com/5871
+    // http://anglebug.com/42264411
     ANGLE_SKIP_TEST_IF(IsVulkan() && IsPixel2());
 
     const std::array<uint32_t, 4> kInitialData = {100, 200, 300, 400};
@@ -1004,6 +1219,911 @@ void main() {
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 }
 
+// Test that buffer updates between uniform buffer range change works.
+TEST_P(UniformBufferTest31, UniformBufferBindingRangeChangeAfterSubData)
+{
+    constexpr char kFS[] = R"(#version 310 es
+precision highp float;
+
+layout (binding = 0) uniform block0 {
+    vec4 color;
+} uni0;
+
+out vec4 fragColor;
+
+void main()
+{
+    fragColor = uni0.color;
+})";
+
+    constexpr GLsizei kVec4Size = 4 * sizeof(float);
+
+    GLint alignment;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
+    if (alignment < kVec4Size)
+    {
+        alignment = kVec4Size;
+    }
+    ASSERT_EQ(alignment % 4, 0);
+
+    // Put two colors in the uniform buffer, the sum of which is yellow.
+    // Note: |alignment| is in bytes, so we can place each uniform in |alignment/4| floats.
+    std::vector<float> colors(alignment / 2, 0);
+    // Set first-half of buffer to Half red color
+    colors[0] = 0.55;
+    colors[1] = 0.0;
+    colors[2] = 0.0;
+    colors[3] = 0.35;
+
+    GLBuffer ubo;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+    glBufferData(GL_UNIFORM_BUFFER, alignment * 2, colors.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    // Setup program for draw
+    ANGLE_GL_PROGRAM(program, essl31_shaders::vs::Simple(), kFS);
+    glUseProgram(program);
+
+    // Enable blending
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw with uniform buffer range = [0, size / 2)
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, 0, kVec4Size);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    // Update last-half of the buffer with Greenish yellow
+    colors[alignment / 4 + 0] = 0.55;
+    colors[alignment / 4 + 1] = 1.0;
+    colors[alignment / 4 + 2] = 0.0;
+    colors[alignment / 4 + 3] = 0.75;
+    glBufferSubData(GL_UNIFORM_BUFFER, alignment, alignment, &colors[alignment / 4]);
+
+    // Draw with uniform buffer range = [size / 2, size)
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, alignment, kVec4Size);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::yellow);
+}
+
+// Test that buffer updates between uniform buffer range change with multiple UBOs works.
+TEST_P(UniformBufferTest31, UniformBufferBindingRangeChangeWithMultipleUBO)
+{
+    constexpr char kFS[] = R"(#version 310 es
+precision highp float;
+
+layout (binding = 0) uniform block0 {
+    vec4 color;
+} uni0;
+
+layout (binding = 1) uniform block1 {
+    vec4 color;
+} uni1;
+
+out vec4 fragColor;
+
+void main()
+{
+    fragColor = uni0.color + uni1.color;
+})";
+
+    // Setup UBOs
+    constexpr GLsizei kVec4Size = 4 * sizeof(float);
+
+    GLint alignment;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
+    if (alignment < kVec4Size)
+    {
+        alignment = kVec4Size;
+    }
+    ASSERT_EQ(alignment % 4, 0);
+
+    // Put two colors in the uniform buffer, the sum of which is yellow.
+    // Note: |alignment| is in bytes, so we can place each uniform in |alignment/4| floats.
+    std::vector<float> colors(alignment / 2, 0);
+    // Set first-half of buffer to red color
+    colors[0] = 1.0;
+    colors[1] = 0.0;
+    colors[2] = 0.0;
+    colors[3] = 1.0;
+    // Set last-half of the buffer to green color
+    colors[alignment / 4 + 0] = 0.0;
+    colors[alignment / 4 + 1] = 1.0;
+    colors[alignment / 4 + 2] = 0.0;
+    colors[alignment / 4 + 3] = 1.0;
+
+    GLBuffer ubo0;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo0);
+    glBufferData(GL_UNIFORM_BUFFER, alignment * 2, colors.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    std::vector<float> colorA(alignment / 4, 0);
+    // Set color to green color
+    colorA[0] = 0.0;
+    colorA[1] = 1.0;
+    colorA[2] = 0.0;
+    colorA[3] = 1.0;
+    GLBuffer uboA;
+    glBindBuffer(GL_UNIFORM_BUFFER, uboA);
+    glBufferData(GL_UNIFORM_BUFFER, alignment, colorA.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    std::vector<float> colorB(alignment / 4, 0);
+    // Set color to blue color
+    colorB[0] = 0.0;
+    colorB[1] = 0.0;
+    colorB[2] = 1.0;
+    colorB[3] = 1.0;
+    GLBuffer uboB;
+    glBindBuffer(GL_UNIFORM_BUFFER, uboB);
+    glBufferData(GL_UNIFORM_BUFFER, alignment, colorB.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    // Setup program for draw
+    ANGLE_GL_PROGRAM(program, essl31_shaders::vs::Simple(), kFS);
+    glUseProgram(program);
+
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw with ubo0 with buffer range = [0, size / 2) and uboA
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo0, 0, kVec4Size);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 1, uboA, 0, kVec4Size);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    // Draw with ubo0 with buffer range = [size / 2, size) and uboB
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo0, alignment, kVec4Size);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 1, uboB, 0, kVec4Size);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::cyan);
+}
+
+// Test that buffer range changes to inactive UBOs works.
+TEST_P(UniformBufferTest31, UniformBufferBindingRangeChangeToInactiveUBO)
+{
+    constexpr char kFS[] = R"(#version 310 es
+precision highp float;
+
+layout (binding = 0) uniform block0 {
+    vec4 color;
+} uni0;
+
+layout (binding = 1) uniform block1 {
+    vec4 color;
+} uni1;
+
+out vec4 fragColor;
+
+void main()
+{
+    fragColor = uni0.color + uni1.color;
+})";
+
+    constexpr char kFSWithInactiveUBO[] = R"(#version 310 es
+precision highp float;
+
+layout (binding = 0) uniform block0 {
+    vec4 color;
+} uni0;
+
+layout (binding = 1) uniform block1 {
+    vec4 color;
+} uni1;
+
+out vec4 fragColor;
+
+void main()
+{
+    fragColor = uni0.color;
+})";
+
+    // Setup UBOs
+    constexpr GLsizei kVec4Size = 4 * sizeof(float);
+
+    GLint alignment;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
+    if (alignment < kVec4Size)
+    {
+        alignment = kVec4Size;
+    }
+    ASSERT_EQ(alignment % 4, 0);
+
+    // Put two colors in the uniform buffer, the sum of which is yellow.
+    // Note: |alignment| is in bytes, so we can place each uniform in |alignment/4| floats.
+    std::vector<float> colors(alignment / 2, 0);
+
+    // Set first-half of buffer to red color
+    colors[0] = 1.0;
+    colors[1] = 0.0;
+    colors[2] = 0.0;
+    colors[3] = 1.0;
+    // Set last-half of the buffer to green color
+    colors[alignment / 4 + 0] = 0.0;
+    colors[alignment / 4 + 1] = 1.0;
+    colors[alignment / 4 + 2] = 0.0;
+    colors[alignment / 4 + 3] = 1.0;
+
+    GLBuffer ubo0;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo0);
+    glBufferData(GL_UNIFORM_BUFFER, alignment * 2, colors.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    // Switch color order for the other UBO
+    // Set first-half of buffer to green color
+    colors[0] = 0.0;
+    colors[1] = 1.0;
+    colors[2] = 0.0;
+    colors[3] = 1.0;
+    // Set last-half of the buffer to red color
+    colors[alignment / 4 + 0] = 1.0;
+    colors[alignment / 4 + 1] = 0.0;
+    colors[alignment / 4 + 2] = 0.0;
+    colors[alignment / 4 + 3] = 1.0;
+    GLBuffer ubo1;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo1);
+    glBufferData(GL_UNIFORM_BUFFER, alignment * 2, colors.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    // Setup programs for draw
+    ANGLE_GL_PROGRAM(programA, essl31_shaders::vs::Simple(), kFS);
+    ANGLE_GL_PROGRAM(programB, essl31_shaders::vs::Simple(), kFSWithInactiveUBO);
+
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw with programA with ubo0 and ubo1 with buffer range = [0, size / 2)
+    glUseProgram(programA);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo0, 0, kVec4Size);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 1, ubo1, 0, kVec4Size);
+    drawQuad(programA, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::yellow);
+
+    // Draw with programB with ubo0 with buffer range = [size / 2, size)
+    // ubo1 is an inactive UBO in programB
+    glUseProgram(programB);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo0, alignment, kVec4Size);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 1, ubo1, alignment, kVec4Size);
+    drawQuad(programB, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+
+    // Draw with programA again but with no changes to ubo0 and ubo1 buffer range
+    glUseProgram(programA);
+    drawQuad(programA, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::yellow);
+}
+
+// Test that buffer range changes to both SSBO and UBO buffers work.
+TEST_P(UniformBufferTest31, UniformBufferBindingRangeChangeWithSSBO)
+{
+    constexpr char kFS[] = R"(#version 310 es
+precision mediump float;
+
+layout(binding=0, std140) buffer Storage
+{
+    uint b;
+} ssbo;
+
+uniform uni { vec4 color; };
+out vec4 fragColor;
+void main()
+{
+    fragColor = color * float(ssbo.b);
+}
+)";
+
+    // Setup SSBO
+    constexpr GLsizei kBytesPerComponent = sizeof(unsigned int);
+    GLint ssboAlignment;
+    glGetIntegerv(GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT, &ssboAlignment);
+    if (ssboAlignment < kBytesPerComponent)
+    {
+        ssboAlignment = kBytesPerComponent;
+    }
+    ASSERT_EQ(ssboAlignment % 4, 0);
+
+    std::vector<unsigned int> initialValue(ssboAlignment / 2, 0);
+    initialValue[0]                 = 1u;
+    initialValue[ssboAlignment / 4] = 2u;
+    GLBuffer ssbo;
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, ssboAlignment * 2, initialValue.data(), GL_STATIC_DRAW);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ssbo);
+
+    // Setup UBO
+    constexpr GLsizei kVec4Size = 4 * sizeof(float);
+    GLint uboAlignment;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &uboAlignment);
+    if (uboAlignment < kVec4Size)
+    {
+        uboAlignment = kVec4Size;
+    }
+    ASSERT_EQ(uboAlignment % 4, 0);
+
+    // Put two colors in the uniform buffer, the sum of which is yellow.
+    // Note: |alignment| is in bytes, so we can place each uniform in |alignment/4| floats.
+    std::vector<float> colors(uboAlignment / 2, 0);
+    // Set first-half of buffer to red color
+    colors[0] = 1.0;
+    colors[1] = 0.0;
+    colors[2] = 0.0;
+    colors[3] = 1.0;
+    // Set last-half of the buffer to half green color
+    colors[uboAlignment / 4 + 0] = 0.0;
+    colors[uboAlignment / 4 + 1] = 0.5;
+    colors[uboAlignment / 4 + 2] = 0.0;
+    colors[uboAlignment / 4 + 3] = 0.5;
+
+    GLBuffer ubo;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+    glBufferData(GL_UNIFORM_BUFFER, uboAlignment * 2, colors.data(), GL_STATIC_DRAW);
+
+    // Setup program for draw
+    ANGLE_GL_PROGRAM(program, essl31_shaders::vs::Simple(), kFS);
+    glUseProgram(program);
+
+    // Enable blending
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw with ssbo and ubo range = [0, size / 2)
+    glUseProgram(program);
+    glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, ssbo, 0, kBytesPerComponent);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, 0, kVec4Size);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    // Draw with ssbo and ubo range = [size / 2, size)
+    glBindBufferRange(GL_SHADER_STORAGE_BUFFER, 0, ssbo, ssboAlignment, kBytesPerComponent);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, uboAlignment, kVec4Size);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::yellow);
+}
+
+// Test that buffer range changes to both ACB and UBO buffers work.
+TEST_P(UniformBufferTest31, UniformBufferBindingRangeChangeWithACB)
+{
+    // Skip the test if atomic counters aren't supported
+    GLint maxCounters = -1;
+    glGetIntegerv(GL_MAX_FRAGMENT_ATOMIC_COUNTERS, &maxCounters);
+    ANGLE_SKIP_TEST_IF(maxCounters <= 0);
+
+    constexpr char kFS[] = R"(#version 310 es
+precision highp float;
+
+layout(binding = 0) uniform atomic_uint acb;
+uniform uni { vec4 color; };
+out vec4 fragColor;
+void main()
+{
+    fragColor = color * float(atomicCounter(acb));
+}
+)";
+
+    // Setup ACB
+    constexpr unsigned int kBytesPerComponent = sizeof(unsigned int);
+    constexpr unsigned int kInitialValue[2]   = {1u, 2u};
+    GLBuffer acb;
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, acb);
+    glBufferData(GL_ATOMIC_COUNTER_BUFFER, kBytesPerComponent * 2, &kInitialValue, GL_STATIC_DRAW);
+    glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, acb);
+
+    // Setup UBO
+    constexpr GLsizei kVec4Size = 4 * sizeof(float);
+    GLint alignment;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
+    if (alignment < kVec4Size)
+    {
+        alignment = kVec4Size;
+    }
+    ASSERT_EQ(alignment % 4, 0);
+
+    // Put two colors in the uniform buffer, the sum of which is yellow.
+    // Note: |alignment| is in bytes, so we can place each uniform in |alignment/4| floats.
+    std::vector<float> colors(alignment / 2, 0);
+    // Set first-half of buffer to red color
+    colors[0] = 1.0;
+    colors[1] = 0.0;
+    colors[2] = 0.0;
+    colors[3] = 1.0;
+    // Set last-half of the buffer to half green color
+    colors[alignment / 4 + 0] = 0.0;
+    colors[alignment / 4 + 1] = 0.5;
+    colors[alignment / 4 + 2] = 0.0;
+    colors[alignment / 4 + 3] = 0.5;
+
+    GLBuffer ubo;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+    glBufferData(GL_UNIFORM_BUFFER, alignment * 2, colors.data(), GL_STATIC_DRAW);
+
+    // Setup program for draw
+    ANGLE_GL_PROGRAM(program, essl31_shaders::vs::Simple(), kFS);
+    glUseProgram(program);
+
+    // Enable blending
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw with acb and ubo range = [0, size / 2)
+    glUseProgram(program);
+    glBindBufferRange(GL_ATOMIC_COUNTER_BUFFER, 0, acb, 0, kBytesPerComponent);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, 0, kVec4Size);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    // Draw with acb and ubo range = [size / 2, size)
+    glBindBufferRange(GL_ATOMIC_COUNTER_BUFFER, 0, acb, kBytesPerComponent, kBytesPerComponent);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, alignment, kVec4Size);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::yellow);
+}
+
+// Test that buffer range changes to both UBO and storage image works.
+TEST_P(UniformBufferTest31, UniformBufferBindingRangeChangeWithStorageImage)
+{
+    constexpr char kFS[] = R"(#version 310 es
+precision highp float;
+layout(rgba8, binding = 0) uniform highp writeonly image2D img;
+uniform uni { vec4 color; };
+out vec4 colorOut;
+void main()
+{
+    colorOut = color;
+    imageStore(img, ivec2(gl_FragCoord.xy), color);
+})";
+
+    // Setup UBO
+    constexpr GLsizei kVec4Size = 4 * sizeof(float);
+    GLint alignment;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
+    if (alignment < kVec4Size)
+    {
+        alignment = kVec4Size;
+    }
+    ASSERT_EQ(alignment % 4, 0);
+
+    // Put two colors in the uniform buffer, the sum of which is yellow.
+    // Note: |alignment| is in bytes, so we can place each uniform in |alignment/4| floats.
+    std::vector<float> colors(alignment / 2, 0);
+    // Set first-half of buffer to red color
+    colors[0] = 1.0;
+    colors[1] = 0.0;
+    colors[2] = 0.0;
+    colors[3] = 1.0;
+    // Set last-half of the buffer to green color
+    colors[alignment / 4 + 0] = 0.0;
+    colors[alignment / 4 + 1] = 1.0;
+    colors[alignment / 4 + 2] = 0.0;
+    colors[alignment / 4 + 3] = 1.0;
+
+    GLBuffer ubo;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+    glBufferData(GL_UNIFORM_BUFFER, alignment * 2, colors.data(), GL_STATIC_DRAW);
+
+    // Setup storage images
+    static constexpr int kTextureSize = 1;
+    GLTexture imageA;
+    glBindTexture(GL_TEXTURE_2D, imageA);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, kTextureSize, kTextureSize);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kTextureSize, kTextureSize, GL_RGBA, GL_UNSIGNED_BYTE,
+                    GLColor::transparentBlack.data());
+
+    GLTexture imageB;
+    glBindTexture(GL_TEXTURE_2D, imageB);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, kTextureSize, kTextureSize);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kTextureSize, kTextureSize, GL_RGBA, GL_UNSIGNED_BYTE,
+                    GLColor::transparentBlack.data());
+
+    // Setup program for draw
+    ANGLE_GL_PROGRAM(program, essl31_shaders::vs::Simple(), kFS);
+    glUseProgram(program);
+
+    // Enable blending
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw with imageA and ubo range = [0, size / 2)
+    glBindImageTexture(0, imageA, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, 0, kVec4Size);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    // Draw with imageB and ubo range = [size / 2, size)
+    glBindImageTexture(0, imageB, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA8);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, alignment, kVec4Size);
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+    glFinish();
+
+    // Verify framebuffer content
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::yellow);
+
+    // Verify storage image content
+    GLFramebuffer fbo;
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+    glBindTexture(GL_TEXTURE_2D, imageA);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, imageA, 0);
+    EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_READ_FRAMEBUFFER);
+    EXPECT_GL_NO_ERROR();
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
+
+    glBindTexture(GL_TEXTURE_2D, imageB);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, imageB, 0);
+    EXPECT_GL_FRAMEBUFFER_COMPLETE(GL_READ_FRAMEBUFFER);
+    EXPECT_GL_NO_ERROR();
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+}
+
+// Test that uniform buffer binding change when using multiple programs works.
+TEST_P(UniformBufferTest31, UniformBufferBindingChangeWithMultiplePrograms)
+{
+    constexpr char kFS[] = R"(#version 310 es
+precision highp float;
+
+layout (binding = 0) uniform block0 {
+    vec4 color;
+} uni0;
+
+layout (binding = 1) uniform block1 {
+    vec4 color;
+} uni1;
+
+out vec4 fragColor;
+
+void main()
+{
+    fragColor = uni0.color + uni1.color;
+})";
+
+    // Setup UBOs
+    constexpr GLsizei kVec4Size = 4 * sizeof(float);
+
+    // Set color0 to red
+    std::vector<float> color0 = {1.0, 0.0, 0.0, 1.0};
+
+    GLBuffer ubo0;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo0);
+    glBufferData(GL_UNIFORM_BUFFER, kVec4Size, color0.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    // Set colorA to green
+    std::vector<float> colorA = {0.0, 1.0, 0.0, 1.0};
+    GLBuffer uboA;
+    glBindBuffer(GL_UNIFORM_BUFFER, uboA);
+    glBufferData(GL_UNIFORM_BUFFER, kVec4Size, colorA.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    // Set colorB to blue
+    std::vector<float> colorB = {0.0, 0.0, 1.0, 1.0};
+    GLBuffer uboB;
+    glBindBuffer(GL_UNIFORM_BUFFER, uboB);
+    glBufferData(GL_UNIFORM_BUFFER, kVec4Size, colorB.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    // Setup programs for draw
+    ANGLE_GL_PROGRAM(program0, essl31_shaders::vs::Simple(), kFS);
+    ANGLE_GL_PROGRAM(program1, essl31_shaders::vs::Simple(), essl31_shaders::fs::Red());
+
+    // Draw with program0
+    glUseProgram(program0);
+
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw with ubo0 and uboA
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo0, 0, kVec4Size);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 1, uboA, 0, kVec4Size);
+    drawQuad(program0, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    // Change buffer binding of GL_UNIFORM_BUFFER index 1 to uboB
+    glBindBufferRange(GL_UNIFORM_BUFFER, 1, uboB, 0, kVec4Size);
+
+    // Draw with program1
+    glUseProgram(program1);
+    drawQuad(program1, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    // Draw with program0, again
+    glUseProgram(program0);
+    drawQuad(program0, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::magenta);
+}
+
+// Test that uniform buffer range change when using multiple programs works.
+TEST_P(UniformBufferTest31, UniformBufferBindingRangeChangeWithMultiplePrograms)
+{
+    constexpr char kFS[] = R"(#version 310 es
+precision highp float;
+
+layout (binding = 0) uniform block0 {
+    vec4 color;
+} uni0;
+
+layout (binding = 1) uniform block1 {
+    vec4 color;
+} uni1;
+
+out vec4 fragColor;
+
+void main()
+{
+    fragColor = uni0.color + uni1.color;
+})";
+
+    // Setup UBOs
+    constexpr GLsizei kVec4Size = 4 * sizeof(float);
+
+    GLint alignment;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
+    if (alignment < kVec4Size)
+    {
+        alignment = kVec4Size;
+    }
+    ASSERT_EQ(alignment % 4, 0);
+
+    // Put two colors in the uniform buffer, the sum of which is yellow.
+    // Note: |alignment| is in bytes, so we can place each uniform in |alignment/4| floats.
+    std::vector<float> colors(alignment / 2, 0);
+    // Set first-half of buffer to red color
+    colors[0] = 1.0;
+    colors[1] = 0.0;
+    colors[2] = 0.0;
+    colors[3] = 1.0;
+    // Set last-half of the buffer to green color
+    colors[alignment / 4 + 0] = 0.0;
+    colors[alignment / 4 + 1] = 1.0;
+    colors[alignment / 4 + 2] = 0.0;
+    colors[alignment / 4 + 3] = 1.0;
+
+    GLBuffer ubo0;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo0);
+    glBufferData(GL_UNIFORM_BUFFER, alignment * 2, colors.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    std::vector<float> colorA(alignment / 4, 0);
+    // Set color to green color
+    colorA[0] = 0.0;
+    colorA[1] = 1.0;
+    colorA[2] = 0.0;
+    colorA[3] = 1.0;
+    GLBuffer uboA;
+    glBindBuffer(GL_UNIFORM_BUFFER, uboA);
+    glBufferData(GL_UNIFORM_BUFFER, alignment, colorA.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    // Setup programs for draw
+    ANGLE_GL_PROGRAM(program0, essl31_shaders::vs::Simple(), kFS);
+    ANGLE_GL_PROGRAM(program1, essl31_shaders::vs::Simple(), essl31_shaders::fs::Red());
+
+    // Draw with program0
+    glUseProgram(program0);
+
+    glClearColor(0, 0, 0, 0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw with ubo0 with buffer range = [0, size / 2) and uboA
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo0, 0, kVec4Size);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 1, uboA, 0, kVec4Size);
+    drawQuad(program0, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+    // Update buffer range of ubo0
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo0, alignment, kVec4Size);
+
+    // Draw with program1
+    glUseProgram(program1);
+    drawQuad(program1, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    // Draw with program0, again
+    glUseProgram(program0);
+    drawQuad(program0, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+}
+
+// Test that uniform buffer range change with non-coherent framebuffer fetch works.
+TEST_P(UniformBufferTest31, UniformBufferBindingRangeChangeWithNonCoherentFBF)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch_non_coherent"));
+
+    constexpr char kFS[] = R"(#version 310 es
+#extension GL_EXT_shader_framebuffer_fetch_non_coherent : require
+precision highp float;
+layout(noncoherent, location = 0) inout highp vec4 o_color;
+
+layout (binding = 0) uniform block0 {
+    vec4 color;
+} uni;
+
+void main (void)
+{
+    o_color += uni.color;
+})";
+
+    // Setup UBO with 2 colors
+    constexpr GLsizei kVec4Size = 4 * sizeof(float);
+
+    GLint alignment;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
+    if (alignment < kVec4Size)
+    {
+        alignment = kVec4Size;
+    }
+    ASSERT_EQ(alignment % 4, 0);
+
+    // Note: |alignment| is in bytes, so we can place each uniform in |alignment/4| floats.
+    std::vector<float> colors(alignment / 2, 0);
+    // Set first-half of buffer to red color
+    colors[0] = 1.0;
+    colors[1] = 0.0;
+    colors[2] = 0.0;
+    colors[3] = 1.0;
+    // Set last-half of the buffer to Green
+    colors[alignment / 4 + 0] = 0.0;
+    colors[alignment / 4 + 1] = 1.0;
+    colors[alignment / 4 + 2] = 0.0;
+    colors[alignment / 4 + 3] = 1.0;
+
+    GLBuffer ubo;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+    glBufferData(GL_UNIFORM_BUFFER, alignment * 2, colors.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    // Setup program for draw
+    ANGLE_GL_PROGRAM(program, essl31_shaders::vs::Simple(), kFS);
+    glUseProgram(program);
+
+    // Setup framebuffer with texture attachment
+    constexpr GLsizei kTextureSize = 1;
+    GLFramebuffer framebuffer;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    GLTexture colorBufferTex;
+    glBindTexture(GL_TEXTURE_2D, colorBufferTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, kTextureSize, kTextureSize, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorBufferTex, 0);
+    ASSERT_GL_NO_ERROR();
+
+    // Clear to blue
+    glClearColor(0, 0, 1.0, 1.0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw with uniform buffer range = [0, size / 2)
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, 0, kVec4Size);
+    // Insert barrier to ensure previous framebuffer writes are visible to
+    // subsequent fragment shader invocations.
+    glFramebufferFetchBarrierEXT();
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    // Draw with uniform buffer range = [size / 2, size)
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, alignment, kVec4Size);
+    // Insert barrier to ensure previous framebuffer writes are visible to
+    // subsequent fragment shader invocations.
+    glFramebufferFetchBarrierEXT();
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::white);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+// Test that uniform buffer range change with coherent framebuffer fetch works.
+TEST_P(UniformBufferTest31, UniformBufferBindingRangeChangeWithCoherentFBF)
+{
+    ANGLE_SKIP_TEST_IF(!IsGLExtensionEnabled("GL_EXT_shader_framebuffer_fetch"));
+
+    constexpr char kFS[] = R"(#version 310 es
+#extension GL_EXT_shader_framebuffer_fetch : require
+precision highp float;
+layout(location = 0) inout highp vec4 o_color;
+
+layout (binding = 0) uniform block0 {
+    vec4 color;
+} uni;
+
+void main (void)
+{
+    o_color += uni.color;
+})";
+
+    // Setup UBO with 2 colors
+    constexpr GLsizei kVec4Size = 4 * sizeof(float);
+
+    GLint alignment;
+    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
+    if (alignment < kVec4Size)
+    {
+        alignment = kVec4Size;
+    }
+    ASSERT_EQ(alignment % 4, 0);
+
+    // Note: |alignment| is in bytes, so we can place each uniform in |alignment/4| floats.
+    std::vector<float> colors(alignment / 2, 0);
+    // Set first-half of buffer to red color
+    colors[0] = 1.0;
+    colors[1] = 0.0;
+    colors[2] = 0.0;
+    colors[3] = 1.0;
+    // Set last-half of the buffer to Green
+    colors[alignment / 4 + 0] = 0.0;
+    colors[alignment / 4 + 1] = 1.0;
+    colors[alignment / 4 + 2] = 0.0;
+    colors[alignment / 4 + 3] = 1.0;
+
+    GLBuffer ubo;
+    glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+    glBufferData(GL_UNIFORM_BUFFER, alignment * 2, colors.data(), GL_STATIC_DRAW);
+    EXPECT_GL_NO_ERROR();
+
+    // Setup program for draw
+    ANGLE_GL_PROGRAM(program, essl31_shaders::vs::Simple(), kFS);
+    glUseProgram(program);
+
+    // Setup framebuffer with texture attachment
+    constexpr GLsizei kTextureSize = 1;
+    GLFramebuffer framebuffer;
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    GLTexture colorBufferTex;
+    glBindTexture(GL_TEXTURE_2D, colorBufferTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, kTextureSize, kTextureSize, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorBufferTex, 0);
+    ASSERT_GL_NO_ERROR();
+
+    // Clear to blue
+    glClearColor(0, 0, 1.0, 1.0);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw with uniform buffer range = [0, size / 2)
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, 0, kVec4Size);
+    // No barrier necessary
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    // Draw with uniform buffer range = [size / 2, size)
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, ubo, alignment, kVec4Size);
+    // No barrier necessary
+    drawQuad(program, essl31_shaders::PositionAttrib(), 0.5f, 1.0f);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::white);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
 // Test with a block containing an array of structs.
 TEST_P(UniformBufferTest, BlockContainingArrayOfStructs)
 {
@@ -1048,7 +2168,7 @@ TEST_P(UniformBufferTest, BlockContainingArrayOfStructs)
 
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUniformBuffer);
     glUniformBlockBinding(program, uniformBufferIndex, 0);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 }
 
@@ -1108,7 +2228,7 @@ TEST_P(UniformBufferTest, BlockArrayContainingArrayOfStructs)
     glBindBufferBase(GL_UNIFORM_BUFFER, 1, uniformBuffer2);
     glUniformBlockBinding(program, uniformBufferIndex, 0);
     glUniformBlockBinding(program, uniformBuffer2Index, 1);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 }
 
@@ -1156,7 +2276,7 @@ TEST_P(UniformBufferTest, BlockContainingArrayOfStructsContainingArrays)
     glBufferData(GL_UNIFORM_BUFFER, kDataSize, v.data(), GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUniformBuffer);
     glUniformBlockBinding(program, uniformBufferIndex, 0);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 }
 
@@ -1205,7 +2325,7 @@ TEST_P(UniformBufferTest, BlockContainingNestedStructs)
     glBufferData(GL_UNIFORM_BUFFER, kDataSize, v.data(), GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUniformBuffer);
     glUniformBlockBinding(program, uniformBufferIndex, 0);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 }
 
@@ -1246,7 +2366,7 @@ TEST_P(UniformBufferTest, UniformBlockReservedOpenGLName)
     glBufferData(GL_UNIFORM_BUFFER, kDataSize, v.data(), GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUniformBuffer);
     glUniformBlockBinding(program, uniformBufferIndex, 0);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 }
 
@@ -1279,7 +2399,7 @@ TEST_P(UniformBufferTest, UniformBlockInstanceReservedOpenGLName)
     glBufferData(GL_UNIFORM_BUFFER, kDataSize, v.data(), GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUniformBuffer);
     glUniformBlockBinding(program, uniformBufferIndex, 0);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 }
 
@@ -1290,7 +2410,7 @@ TEST_P(UniformBufferTest, Std140UniformBlockInstanceWithNestedStructsContainingV
 {
     // Got incorrect test result on non-NVIDIA Android - the alpha channel was not set correctly
     // from the second vector, possibly the platform doesn't implement std140 packing right?
-    // http://anglebug.com/2217
+    // http://anglebug.com/42260937
     ANGLE_SKIP_TEST_IF(IsAndroid() && !IsNVIDIA());
 
     constexpr char kFS[] =
@@ -1338,7 +2458,7 @@ TEST_P(UniformBufferTest, Std140UniformBlockInstanceWithNestedStructsContainingV
     glBufferData(GL_UNIFORM_BUFFER, kDataSize, v.data(), GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUniformBuffer);
     glUniformBlockBinding(program, uniformBufferIndex, 0);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 }
 
@@ -1386,8 +2506,8 @@ TEST_P(UniformBufferTest, DetachShaders)
 TEST_P(UniformBufferTest, Std140UniformBlockWithRowMajorQualifier)
 {
     // AMD OpenGL driver doesn't seem to apply the row-major qualifier right.
-    // http://anglebug.com/2273
-    ANGLE_SKIP_TEST_IF(IsAMD() && IsOpenGL() && !IsMac());
+    // http://anglebug.com/40096480
+    ANGLE_SKIP_TEST_IF(IsAMD() && IsOpenGL());
 
     constexpr char kFS[] =
         R"(#version 300 es
@@ -1424,7 +2544,7 @@ TEST_P(UniformBufferTest, Std140UniformBlockWithRowMajorQualifier)
     glBufferData(GL_UNIFORM_BUFFER, kDataSize, v.data(), GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUniformBuffer);
     glUniformBlockBinding(program, uniformBufferIndex, 0);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     ASSERT_GL_NO_ERROR();
     EXPECT_PIXEL_COLOR_NEAR(0, 0, GLColor(255, 64, 128, 32), 5);
 }
@@ -1434,8 +2554,8 @@ TEST_P(UniformBufferTest, Std140UniformBlockWithRowMajorQualifier)
 TEST_P(UniformBufferTest, Std140UniformBlockWithPerMemberRowMajorQualifier)
 {
     // AMD OpenGL driver doesn't seem to apply the row-major qualifier right.
-    // http://anglebug.com/2273
-    ANGLE_SKIP_TEST_IF(IsAMD() && IsOpenGL() && !IsMac());
+    // http://anglebug.com/40096480
+    ANGLE_SKIP_TEST_IF(IsAMD() && IsOpenGL());
 
     constexpr char kFS[] =
         R"(#version 300 es
@@ -1472,7 +2592,7 @@ TEST_P(UniformBufferTest, Std140UniformBlockWithPerMemberRowMajorQualifier)
     glBufferData(GL_UNIFORM_BUFFER, kDataSize, v.data(), GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUniformBuffer);
     glUniformBlockBinding(program, uniformBufferIndex, 0);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     ASSERT_GL_NO_ERROR();
     EXPECT_PIXEL_COLOR_NEAR(0, 0, GLColor(255, 64, 128, 32), 5);
 }
@@ -1519,7 +2639,7 @@ TEST_P(UniformBufferTest, Std140UniformBlockWithPerMemberColumnMajorQualifier)
     glBufferData(GL_UNIFORM_BUFFER, kDataSize, v.data(), GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUniformBuffer);
     glUniformBlockBinding(program, uniformBufferIndex, 0);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     ASSERT_GL_NO_ERROR();
     EXPECT_PIXEL_COLOR_NEAR(0, 0, GLColor(255, 192, 128, 96), 5);
 }
@@ -1528,8 +2648,8 @@ TEST_P(UniformBufferTest, Std140UniformBlockWithPerMemberColumnMajorQualifier)
 TEST_P(UniformBufferTest, Std140UniformBlockWithRowMajorQualifierOnStruct)
 {
     // AMD OpenGL driver doesn't seem to apply the row-major qualifier right.
-    // http://anglebug.com/2273
-    ANGLE_SKIP_TEST_IF(IsAMD() && IsOpenGL() && !IsMac());
+    // http://anglebug.com/40096480
+    ANGLE_SKIP_TEST_IF(IsAMD() && IsOpenGL());
 
     constexpr char kFS[] =
         R"(#version 300 es
@@ -1571,7 +2691,7 @@ TEST_P(UniformBufferTest, Std140UniformBlockWithRowMajorQualifierOnStruct)
     glBufferData(GL_UNIFORM_BUFFER, kDataSize, v.data(), GL_STATIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUniformBuffer);
     glUniformBlockBinding(program, uniformBufferIndex, 0);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     ASSERT_GL_NO_ERROR();
     EXPECT_PIXEL_COLOR_NEAR(0, 0, GLColor(255, 64, 128, 32), 5);
 }
@@ -1592,9 +2712,6 @@ void main()
 {
   fragColor = color;
 })";
-
-    // http://anglebug.com/2287
-    ANGLE_SKIP_TEST_IF(IsMac() && IsNVIDIA() && IsDesktopOpenGL());
 
     ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), kFragmentShader);
 
@@ -1754,7 +2871,7 @@ void main()
 }
 
 // Recreate WebGL conformance test conformance2/uniforms/large-uniform-buffers.html to test
-// regression in http://anglebug.com/3388
+// regression in http://anglebug.com/42262055
 TEST_P(UniformBufferTest, SizeOverMaxBlockSize)
 {
     constexpr char kFragmentShader[] = R"(#version 300 es
@@ -1773,7 +2890,7 @@ void main()
 
     // Test crashes on Windows AMD OpenGL
     ANGLE_SKIP_TEST_IF(IsAMD() && IsWindows() && IsOpenGL());
-    // http://anglebug.com/5382
+    // http://anglebug.com/42263922
     ANGLE_SKIP_TEST_IF(IsLinux() && IsAMD() && IsDesktopOpenGL());
 
     ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), kFragmentShader);
@@ -1855,9 +2972,6 @@ void main()
 // Test a uniform block where an array of row-major matrices is dynamically indexed.
 TEST_P(UniformBufferTest, Std140UniformBlockWithDynamicallyIndexedRowMajorArray)
 {
-    // http://anglebug.com/3837 , http://anglebug.com/2273
-    ANGLE_SKIP_TEST_IF((IsLinux() && IsIntel() && IsOpenGL()) || IsMac());
-
     constexpr char kFS[] =
         R"(#version 300 es
 
@@ -1903,7 +3017,7 @@ TEST_P(UniformBufferTest, Std140UniformBlockWithDynamicallyIndexedRowMajorArray)
     GLint indexLoc = glGetUniformLocation(program, "u_zero");
     glUseProgram(program);
     glUniform1i(indexLoc, 0);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     ASSERT_GL_NO_ERROR();
     EXPECT_PIXEL_COLOR_NEAR(0, 0, GLColor(0, 255, 0, 255), 5);
 }
@@ -1911,7 +3025,7 @@ TEST_P(UniformBufferTest, Std140UniformBlockWithDynamicallyIndexedRowMajorArray)
 // Test with many uniform buffers work as expected.
 TEST_P(UniformBufferTest, ManyBlocks)
 {
-    // http://anglebug.com/5039
+    // http://anglebug.com/42263608
     ANGLE_SKIP_TEST_IF(IsD3D11());
 
     constexpr char kFS[] =
@@ -1974,7 +3088,7 @@ TEST_P(UniformBufferTest, ManyBlocks)
     }
 
     glViewport(0, 0, getWindowWidth() / 2, getWindowHeight());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
 
     // Modify buffer[1]
     glBindBuffer(GL_UNIFORM_BUFFER, buffers[1]);
@@ -1987,7 +3101,7 @@ TEST_P(UniformBufferTest, ManyBlocks)
     glBufferData(GL_UNIFORM_BUFFER, v.size(), v.data(), GL_STATIC_DRAW);
 
     glViewport(getWindowWidth() / 2, 0, getWindowWidth() / 2, getWindowHeight());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
 
     // First draw
     EXPECT_PIXEL_NEAR(0, 0, 78, 78, 78, 255, 2);
@@ -2216,17 +3330,17 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsStruct)
 
     setArrayValues(floatData, 0, arraySize, 16, 0, 4, 4, 0.0f, 0.0f, 1.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::blue, GLColor::blue, GLColor::blue, GLColor::blue);
 
     setArrayValues(floatData, 0, arraySize, 16, 0, 4, 4, 0.0f, 1.0f, 0.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::green, GLColor::green, GLColor::green);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, 16, 0, 4, 4, 1.0f, 0.0f, 0.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::red, GLColor::green, GLColor::green);
 }
 
@@ -2268,17 +3382,17 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsStructAndInstanced)
 
     setArrayValues(floatData, 0, arraySize, 16, 0, 4, 4, 0.0f, 0.0f, 1.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::blue, GLColor::blue, GLColor::blue, GLColor::blue);
 
     setArrayValues(floatData, 0, arraySize, 16, 0, 4, 4, 0.0f, 1.0f, 0.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::green, GLColor::green, GLColor::green);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, 16, 0, 4, 4, 1.0f, 0.0f, 0.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::red, GLColor::green, GLColor::green);
 }
 
@@ -2336,19 +3450,19 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsStructAndInstancedAr
 
     setArrayValues(floatData1, 0, arraySize, 16, 0, 4, 4, 0.0f, 1.0f, 0.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData1.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::cyan, GLColor::cyan, GLColor::cyan, GLColor::cyan);
 
     glBindBuffer(GL_UNIFORM_BUFFER, mUniformBuffer);
     setArrayValues(floatData0, 0, arraySize, 16, 0, 4, 4, 1.0f, 0.0f, 0.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData0.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::yellow, GLColor::yellow, GLColor::yellow, GLColor::yellow);
 
     glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer1);
     setArrayValues(floatData1, arraySize / 4, arraySize / 2, 16, 0, 4, 4, 0.0f, 0.0f, 1.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData1.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::yellow, GLColor::magenta, GLColor::yellow, GLColor::yellow);
 }
 
@@ -2397,7 +3511,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructMat4AndFloa
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::blue, GLColor::blue, GLColor::blue, GLColor::blue);
 
     setArrayValues(floatData, 0, arraySize, strideofFloatCount, 0, 4, 4, 0.0f, 0.5f, 0.0f, 0.5f, 16,
@@ -2405,7 +3519,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructMat4AndFloa
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::green, GLColor::green, GLColor::green);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, strideofFloatCount, 0, 4, 4, 0.5f, 0.0f,
@@ -2413,7 +3527,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructMat4AndFloa
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::red, GLColor::green, GLColor::green);
 }
 
@@ -2459,7 +3573,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructVec2AndVec3
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::white, GLColor::white, GLColor::white, GLColor::white);
 
     setArrayValues(floatData, 0, arraySize, strideofFloatCount, 0, 1, 2, 1.0f, 0.0f, 0.0f, 0.0f, 4,
@@ -2467,7 +3581,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructVec2AndVec3
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::red, GLColor::red, GLColor::red, GLColor::red);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, strideofFloatCount, 0, 1, 2, 0.0f, 0.0f,
@@ -2475,7 +3589,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructVec2AndVec3
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::red, GLColor::blue, GLColor::red, GLColor::red);
 }
 
@@ -2521,7 +3635,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructFloatAndVec
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::white, GLColor::white, GLColor::white, GLColor::white);
 
     setArrayValues(floatData, 0, arraySize, strideofFloatCount, 0, 1, 1, 1.0f, 0.0f, 0.0f, 0.0f, 4,
@@ -2529,7 +3643,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructFloatAndVec
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::red, GLColor::red, GLColor::red, GLColor::red);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, strideofFloatCount, 0, 1, 1, 0.0f, 0.0f,
@@ -2537,7 +3651,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructFloatAndVec
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::red, GLColor::blue, GLColor::red, GLColor::red);
 }
 
@@ -2545,8 +3659,6 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructFloatAndVec
 // member.
 TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructVec3AndFloat)
 {
-    ANGLE_SKIP_TEST_IF(IsMac());
-
     std::ostringstream stream;
     generateArraySizeAndDivisorsDeclaration(stream, false, false, false);
     const std::string &kFS =
@@ -2584,7 +3696,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructVec3AndFloa
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::white, GLColor::white, GLColor::white, GLColor::white);
 
     setArrayValues(floatData, 0, arraySize, strideofFloatCount, 0, 1, 3, 0.0f, 0.0f, 1.0f, 0.0f, 3,
@@ -2592,7 +3704,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructVec3AndFloa
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::red, GLColor::red, GLColor::red, GLColor::red);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, strideofFloatCount, 0, 1, 3, 0.0f, 1.0f,
@@ -2600,7 +3712,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructVec3AndFloa
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::red, GLColor::blue, GLColor::red, GLColor::red);
 }
 
@@ -2658,7 +3770,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, TwoUniformBlocksInSameProgram)
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount2 * sizeof(GLfloat), &floatData[0]);
     glBufferSubData(GL_UNIFORM_BUFFER, blockSize2, floatCount1 * sizeof(GLfloat),
                     &floatData[floatCount2]);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::blue, GLColor::blue, GLColor::blue, GLColor::blue);
 
     setArrayValues(floatData, 0, arraySize2, 16, 0, 4, 4, 0.0f, 1.0f, 0.0f, 0.0f);
@@ -2667,7 +3779,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, TwoUniformBlocksInSameProgram)
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount2 * sizeof(GLfloat), &floatData[0]);
     glBufferSubData(GL_UNIFORM_BUFFER, blockSize2 + floatCount1 * sizeof(GLfloat) / 4,
                     floatCount1 * sizeof(GLfloat) / 4, &floatData[floatCount2 + floatCount1 / 4]);
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::cyan, GLColor::yellow, GLColor::cyan, GLColor::cyan);
 }
 
@@ -2738,19 +3850,19 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, TwoUniformBlocksInDiffProgram)
 
     setArrayValues(floatData, 0, arraySize1, 16, 0, 4, 4, 0.0f, 0.0f, 1.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), &floatData[0]);
-    drawQuad(program1.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program1, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::blue, GLColor::blue, GLColor::blue, GLColor::blue);
 
     setArrayValues(floatData, 0, arraySize2, 16, 0, 4, 4, 0.0f, 1.0f, 0.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount2 * sizeof(GLfloat), &floatData[0]);
-    drawQuad(program2.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program2, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::green, GLColor::green, GLColor::green);
 
     setArrayValues(floatData, arraySize2, arraySize2 + arraySize1 / 2, 16, 0, 4, 4, 0.0f, 1.0f,
                    0.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, floatCount2 * sizeof(GLfloat),
                     (floatCount1 / 2 - floatCount2) * sizeof(GLfloat), &floatData[0]);
-    drawQuad(program1.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program1, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::green, GLColor::blue, GLColor::blue);
 }
 
@@ -2760,8 +3872,6 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, TwoUniformBlocksInDiffProgram)
 // buffer data correctly.
 TEST_P(UniformBlockWithOneLargeArrayMemberTest, SharedSameBufferWithOtherOne)
 {
-    ANGLE_SKIP_TEST_IF(IsIntel() && IsMac() && IsOpenGL());
-
     std::ostringstream stream;
     generateArraySizeAndDivisorsDeclaration(stream, false, true, false);
     const std::string &kFS =
@@ -2810,14 +3920,14 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, SharedSameBufferWithOtherOne)
 
     glBufferSubData(GL_UNIFORM_BUFFER, alignment, floatCount * sizeof(GLfloat), floatData.data());
     glBufferSubData(GL_UNIFORM_BUFFER, 0, 4 * sizeof(GLfloat), floatData1.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::magenta, GLColor::magenta, GLColor::magenta, GLColor::magenta);
 
     setArrayValues(floatData, 0, arraySize, 16, 0, 4, 4, 0.0f, 0.5f, 0.0f, 0.5f);
     setArrayValues(floatData1, 0, 1, 4, 0, 1, 4, 0.0f, 0.5f, 0.0f, 0.5f);
     glBufferSubData(GL_UNIFORM_BUFFER, alignment, floatCount * sizeof(GLfloat), floatData.data());
     glBufferSubData(GL_UNIFORM_BUFFER, 0, 4 * sizeof(GLfloat), floatData1.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::green, GLColor::green, GLColor::green);
 }
 
@@ -2886,17 +3996,17 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMatrix)
 
     setArrayValues(floatData, 0, arraySize, 16, 0, 4, 4, 0.0f, 0.0f, 1.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::blue, GLColor::blue, GLColor::blue, GLColor::blue);
 
     setArrayValues(floatData, 0, arraySize, 16, 0, 4, 4, 0.0f, 1.0f, 0.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::green, GLColor::green, GLColor::green);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, 16, 0, 4, 4, 1.0f, 0.0f, 0.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::red, GLColor::green, GLColor::green);
 }
 
@@ -2953,27 +4063,27 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMatrixAndInstanced)
 
     setArrayValues(floatData1, 0, arraySize, 16, 0, 4, 4, 0.0f, 1.0f, 0.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData1.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::cyan, GLColor::cyan, GLColor::cyan, GLColor::cyan);
 
     glBindBuffer(GL_UNIFORM_BUFFER, mUniformBuffer);
     setArrayValues(floatData0, 0, arraySize, 16, 0, 4, 4, 1.0f, 0.0f, 0.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData0.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::yellow, GLColor::yellow, GLColor::yellow, GLColor::yellow);
 
     glBindBuffer(GL_UNIFORM_BUFFER, uniformBuffer1);
     setArrayValues(floatData1, arraySize / 4, arraySize / 2, 16, 0, 4, 4, 0.0f, 0.0f, 1.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData1.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::yellow, GLColor::magenta, GLColor::yellow, GLColor::yellow);
 }
 
 // Test uniform block with row major qualifier whose member is matrix type.
 TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMatrixAndRowMajorQualifier)
 {
-    // http://anglebug.com/3837 , http://anglebug.com/2273
-    ANGLE_SKIP_TEST_IF((IsMac() && IsOpenGL()) || IsAndroid() || (IsAMD() && IsOpenGL()) ||
+    // http://anglebug.com/42262481 , http://anglebug.com/40096480
+    ANGLE_SKIP_TEST_IF(IsAndroid() || (IsAMD() && IsOpenGL()) ||
                        (IsLinux() && IsIntel() && IsOpenGL()));
 
     std::ostringstream stream;
@@ -3011,19 +4121,19 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMatrixAndRowMajorQua
     setArrayValues(floatData, 0, arraySize, 16, 0, 2, 4, 0.0f, 0.0f, 0.0f, 0.0f, 8, 2, 4, 1.0f,
                    1.0f, 1.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::blue, GLColor::blue, GLColor::blue, GLColor::blue);
 
     setArrayValues(floatData, 0, arraySize, 16, 4, 1, 4, 1.0f, 1.0f, 1.0f, 1.0f, 8, 1, 4, 0.0f,
                    0.0f, 0.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::green, GLColor::green, GLColor::green);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, 16, 0, 1, 4, 1.0f, 1.0f, 1.0f, 1.0f, 4,
                    1, 4, 0.0f, 0.0f, 0.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::red, GLColor::green, GLColor::green);
 }
 
@@ -3062,12 +4172,12 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsVec4)
 
     setArrayValues(floatData, 0, arraySize, 4, 0, 1, 4, 1.0f, 0.0f, 1.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::magenta, GLColor::magenta, GLColor::magenta, GLColor::magenta);
 
     setArrayValues(floatData, 0, arraySize, 4, 0, 1, 4, 1.0f, 1.0f, 0.0f, 1.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::yellow, GLColor::yellow, GLColor::yellow, GLColor::yellow);
 }
 
@@ -3106,17 +4216,17 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsVec3)
 
     setArrayValues(floatData, 0, arraySize, 4, 0, 1, 3, 0.0f, 0.0f, 1.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::blue, GLColor::blue, GLColor::blue, GLColor::blue);
 
     setArrayValues(floatData, 0, arraySize, 4, 0, 1, 3, 0.0f, 1.0f, 0.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::green, GLColor::green, GLColor::green);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, 4, 0, 1, 3, 1.0f, 0.0f, 0.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::red, GLColor::green, GLColor::green);
 }
 
@@ -3155,17 +4265,17 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsVec2)
 
     setArrayValues(floatData, 0, arraySize, 4, 0, 1, 2, 1.0f, 0.0f, 0.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::magenta, GLColor::magenta, GLColor::magenta, GLColor::magenta);
 
     setArrayValues(floatData, 0, arraySize, 4, 0, 1, 2, 0.0f, 1.0f, 0.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::green, GLColor::green, GLColor::green);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, 4, 0, 1, 2, 1.0f, 0.0f, 0.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::magenta, GLColor::green, GLColor::green);
 }
 
@@ -3205,12 +4315,12 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsFloat)
 
     setArrayValues(floatData, 0, arraySize, 4, 0, 1, 1, 1.0f, 0.0f, 0.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::red, GLColor::red, GLColor::red, GLColor::red);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, 4, 0, 1, 1, 0.0f, 0.0f, 0.0f, 0.0f);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, floatCount * sizeof(GLfloat), floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::red, GLColor::black, GLColor::red, GLColor::red);
 }
 
@@ -3259,7 +4369,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructFloatAndMat
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::blue, GLColor::blue, GLColor::blue, GLColor::blue);
 
     setArrayValues(floatData, 0, arraySize, strideofFloatCount, 0, 1, 1, 2.0f, 0.0f, 0.0f, 0.0f, 4,
@@ -3267,7 +4377,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructFloatAndMat
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::green, GLColor::green, GLColor::green);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, strideofFloatCount, 0, 1, 1, 2.0f, 0.0f,
@@ -3275,7 +4385,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructFloatAndMat
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::green, GLColor::red, GLColor::green, GLColor::green);
 }
 
@@ -3283,8 +4393,6 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructFloatAndMat
 // member.
 TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructFloatAndVec4)
 {
-    ANGLE_SKIP_TEST_IF(IsMac());
-
     std::ostringstream stream;
     generateArraySizeAndDivisorsDeclaration(stream, false, false, false);
     const std::string &kFS =
@@ -3322,7 +4430,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructFloatAndVec
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::white, GLColor::white, GLColor::white, GLColor::white);
 
     setArrayValues(floatData, 0, arraySize, strideofFloatCount, 0, 1, 1, 1.0f, 0.0f, 0.0f, 0.0f, 4,
@@ -3330,7 +4438,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructFloatAndVec
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::red, GLColor::red, GLColor::red, GLColor::red);
 
     setArrayValues(floatData, arraySize / 4, arraySize / 2, strideofFloatCount, 0, 1, 1, 0.0f, 0.0f,
@@ -3338,7 +4446,7 @@ TEST_P(UniformBlockWithOneLargeArrayMemberTest, MemberTypeIsMixStructFloatAndVec
     glBufferSubData(GL_UNIFORM_BUFFER, 0,
                     std::min(static_cast<size_t>(blockSize), floatCount * sizeof(GLfloat)),
                     floatData.data());
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
     checkResults(GLColor::red, GLColor::blue, GLColor::red, GLColor::red);
 }
 
@@ -3526,9 +4634,9 @@ TEST_P(UniformBufferTest, BufferDataInLoop)
 {
     glClear(GL_COLOR_BUFFER_BIT);
 
-    // Use large buffer size to get around suballocation, so that we will gets a new buffer with
+    // Use large buffer size to get around suballocation, so that we will get a new buffer with
     // bufferData call.
-    static constexpr size_t kBufferSize = 4 * 1024 * 1024;
+    static constexpr size_t kBufferSize = 64 * 1024 * 1024;
     std::vector<float> floatData;
     floatData.resize(kBufferSize / (sizeof(float)), 0.0f);
     floatData[0] = 0.5f;
@@ -3585,6 +4693,9 @@ class UniformBufferMemoryTest : public UniformBufferTest
 // supposedly to issue flush if needed.
 TEST_P(UniformBufferMemoryTest, BufferDataInLoopManyTimes)
 {
+    GLPerfMonitor monitor;
+    glBeginPerfMonitorAMD(monitor);
+
     // Run this test for Vulkan only.
     ANGLE_SKIP_TEST_IF(!IsVulkan());
     uint64_t expectedSubmitCalls = getPerfCounters().commandQueueSubmitCallsTotal + 1;
@@ -3624,6 +4735,8 @@ TEST_P(UniformBufferMemoryTest, BufferDataInLoopManyTimes)
             break;
         }
     }
+    glEndPerfMonitorAMD(monitor);
+
     EXPECT_EQ(getPerfCounters().commandQueueSubmitCallsTotal, expectedSubmitCalls);
     ASSERT_GL_NO_ERROR();
     EXPECT_PIXEL_NEAR(0, 0, 128, 191, 64, 255, 1);
@@ -3653,7 +4766,7 @@ TEST_P(WebGL2UniformBufferTest, LargeArrayOfStructs)
     constexpr char kVertexShader[] = R"(
         struct InstancingData
         {
-            mat4 transformation;
+            vec4 transformation;
         };
 
         layout(std140) uniform InstanceBlock
@@ -3663,7 +4776,7 @@ TEST_P(WebGL2UniformBufferTest, LargeArrayOfStructs)
 
         void main()
         {
-            gl_Position = vec4(1.0) * instances[gl_InstanceID].transformation;
+            gl_Position = vec4(1.0) * instances[gl_InstanceID].transformation[0];
         })";
 
     constexpr char kFragmentShader[] = R"(#version 300 es
@@ -3678,16 +4791,198 @@ TEST_P(WebGL2UniformBufferTest, LargeArrayOfStructs)
     glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &maxUniformBlockSize);
 
     std::string vs = "#version 300 es\n#define MAX_INSTANCE_COUNT " +
-                     std::to_string(std::min(800, maxUniformBlockSize / 64)) + kVertexShader;
+                     std::to_string(maxUniformBlockSize / 16) + kVertexShader;
 
     ANGLE_GL_PROGRAM(program, vs.c_str(), kFragmentShader);
-    // Add a draw call for the sake of the Vulkan backend that currently really builds shaders at
-    // draw time.
-    drawQuad(program.get(), essl3_shaders::PositionAttrib(), 0.5f);
+}
+
+class UniformBufferShadowBufferTest : public UniformBufferTest
+{
+  protected:
+    UniformBufferShadowBufferTest() {}
+};
+
+// Test that using an array buffer as a uniform buffer works correctly, especially
+// when the buffer size is not a multiple of the uniform block size, and the backend
+// expects padded buffers (e.g. Metal with shadow buffers).
+TEST_P(UniformBufferShadowBufferTest, ArrayBufferBoundAsUniformBufferWithBool)
+{
+    constexpr char kFS[] =
+        R"(#version 300 es
+        precision highp float;
+        layout(std140) uniform U { bool b; };
+        out vec4 my_FragColor;
+        void main()
+        {
+            my_FragColor = b ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0, 0.0, 0.0, 1.0);
+        })";
+
+    ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), kFS);
+    glUseProgram(program);
+
+    GLuint buffer;
+    glGenBuffers(1, &buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    // Create a buffer of 5 bytes (not a multiple of std140 block size or 16).
+    constexpr uint8_t data[5] = {1, 0, 0, 0, 0};
+    glBufferData(GL_ARRAY_BUFFER, 5, data, GL_STATIC_DRAW);
+
+    GLuint blockIndex = glGetUniformBlockIndex(program, "U");
+    glUniformBlockBinding(program, blockIndex, 0);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, buffer);
+
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
+    EXPECT_GL_NO_ERROR();
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
+}
+
+// Test that rebinding UBOs with |glUniformBlockBinding| a buffer offset has changed works.
+TEST_P(UniformBufferTest, BlockBindChangeAfterOffsetChange)
+{
+    constexpr char kFS[] = R"(#version 300 es
+precision highp float;
+layout(std140) uniform Block0 { vec4 u0; };
+layout(std140) uniform Block1 { vec4 u1; };
+out vec4 fragColor;
+void main() {
+  fragColor = u0 + u1;
+})";
+
+    ANGLE_GL_PROGRAM(program, essl3_shaders::vs::Simple(), kFS);
+    glUseProgram(program);
+
+    const GLuint block0Index = glGetUniformBlockIndex(program, "Block0");
+    const GLuint block1Index = glGetUniformBlockIndex(program, "Block1");
+
+    // Map block bindings to something explicit
+    glUniformBlockBinding(program, block0Index, 0);
+    glUniformBlockBinding(program, block1Index, 1);
+
+    constexpr GLuint kSmallBufferSize = 256;
+    constexpr GLuint kLargeBufferSize = 16 * 1024 * 1024;
+
+    const std::vector<float> kBuffer0InitData(kSmallBufferSize, 0.25);
+    const std::vector<float> kBuffer1InitData(kSmallBufferSize, 0.1);
+    const std::vector<float> kBuffer2InitData(kLargeBufferSize, 0.5);
+
+    GLBuffer buffer0;
+    glBindBuffer(GL_UNIFORM_BUFFER, buffer0);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * kSmallBufferSize, kBuffer0InitData.data(),
+                 GL_STATIC_DRAW);
+
+    GLBuffer buffer1;
+    glBindBuffer(GL_UNIFORM_BUFFER, buffer1);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * kSmallBufferSize, kBuffer1InitData.data(),
+                 GL_STATIC_DRAW);
+
+    GLBuffer buffer2;
+    glBindBuffer(GL_UNIFORM_BUFFER, buffer2);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * kLargeBufferSize, kBuffer2InitData.data(),
+                 GL_STATIC_DRAW);
+
+    // Bind all the buffers.  Note that binding 2 is unused by the program.  Bind the large buffer
+    // at an offset near the end.
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, buffer0, 0, kSmallBufferSize);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 1, buffer1, 0, kSmallBufferSize);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 2, buffer2, kLargeBufferSize - kSmallBufferSize,
+                      kSmallBufferSize);
+
+    // Issue a draw call to sync all dirty bits.
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
+
+    // Change the offset of binding 0 only.  This takes a special fast-path in the Vulkan backend.
+    glBindBufferRange(GL_UNIFORM_BUFFER, 0, buffer0, kSmallBufferSize, kSmallBufferSize);
+
+    // Switch the binding of the other buffer to the huge buffer.
+    glUniformBlockBinding(program, block1Index, 2);
+
+    // Draw again.  It must correctly read from buffer0 and buffer2.
+    drawQuad(program, essl3_shaders::PositionAttrib(), 0.5f);
+    EXPECT_PIXEL_COLOR_NEAR(0, 0, GLColor(191, 191, 191, 191), 1);
+    ASSERT_GL_NO_ERROR();
+}
+
+// Test that reusing the same uniform buffer for two different programs where the Metal
+// layout results in different sizes (e.g. mat2[64] vs row_major mat4[32]) works correctly.
+// See crbug.com/500472605 for more details.
+// Both have std140 size of 2048 bytes.
+// mat2[64]: std140 is 64 * 32 = 2048 bytes, Metal is 64 * 16 = 1024 bytes.
+// mat4[32]: std140 is 32 * 64 = 2048 bytes, Metal is 32 * 64 = 2048 bytes.
+TEST_P(UniformBufferTest, SameBufferDifferentMetalSize)
+{
+    // Program A: mat2[64] (stdSize 2048, metalSize 1024)
+    const char *kVS  = essl3_shaders::vs::Simple();
+    const char *kFSA = R"(#version 300 es
+precision highp float;
+layout(std140) uniform block {
+    mat2 m[64];
+} ubo;
+out vec4 fragColor;
+void main()
+{
+    fragColor = vec4(ubo.m[63][0], 0.0, 1.0);
+})";
+
+    // Program B: row_major mat4[32] (stdSize 2048, metalSize 2048)
+    const char *kFSB = R"(#version 300 es
+precision highp float;
+layout(std140, row_major) uniform block {
+    mat4 m[32];
+} ubo;
+out vec4 fragColor;
+void main()
+{
+    fragColor = ubo.m[30][0];
+})";
+
+    ANGLE_GL_PROGRAM(programA, kVS, kFSA);
+    ANGLE_GL_PROGRAM(programB, kVS, kFSB);
+
+    glUniformBlockBinding(programA, glGetUniformBlockIndex(programA, "block"), 0);
+    glUniformBlockBinding(programB, glGetUniformBlockIndex(programB, "block"), 0);
+
+    GLBuffer buffer;
+    glBindBuffer(GL_UNIFORM_BUFFER, buffer);
+
+    // 2048 bytes of data. (512 floats)
+    std::vector<float> data(512, 0.0f);
+    // Program A: m[63][0] is at offset 63 * 32 = 2016. (r0c0, r1c0)
+    // float index = 2016 / 4 = 504.
+    data[504] = 1.0f;
+    data[505] = 0.5f;
+
+    // Program B: m[30] starts at offset 30 * 64 = 1920.
+    // m[30][0] is the first column of the 31st matrix.
+    // In row-major, m[30][0] = (r0c0, r1c0, r2c0, r3c0) of m[30].
+    // Float indices (offset / 4):
+    // r0c0: 1920 / 4 = 480
+    // r1c0: 1936 / 4 = 484
+    // r2c0: 1952 / 4 = 488
+    // r3c0: 1968 / 4 = 492
+    data[480] = 0.2f;
+    data[484] = 0.1f;
+    data[488] = 0.7f;
+    data[492] = 0.4f;
+
+    glBufferData(GL_UNIFORM_BUFFER, data.size() * sizeof(float), data.data(), GL_STATIC_DRAW);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, buffer);
+
+    // Program A: mat2[64]. Should see m[63][0] = (1.0, 0.5)
+    drawQuad(programA, essl3_shaders::PositionAttrib(), 0.5f);
+    EXPECT_PIXEL_COLOR_NEAR(0, 0, GLColor(255, 127, 0, 255), 1);
+
+    // Program B: row_major mat4[32]. Should see m[30][0] = (0.2, 0.1, 0.7, 0.4)
+    // If it incorrectly reuses Program A's 1024-byte buffer, it will go OOB.
+    drawQuad(programB, essl3_shaders::PositionAttrib(), 0.5f);
+    EXPECT_PIXEL_COLOR_NEAR(0, 0, GLColor(51, 25, 178, 102), 1);
 }
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(UniformBufferTest);
 ANGLE_INSTANTIATE_TEST_ES3(UniformBufferTest);
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(UniformBufferShadowBufferTest);
+ANGLE_INSTANTIATE_TEST_ES3_AND(UniformBufferShadowBufferTest,
+                               ES3_METAL().enable(Feature::UseShadowBuffersWhenAppropriate));
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(UniformBlockWithOneLargeArrayMemberTest);
 ANGLE_INSTANTIATE_TEST_ES3(UniformBlockWithOneLargeArrayMemberTest);
@@ -3700,5 +4995,108 @@ ANGLE_INSTANTIATE_TEST_ES3(UniformBufferMemoryTest);
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(WebGL2UniformBufferTest);
 ANGLE_INSTANTIATE_TEST_ES3(WebGL2UniformBufferTest);
+
+class SimpleUniformBufferTest : public ANGLETest<>
+{
+  protected:
+    SimpleUniformBufferTest()
+    {
+        setWindowWidth(128);
+        setWindowHeight(128);
+        setConfigRedBits(8);
+        setConfigGreenBits(8);
+        setConfigBlueBits(8);
+        setConfigAlphaBits(8);
+    }
+};
+
+// Test that maps a buffer as staging, then performs a draw inducing a garbage collect of the
+// staging buffer. This would formerly UAF, but now returns an invalid operation.
+// TODO(http://anglebug.com/505771894): Update test once we validate that drawing with a mapped
+// buffer is invalid.
+TEST_P(SimpleUniformBufferTest, MappedUBOStagingGarbageCollection)
+{
+    // Only applies to D3D11 backend.
+    ANGLE_SKIP_TEST_IF(!IsD3D11());
+
+    // Create a program with 10 uniform blocks.
+    constexpr char kVS[] = R"(#version 300 es
+layout(std140) uniform block0 { vec4 data0; };
+layout(std140) uniform block1 { vec4 data1; };
+layout(std140) uniform block2 { vec4 data2; };
+layout(std140) uniform block3 { vec4 data3; };
+layout(std140) uniform block4 { vec4 data4; };
+layout(std140) uniform block5 { vec4 data5; };
+layout(std140) uniform block6 { vec4 data6; };
+layout(std140) uniform block7 { vec4 data7; };
+layout(std140) uniform block8 { vec4 data8; };
+layout(std140) uniform block9 { vec4 data9; };
+
+void main() {
+    vec4 total = vec4(0.0);
+    total += data0;
+    total += data1;
+    total += data2;
+    total += data3;
+    total += data4;
+    total += data5;
+    total += data6;
+    total += data7;
+    total += data8;
+    total += data9;
+    gl_Position = vec4(total.xyz, 1.0);
+}
+    )";
+
+    constexpr char kFS[] = R"(#version 300 es
+precision highp float;
+out vec4 color;
+void main() {
+    color = vec4(1.0);
+}
+)";
+
+    ANGLE_GL_PROGRAM(program, kVS, kFS);
+    glUseProgram(program);
+
+    // Create a buffer and bind it as a COPY_READ_BUFFER.
+    GLBuffer buffer;
+    glBindBuffer(GL_COPY_READ_BUFFER, buffer);
+
+    // Use GL_DYNAMIC_DRAW and provide data to ensure it uses SYSTEM_MEMORY storage
+    // and sets it as mLatestBufferStorage.
+    std::vector<uint8_t> data(1024, 0);
+    glBufferData(GL_COPY_READ_BUFFER, 1024, data.data(), GL_DYNAMIC_DRAW);
+
+    // Bind the buffer as a UBO to all 10 slots.
+    for (int i = 0; i < 10; ++i)
+    {
+        glBindBufferBase(GL_UNIFORM_BUFFER, i, buffer);
+    }
+
+    // Map the buffer for reading. Since it's SYSTEM_MEMORY and we are mapping for read,
+    // it should allocate a STAGING buffer.
+    void *ptr = glMapBufferRange(GL_COPY_READ_BUFFER, 0, 1024, GL_MAP_READ_BIT);
+    ASSERT_NE(ptr, nullptr);
+
+    // Now perform a draw call.
+    // This will trigger StateManager11::syncUniformBuffersForShader.
+    // It will iterate through the 10 slots.
+    // For each slot, it calls Buffer11::getConstantBufferRange -> getBufferStorage(UNIFORM) ->
+    // garbageCollection. garbageCollection(UNIFORM) calls checkForDeallocation(STAGING). On the 9th
+    // slot, STAGING's idleness will be 9, exceeding the threshold of 8. checkForDeallocation would
+    // then attempt to delete the STAGING storage because latestStorage (SYSTEM_MEMORY) != storage
+    // (STAGING), however, it currently detects this and returns failure.
+    glDrawArrays(GL_POINTS, 0, 1);
+
+    // Now unmap. This calls Buffer11::unmap() which uses mMappedStorage and would formerly UAF on
+    // accessing mMappedBuffer.
+    glUnmapBuffer(GL_COPY_READ_BUFFER);
+
+    ASSERT_GL_ERROR(GL_INVALID_OPERATION);
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SimpleUniformBufferTest);
+ANGLE_INSTANTIATE_TEST_ES3(SimpleUniformBufferTest);
 
 }  // namespace

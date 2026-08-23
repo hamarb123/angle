@@ -9,23 +9,23 @@
 #include "angle_gl.h"
 #include "common/utilities.h"
 #include "compiler/translator/ImmutableStringBuilder.h"
+#include "compiler/translator/Name.h"
 #include "compiler/translator/StaticType.h"
 #include "compiler/translator/msl/AstHelpers.h"
 #include "compiler/translator/msl/DriverUniformMetal.h"
 #include "compiler/translator/msl/EmitMetal.h"
-#include "compiler/translator/msl/Name.h"
 #include "compiler/translator/msl/RewritePipelines.h"
 #include "compiler/translator/msl/SymbolEnv.h"
 #include "compiler/translator/msl/ToposortStructs.h"
 #include "compiler/translator/msl/UtilsMSL.h"
+#include "compiler/translator/tree_ops/AddDefaultReturnStatements.h"
 #include "compiler/translator/tree_ops/InitializeVariables.h"
 #include "compiler/translator/tree_ops/MonomorphizeUnsupportedFunctions.h"
 #include "compiler/translator/tree_ops/PreTransformTextureCubeGradDerivatives.h"
+#include "compiler/translator/tree_ops/ReduceInterfaceBlocks.h"
 #include "compiler/translator/tree_ops/RemoveAtomicCounterBuiltins.h"
-#include "compiler/translator/tree_ops/RemoveInactiveInterfaceVariables.h"
 #include "compiler/translator/tree_ops/RewriteArrayOfArrayOfOpaqueUniforms.h"
 #include "compiler/translator/tree_ops/RewriteAtomicCounters.h"
-#include "compiler/translator/tree_ops/RewriteCubeMapSamplersAs2DArray.h"
 #include "compiler/translator/tree_ops/RewriteDfdy.h"
 #include "compiler/translator/tree_ops/RewriteStructSamplers.h"
 #include "compiler/translator/tree_ops/SeparateStructFromUniformDeclarations.h"
@@ -34,14 +34,12 @@
 #include "compiler/translator/tree_ops/msl/FixTypeConstructors.h"
 #include "compiler/translator/tree_ops/msl/HoistConstants.h"
 #include "compiler/translator/tree_ops/msl/IntroduceVertexIndexID.h"
-#include "compiler/translator/tree_ops/msl/NameEmbeddedUniformStructsMetal.h"
-#include "compiler/translator/tree_ops/msl/ReduceInterfaceBlocks.h"
+#include "compiler/translator/tree_ops/msl/RescopeGlobalVariables.h"
 #include "compiler/translator/tree_ops/msl/RewriteCaseDeclarations.h"
 #include "compiler/translator/tree_ops/msl/RewriteInterpolants.h"
 #include "compiler/translator/tree_ops/msl/RewriteOutArgs.h"
 #include "compiler/translator/tree_ops/msl/RewriteUnaddressableReferences.h"
 #include "compiler/translator/tree_ops/msl/SeparateCompoundExpressions.h"
-#include "compiler/translator/tree_ops/msl/SeparateCompoundStructDeclarations.h"
 #include "compiler/translator/tree_ops/msl/WrapMain.h"
 #include "compiler/translator/tree_util/BuiltIn.h"
 #include "compiler/translator/tree_util/DriverUniform.h"
@@ -53,7 +51,6 @@
 #include "compiler/translator/tree_util/ReplaceVariable.h"
 #include "compiler/translator/tree_util/RunAtTheBeginningOfShader.h"
 #include "compiler/translator/tree_util/RunAtTheEndOfShader.h"
-#include "compiler/translator/tree_util/SpecializationConstant.h"
 #include "compiler/translator/util.h"
 
 namespace sh
@@ -64,12 +61,6 @@ namespace
 
 constexpr Name kFlippedPointCoordName("flippedPointCoord", SymbolType::AngleInternal);
 constexpr Name kFlippedFragCoordName("flippedFragCoord", SymbolType::AngleInternal);
-
-constexpr const TVariable kgl_VertexIDMetal(BuiltInId::gl_VertexID,
-                                            ImmutableString("gl_VertexID"),
-                                            SymbolType::BuiltIn,
-                                            TExtension::UNDEFINED,
-                                            StaticType::Get<EbtUInt, EbpHigh, EvqVertexID, 1, 1>());
 
 class DeclareStructTypesTraverser : public TIntermTraverser
 {
@@ -117,78 +108,6 @@ class DeclareStructTypesTraverser : public TIntermTraverser
     TOutputMSL *mOutputMSL;
 };
 
-class DeclareDefaultUniformsTraverser : public TIntermTraverser
-{
-  public:
-    DeclareDefaultUniformsTraverser(TInfoSinkBase *sink,
-                                    ShHashFunction64 hashFunction,
-                                    NameMap *nameMap)
-        : TIntermTraverser(true, true, true),
-          mSink(sink),
-          mHashFunction(hashFunction),
-          mNameMap(nameMap),
-          mInDefaultUniform(false)
-    {}
-
-    bool visitDeclaration(Visit visit, TIntermDeclaration *node) override
-    {
-        const TIntermSequence &sequence = *(node->getSequence());
-
-        // TODO(jmadill): Compound declarations.
-        ASSERT(sequence.size() == 1);
-
-        TIntermTyped *variable = sequence.front()->getAsTyped();
-        const TType &type      = variable->getType();
-        bool isUniform         = type.getQualifier() == EvqUniform && !type.isInterfaceBlock() &&
-                         !IsOpaqueType(type.getBasicType());
-
-        if (visit == PreVisit)
-        {
-            if (isUniform)
-            {
-                (*mSink) << "    " << GetTypeName(type, mHashFunction, mNameMap) << " ";
-                mInDefaultUniform = true;
-            }
-        }
-        else if (visit == InVisit)
-        {
-            mInDefaultUniform = isUniform;
-        }
-        else if (visit == PostVisit)
-        {
-            if (isUniform)
-            {
-                (*mSink) << ";\n";
-
-                // Remove the uniform declaration from the tree so it isn't parsed again.
-                TIntermSequence emptyReplacement;
-                mMultiReplacements.emplace_back(getParentNode()->getAsBlock(), node,
-                                                std::move(emptyReplacement));
-            }
-
-            mInDefaultUniform = false;
-        }
-        return true;
-    }
-
-    void visitSymbol(TIntermSymbol *symbol) override
-    {
-        if (mInDefaultUniform)
-        {
-            const ImmutableString &name = symbol->variable().name();
-            ASSERT(!gl::IsBuiltInName(name.data()));
-            (*mSink) << HashName(&symbol->variable(), mHashFunction, mNameMap)
-                     << ArrayString(symbol->getType());
-        }
-    }
-
-  private:
-    TInfoSinkBase *mSink;
-    ShHashFunction64 mHashFunction;
-    NameMap *mNameMap;
-    bool mInDefaultUniform;
-};
-
 // Declares a new variable to replace gl_DepthRange, its values are fed from a driver uniform.
 [[nodiscard]] bool ReplaceGLDepthRangeWithDriverUniform(TCompiler *compiler,
                                                         TIntermBlock *root,
@@ -226,7 +145,7 @@ TIntermSequence *GetMainSequence(TIntermBlock *root)
     TIntermSymbol *builtinRef = new TIntermSymbol(builtin);
 
     // Create a swizzle to "builtin.xy"
-    TVector<int> swizzleOffsetXY = {0, 1};
+    TVector<uint32_t> swizzleOffsetXY = {0, 1};
     TIntermSwizzle *builtinXY    = new TIntermSwizzle(builtinRef, swizzleOffsetXY);
 
     // Create a symbol reference to our new variable that will hold the modified builtin.
@@ -293,17 +212,16 @@ void AddFragColorDeclaration(TIntermBlock &root, TSymbolTable &symbolTable, cons
     root.insertChildNodes(FindMainIndex(&root), TIntermSequence{new TIntermDeclaration{&var}});
 }
 
-void AddFragDepthDeclaration(TIntermBlock &root, TSymbolTable &symbolTable)
+void AddBuiltInDeclaration(TIntermBlock &root, TSymbolTable &symbolTable, const TVariable &builtIn)
 {
     // Check if the variable has been already declared.
-    const TIntermSymbol *fragDepthBuiltIn = new TIntermSymbol(BuiltInVariable::gl_FragDepth());
-    const TIntermSymbol *fragDepthSymbol  = FindSymbolNode(&root, ImmutableString("gl_FragDepth"));
-    if (fragDepthSymbol && fragDepthSymbol->uniqueId() != fragDepthBuiltIn->uniqueId())
+    const TIntermSymbol *builtInSymbol = new TIntermSymbol(&builtIn);
+    const TIntermSymbol *foundSymbol   = FindSymbolNode(&root, builtIn.name());
+    if (foundSymbol && foundSymbol->uniqueId() != builtInSymbol->uniqueId())
     {
         return;
     }
-    root.insertChildNodes(FindMainIndex(&root),
-                          TIntermSequence{new TIntermDeclaration{BuiltInVariable::gl_FragDepth()}});
+    root.insertChildNodes(FindMainIndex(&root), TIntermSequence{new TIntermDeclaration{&builtIn}});
 }
 
 void AddFragDepthEXTDeclaration(TCompiler &compiler, TIntermBlock &root, TSymbolTable &symbolTable)
@@ -316,7 +234,7 @@ void AddFragDepthEXTDeclaration(TCompiler &compiler, TIntermBlock &root, TSymbol
     {
         return;
     }
-    AddFragDepthDeclaration(root, symbolTable);
+    AddBuiltInDeclaration(root, symbolTable, *BuiltInVariable::gl_FragDepth());
 }
 
 [[nodiscard]] bool AddNumSamplesDeclaration(TCompiler &compiler,
@@ -440,6 +358,28 @@ void AddFragDepthEXTDeclaration(TCompiler &compiler, TIntermBlock &root, TSymbol
                       new TType(EbtUInt, EbpHigh, EvqSampleMask, 1), SymbolType::AngleInternal);
     DeclareRightBeforeMain(root, *angleSampleMask);
 
+    // Write all-enabled sample mask even for single-sampled rendering
+    // when the shader uses derivatives to workaround a driver bug.
+    if (compiler.usesDerivatives())
+    {
+        TIntermBlock *helperAssignBlock = new TIntermBlock;
+        helperAssignBlock->appendStatement(new TIntermBinary(
+            EOpAssign, new TIntermSymbol(angleSampleMask), CreateUIntNode(0xFFFFFFFFu)));
+
+        TVariable *writeHelperSampleMaskVar =
+            new TVariable(&symbolTable, sh::ImmutableString(mtl::kWriteHelperSampleMaskConstName),
+                          StaticType::Get<EbtBool, EbpUndefined, EvqSpecConst, 1, 1>(),
+                          SymbolType::AngleInternal);
+
+        if (!RunAtTheBeginningOfShader(
+                &compiler, &root,
+                new TIntermIfElse(new TIntermSymbol(writeHelperSampleMaskVar), helperAssignBlock,
+                                  nullptr)))
+        {
+            return false;
+        }
+    }
+
     // ANGLE_metal_SampleMask = ANGLE_angleUniforms.coverageMask;
     TIntermBlock *block = new TIntermBlock;
     block->appendStatement(new TIntermBinary(EOpAssign, new TIntermSymbol(angleSampleMask),
@@ -505,7 +445,7 @@ void AddFragDepthEXTDeclaration(TCompiler &compiler, TIntermBlock &root, TSymbol
         // EXT_blend_func_extended usage, the exact variable may be unknown until the
         // program is linked.
         TVariable *alpha0 =
-            new TVariable(&symbolTable, sh::ImmutableString("_ALPHA0"),
+            new TVariable(&symbolTable, sh::ImmutableString("ALPHA0"),
                           StaticType::Get<EbtFloat, EbpUndefined, EvqSpecConst, 1, 1>(),
                           SymbolType::AngleInternal);
 
@@ -632,12 +572,13 @@ void AddFragDepthEXTDeclaration(TCompiler &compiler, TIntermBlock &root, TSymbol
     }
 
     // Sample mask assignment is guarded by ANGLEMultisampledRendering specialization constant
-    TVariable *sampleMaskEnabledVar = new TVariable(
+    TVariable *multisampledRenderingVar = new TVariable(
         &symbolTable, sh::ImmutableString(mtl::kMultisampledRenderingConstName),
         StaticType::Get<EbtBool, EbpUndefined, EvqSpecConst, 1, 1>(), SymbolType::AngleInternal);
     return RunAtTheEndOfShader(
         &compiler, &root,
-        new TIntermIfElse(new TIntermSymbol(sampleMaskEnabledVar), block, nullptr), &symbolTable);
+        new TIntermIfElse(new TIntermSymbol(multisampledRenderingVar), block, nullptr),
+        &symbolTable);
 }
 
 [[nodiscard]] bool AddFragDataDeclaration(TCompiler &compiler,
@@ -659,11 +600,9 @@ void AddFragDepthEXTDeclaration(TCompiler &compiler, TIntermBlock &root, TSymbol
     const char *name                 = secondary ? secondaryFragDataEXT : fragData;
     for (int i = 0; i < maxDrawBuffers; i++)
     {
-        ImmutableStringBuilder builder(strlen(name) + 3);
-        builder << name << "_";
-        builder.appendDecimal(i);
+        ImmutableString varName = BuildConcatenatedImmutableString(name, '_', i);
         const TVariable *glFragData =
-            new TVariable(&symbolTable, builder, gl_FragDataType, SymbolType::AngleInternal,
+            new TVariable(&symbolTable, varName, gl_FragDataType, SymbolType::AngleInternal,
                           TExtension::UNDEFINED);
         glFragDataSlots.push_back(glFragData);
         declareGLFragdataSequence.push_back(new TIntermDeclaration{glFragData});
@@ -727,7 +666,7 @@ void AddFragDepthEXTDeclaration(TCompiler &compiler, TIntermBlock &root, TSymbol
     TIntermSymbol *positionRef = new TIntermSymbol(position);
 
     // Create a swizzle to "gl_Position.y"
-    TVector<int> swizzleOffsetY;
+    TVector<uint32_t> swizzleOffsetY;
     swizzleOffsetY.push_back(1);
     TIntermSwizzle *positionY = new TIntermSwizzle(positionRef, swizzleOffsetY);
 
@@ -749,8 +688,9 @@ void AddFragDepthEXTDeclaration(TCompiler &compiler, TIntermBlock &root, TSymbol
 {
     ASSERT(shaderType == GL_VERTEX_SHADER || shaderType == GL_FRAGMENT_SHADER);
 
-    const TVariable *clipDistanceVar =
-        &FindSymbolNode(root, ImmutableString("gl_ClipDistance"))->variable();
+    const TIntermSymbol *symbolNode = FindSymbolNode(root, ImmutableString("gl_ClipDistance"));
+    ASSERT(symbolNode != nullptr);
+    const TVariable *clipDistanceVar = &symbolNode->variable();
 
     const bool fragment = shaderType == GL_FRAGMENT_SHADER;
     if (fragment)
@@ -761,12 +701,6 @@ void AddFragDepthEXTDeclaration(TCompiler &compiler, TIntermBlock &root, TSymbol
 
         const TVariable *globalVar = new TVariable(symbolTable, ImmutableString("ClipDistance"),
                                                    globalType, SymbolType::AngleInternal);
-        if (!compiler->isClipDistanceRedeclared())
-        {
-            TIntermDeclaration *globalDecl = new TIntermDeclaration();
-            globalDecl->appendDeclarator(new TIntermSymbol(globalVar));
-            root->insertStatement(0, globalDecl);
-        }
 
         if (!ReplaceVariable(compiler, root, clipDistanceVar, globalVar))
         {
@@ -777,20 +711,18 @@ void AddFragDepthEXTDeclaration(TCompiler &compiler, TIntermBlock &root, TSymbol
 
     TIntermBlock *assignBlock = new TIntermBlock();
     size_t index              = FindMainIndex(root);
-    TIntermSymbol *arraySym   = new TIntermSymbol(clipDistanceVar);
     TType *type = new TType(EbtFloat, EbpHigh, fragment ? EvqFragmentIn : EvqVertexOut, 1, 1);
-    for (uint8_t i = 0; i < compiler->getClipDistanceArraySize(); i++)
+    for (int i = 0; i < compiler->getClipDistanceArraySize(); i++)
     {
-        std::stringstream name;
-        name << "ClipDistance_" << static_cast<int>(i);
-        TIntermSymbol *varyingSym = new TIntermSymbol(new TVariable(
-            symbolTable, ImmutableString(name.str()), type, SymbolType::AngleInternal));
-
+        TVariable *varyingVar =
+            new TVariable(symbolTable, BuildConcatenatedImmutableString("ClipDistance_", i), type,
+                          SymbolType::AngleInternal);
         TIntermDeclaration *varyingDecl = new TIntermDeclaration();
-        varyingDecl->appendDeclarator(varyingSym);
+        varyingDecl->appendDeclarator(new TIntermSymbol(varyingVar));
         root->insertStatement(index++, varyingDecl);
-
-        TIntermTyped *arrayAccess = new TIntermBinary(EOpIndexDirect, arraySym, CreateIndexNode(i));
+        TIntermSymbol *varyingSym = new TIntermSymbol(varyingVar);
+        TIntermTyped *arrayAccess = new TIntermBinary(
+            EOpIndexDirect, new TIntermSymbol(clipDistanceVar), CreateIndexNode(i));
         assignBlock->appendStatement(new TIntermBinary(
             EOpAssign, fragment ? arrayAccess : varyingSym, fragment ? varyingSym : arrayAccess));
     }
@@ -863,7 +795,7 @@ bool TranslatorMSL::transformDepthBeforeCorrection(TIntermBlock *root,
     TIntermSymbol *positionRef = new TIntermSymbol(position);
 
     // Create a swizzle to "gl_Position.z"
-    TVector<int> swizzleOffsetZ = {2};
+    TVector<uint32_t> swizzleOffsetZ = {2};
     TIntermSwizzle *positionZ   = new TIntermSwizzle(positionRef, swizzleOffsetZ);
 
     // Create a ref to "zscale"
@@ -895,12 +827,12 @@ bool TranslatorMSL::appendVertexShaderDepthCorrectionToMain(
     const TVariable *position  = BuiltInVariable::gl_Position();
     TIntermSymbol *positionRef = new TIntermSymbol(position);
 
-    TVector<int> swizzleOffsetZ = {2};
+    TVector<uint32_t> swizzleOffsetZ = {2};
     TIntermSwizzle *positionZ   = new TIntermSwizzle(positionRef, swizzleOffsetZ);
 
     TIntermConstantUnion *oneHalf = CreateFloatNode(0.5f, EbpMedium);
 
-    TVector<int> swizzleOffsetW = {3};
+    TVector<uint32_t> swizzleOffsetW = {3};
     TIntermSwizzle *positionW   = new TIntermSwizzle(positionRef->deepCopy(), swizzleOffsetW);
 
     // Create the expression "(gl_Position.z + gl_Position.w) * 0.5".
@@ -941,26 +873,19 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
                                   TIntermBlock *root,
                                   const ShCompileOptions &compileOptions,
                                   PerformanceDiagnostics * /*perfDiagnostics*/,
-                                  SpecConst *specConst,
                                   DriverUniformMetal *driverUniforms)
 {
     TSymbolTable &symbolTable = getSymbolTable();
     IdGen idGen;
     ProgramPreludeConfig ppc(metalShaderTypeFromGLSL(getShaderType()));
+    ppc.usesDerivatives = usesDerivatives();
 
-    if (!WrapMain(*this, idGen, *root))
+    if (!sh::AddDefaultReturnStatements(this, root))
     {
         return false;
     }
 
-    // Remove declarations of inactive shader interface variables so glslang wrapper doesn't need to
-    // replace them.  Note: this is done before extracting samplers from structs, as removing such
-    // inactive samplers is not yet supported.  Note also that currently, CollectVariables marks
-    // every field of an active uniform that's of struct type as active, i.e. no extracted sampler
-    // is inactive.
-    if (!RemoveInactiveInterfaceVariables(this, root, &getSymbolTable(), getAttributes(),
-                                          getInputVaryings(), getOutputVariables(), getUniforms(),
-                                          getInterfaceBlocks(), false))
+    if (!WrapMain(*this, idGen, *root))
     {
         return false;
     }
@@ -981,6 +906,14 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
         }
     }
 
+    if (compileOptions.rescopeGlobalVariables)
+    {
+        if (!RescopeGlobalVariables(*this, *root))
+        {
+            return false;
+        }
+    }
+
     // If there are any function calls that take array-of-array of opaque uniform parameters, or
     // other opaque uniforms that need special handling in Vulkan, such as atomic counters,
     // monomorphize the functions by removing said parameters and replacing them in the function
@@ -991,31 +924,21 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
     // - It dramatically simplifies future transformations w.r.t to samplers in structs, array of
     //   arrays of opaque types, atomic counters etc.
     // - Avoids the need for shader*ArrayDynamicIndexing Vulkan features.
-    UnsupportedFunctionArgsBitSet args{UnsupportedFunctionArgs::StructContainingSamplers,
-                                       UnsupportedFunctionArgs::ArrayOfArrayOfSamplerOrImage,
-                                       UnsupportedFunctionArgs::AtomicCounter,
-                                       UnsupportedFunctionArgs::SamplerCubeEmulation,
-                                       UnsupportedFunctionArgs::Image};
-    if (!MonomorphizeUnsupportedFunctions(this, root, &getSymbolTable(), compileOptions, args))
+    if (!compileOptions.useIR)
     {
-        return false;
+        UnsupportedFunctionArgsBitSet args{UnsupportedFunctionArgs::StructContainingSamplers,
+                                           UnsupportedFunctionArgs::ArrayOfArrayOfSamplerOrImage,
+                                           UnsupportedFunctionArgs::AtomicCounter,
+                                           UnsupportedFunctionArgs::Image};
+        if (!MonomorphizeUnsupportedFunctions(this, root, &getSymbolTable(), args))
+        {
+            return false;
+        }
     }
 
     if (aggregateTypesUsedForUniforms > 0)
     {
-        if (!NameEmbeddedStructUniformsMetal(this, root, &symbolTable))
-        {
-            return false;
-        }
-
-        if (!SeparateStructFromUniformDeclarations(this, root, &getSymbolTable()))
-        {
-            return false;
-        }
-
-        int removedUniformsCount;
-
-        if (!RewriteStructSamplers(this, root, &getSymbolTable(), &removedUniformsCount))
+        if (!RewriteStructSamplers(this, root, &getSymbolTable()))
         {
             return false;
         }
@@ -1027,15 +950,6 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
     if (!RewriteArrayOfArrayOfOpaqueUniforms(this, root, &getSymbolTable()))
     {
         return false;
-    }
-
-    if (compileOptions.emulateSeamfulCubeMapSampling)
-    {
-        if (!RewriteCubeMapSamplersAs2DArray(this, root, &symbolTable,
-                                             getShaderType() == GL_FRAGMENT_SHADER))
-        {
-            return false;
-        }
     }
 
     if (getShaderVersion() >= 300 ||
@@ -1113,11 +1027,7 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
         }
         if (usesVertexId)
         {
-            if (!ReplaceVariable(this, root, BuiltInVariable::gl_VertexID(), &kgl_VertexIDMetal))
-            {
-                return false;
-            }
-            DeclareRightBeforeMain(*root, kgl_VertexIDMetal);
+            AddBuiltInDeclaration(*root, symbolTable, *BuiltInVariable::gl_VertexID());
         }
     }
     SymbolEnv symbolEnv(*this, *root);
@@ -1168,7 +1078,7 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
         bool usesFragDepth             = false;
         bool usesFragDepthEXT          = false;
         bool usesSecondaryFragColorEXT = false;
-        bool usesSecondaryFragDataEXT  = false;
+        bool usesSecondaryFragDataEXT  = symbolTable.isSecondaryFragDataUsed();
         for (const ShaderVariable &outputVarying : mOutputVariables)
         {
             if (outputVarying.isBuiltIn())
@@ -1192,10 +1102,6 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
                 else if (outputVarying.name == "gl_SecondaryFragColorEXT")
                 {
                     usesSecondaryFragColorEXT = true;
-                }
-                else if (outputVarying.name == "gl_SecondaryFragDataEXT")
-                {
-                    usesSecondaryFragDataEXT = true;
                 }
                 else if (outputVarying.name == "gl_SampleMask")
                 {
@@ -1223,7 +1129,7 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
 
         if (usesFragDepth)
         {
-            AddFragDepthDeclaration(*root, symbolTable);
+            AddBuiltInDeclaration(*root, symbolTable, *BuiltInVariable::gl_FragDepth());
         }
         else if (usesFragDepthEXT)
         {
@@ -1276,8 +1182,6 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
             }
         }
 
-        ASSERT(!usesSampleMask || isSampleMaskAllowed());
-
         if (usesPointCoord)
         {
             TIntermTyped *flipNegXY =
@@ -1305,8 +1209,7 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
             DeclareRightBeforeMain(*root, *fragCoord);
         }
 
-        if (!RewriteDfdy(this, root, &getSymbolTable(), getShaderVersion(), specConst,
-                         driverUniforms))
+        if (!RewriteDfdy(this, root, &getSymbolTable(), getShaderVersion(), driverUniforms))
         {
             return false;
         }
@@ -1345,21 +1248,21 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
     else if (getShaderType() == GL_VERTEX_SHADER)
     {
         DeclareRightBeforeMain(*root, *BuiltInVariable::gl_Position());
-
-        if (FindSymbolNode(root, BuiltInVariable::gl_PointSize()->name()))
+        // Always declare gl_PointSize to get [[point_size]] defined in case
+        // client draws with GL_POINTS.
         {
-            const TVariable *pointSize = static_cast<const TVariable *>(
-                getSymbolTable().findBuiltIn(ImmutableString("gl_PointSize"), getShaderVersion()));
+
+            const TVariable *pointSize = getShaderVersion() >= 300
+                                             ? BuiltInVariable::gl_PointSize300()
+                                             : BuiltInVariable::gl_PointSize();
             DeclareRightBeforeMain(*root, *pointSize);
-        }
-
-        if (FindSymbolNode(root, BuiltInVariable::gl_VertexIndex()->name()))
-        {
-            if (!ReplaceVariable(this, root, BuiltInVariable::gl_VertexIndex(), &kgl_VertexIDMetal))
+            TIntermBinary *defaultPointSize =
+                new TIntermBinary(TOperator::EOpAssign, new TIntermSymbol(pointSize),
+                                  CreateFloatNode(1.0f, pointSize->getType().getPrecision()));
+            if (!RunAtTheBeginningOfShader(this, root, defaultPointSize))
             {
                 return false;
             }
-            DeclareRightBeforeMain(*root, kgl_VertexIDMetal);
         }
 
         // Append a macro for transform feedback substitution prior to modifying depth.
@@ -1411,16 +1314,13 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
     }
     else if (getShaderType() == GL_FRAGMENT_SHADER)
     {
-        if (isSampleMaskAllowed())
+        mValidateASTOptions.validateVariableReferences = false;
+        if (!AddSampleMaskDeclaration(*this, *root, symbolTable, driverUniforms,
+                                      compileOptions.emulateAlphaToCoverage ||
+                                          compileOptions.metal.generateShareableShaders,
+                                      usesSampleMask))
         {
-            mValidateASTOptions.validateVariableReferences = false;
-            if (!AddSampleMaskDeclaration(*this, *root, symbolTable, driverUniforms,
-                                          compileOptions.emulateAlphaToCoverage ||
-                                              compileOptions.metal.generateShareableShaders,
-                                          usesSampleMask))
-            {
-                return false;
-            }
+            return false;
         }
     }
 
@@ -1443,13 +1343,7 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
         return false;
     }
 
-    const bool needsExplicitBoolCasts = compileOptions.addExplicitBoolCasts;
-    if (!AddExplicitTypeCasts(*this, *root, symbolEnv, needsExplicitBoolCasts))
-    {
-        return false;
-    }
-
-    if (!SeparateCompoundStructDeclarations(*this, idGen, *root, &getSymbolTable()))
+    if (!AddExplicitTypeCasts(*this, *root, symbolEnv))
     {
         return false;
     }
@@ -1459,7 +1353,8 @@ bool TranslatorMSL::translateImpl(TInfoSinkBase &sink,
         return false;
     }
 
-    if (!ReduceInterfaceBlocks(*this, *root, idGen, &getSymbolTable()))
+    if (!ReduceInterfaceBlocks(*this, *root,
+                               [&idGen]() { return idGen.createNewName().rawName(); }))
     {
         return false;
     }
@@ -1530,15 +1425,14 @@ bool TranslatorMSL::translate(TIntermBlock *root,
     }
 
     // TODO: refactor the code in TranslatorMSL to not issue raw function calls.
-    // http://anglebug.com/6059#c2
+    // http://anglebug.com/42264589#comment3
     mValidateASTOptions.validateNoRawFunctionCalls = false;
     // A validation error is generated in this backend due to bool uniforms.
     mValidateASTOptions.validatePrecision = false;
 
     TInfoSinkBase &sink = getInfoSink().obj;
-    SpecConst specConst(&getSymbolTable(), compileOptions, getShaderType());
     DriverUniformMetal driverUniforms(DriverUniformMode::Structure);
-    if (!translateImpl(sink, root, compileOptions, perfDiagnostics, &specConst, &driverUniforms))
+    if (!translateImpl(sink, root, compileOptions, perfDiagnostics, &driverUniforms))
     {
         return false;
     }

@@ -8,6 +8,7 @@
 //     https://github.com/google/skia/blob/master/tools/CrashHandler.cpp
 //
 
+#include "common/unsafe_buffers.h"
 #include "util/test_utils.h"
 
 #include "common/FixedVector.h"
@@ -115,7 +116,8 @@ void PrintStackBacktrace()
 
         int ok          = -1;
         char *demangled = abi::__cxa_demangle(mangled, nullptr, nullptr, &ok);
-        printf("    %s (+0x%zx)\n", ok == 0 ? demangled : mangled, (size_t)offset);
+        ANGLE_UNSAFE_TODO(
+            printf("    %s (+0x%zx)\n", ok == 0 ? demangled : mangled, (size_t)offset));
         if (ok)
         {
             free(demangled);
@@ -127,6 +129,7 @@ void PrintStackBacktrace()
 static void Handler(int sig)
 {
     printf("\nSignal %d:\n", sig);
+    fflush(stdout);
 
     if (gCrashHandlerCallback)
     {
@@ -134,6 +137,7 @@ static void Handler(int sig)
     }
 
     PrintStackBacktrace();
+    fflush(stdout);
 
     // Exit NOW.  Don't notify other threads, don't call anything registered with atexit().
     _Exit(sig);
@@ -262,11 +266,11 @@ bool ParseProcMaps(const std::string &input, MemoryRegionArray *regions_out)
         // The final %n term captures the offset in the input string, which is used
         // to determine the path name. It *does not* increment the return value.
         // Refer to man 3 sscanf for details.
-        if (sscanf(line, "%" SCNxPTR "-%" SCNxPTR " %4c %llx %hhx:%hhx %ld %n", &region.start,
-                   &region.end, permissions, &region.offset, &dev_major, &dev_minor, &inode,
-                   &path_index) < 7)
+        if (ANGLE_UNSAFE_TODO(sscanf(line, "%" SCNxPTR "-%" SCNxPTR " %4c %llx %hhx:%hhx %ld %n",
+                                     &region.start, &region.end, permissions, &region.offset,
+                                     &dev_major, &dev_minor, &inode, &path_index)) < 7)
         {
-            fprintf(stderr, "ParseProcMaps: sscanf failed for line: %s\n", line);
+            ANGLE_UNSAFE_TODO(fprintf(stderr, "ParseProcMaps: sscanf failed for line: %s\n", line));
             return false;
         }
 
@@ -294,7 +298,7 @@ bool ParseProcMaps(const std::string &input, MemoryRegionArray *regions_out)
 
         // Pushing then assigning saves us a string copy.
         regions.push_back(region);
-        regions.back().path.assign(line + path_index);
+        regions.back().path.assign(ANGLE_UNSAFE_TODO(line + path_index));
     }
 
     regions_out->swap(regions);
@@ -320,7 +324,7 @@ void SetBaseAddressesForMemoryRegions(MemoryRegionArray &regions)
         static_assert(SELFMAG <= sizeof(ElfW(Ehdr)), "SELFMAG too large");
         if ((r.permissions & MappedMemoryRegion::READ) &&
             safe_memcpy(&ehdr, r.start, sizeof(ElfW(Ehdr))) &&
-            memcmp(ehdr.e_ident, ELFMAG, SELFMAG) == 0)
+            ANGLE_UNSAFE_TODO(memcmp(ehdr.e_ident, ELFMAG, SELFMAG)) == 0)
         {
             switch (ehdr.e_type)
             {
@@ -431,14 +435,15 @@ const char *ResolveAddress(const MemoryRegionArray &regions,
         if (pathSlashPos != std::string::npos && region.path.substr(pathSlashPos) == baseModule)
         {
             uintptr_t scannedAddress;
-            int scanReturn = sscanf(address, "%" SCNxPTR, &scannedAddress);
+            int scanReturn = ANGLE_UNSAFE_TODO(sscanf(address, "%" SCNxPTR, &scannedAddress));
             ASSERT(scanReturn == 1);
             scannedAddress -= region.base;
             char printBuffer[255] = {};
-            size_t scannedSize    = sprintf(printBuffer, "0x%" PRIXPTR, scannedAddress);
+            size_t scannedSize =
+                ANGLE_UNSAFE_TODO(sprintf(printBuffer, "0x%" PRIXPTR, scannedAddress));
             size_t bufferSize     = buffer.size();
             buffer.resize(bufferSize + scannedSize + 1, 0);
-            memcpy(&buffer[bufferSize], printBuffer, scannedSize);
+            ANGLE_UNSAFE_TODO(memcpy(&buffer[bufferSize], printBuffer, scannedSize));
             return &buffer[bufferSize];
         }
     }
@@ -513,7 +518,7 @@ void PrintStackBacktrace()
 
     for (int i = 0; i < count; i++)
     {
-        char *symbol = symbols[i];
+        char *symbol = ANGLE_UNSAFE_TODO(symbols[i]);
 
         // symbol looks like the following:
         //
@@ -522,15 +527,15 @@ void PrintStackBacktrace()
         // If module is not an absolute path, it needs to be resolved.
 
         char *module  = symbol;
-        char *address = strchr(symbol, '[') + 1;
+        char *address = ANGLE_UNSAFE_TODO(strchr(symbol, '[') + 1);
 
-        *strchr(module, '(')  = 0;
-        *strchr(address, ']') = 0;
+        *ANGLE_UNSAFE_TODO(strchr(module, '('))  = 0;
+        *ANGLE_UNSAFE_TODO(strchr(address, ']')) = 0;
 
         // If module is the same as last, continue batching addresses.  If commandLineArgs has
         // reached its capacity however, make the call to addr2line already.  Note that there should
         // be one entry left for the terminating nullptr at the end of the command line args.
-        if (strcmp(module, currentModule) == 0 &&
+        if (ANGLE_UNSAFE_TODO(strcmp(module, currentModule)) == 0 &&
             commandLineArgs.size() + 1 < commandLineArgs.max_size())
         {
             commandLineArgs.push_back(
@@ -584,7 +589,7 @@ void PrintStackBacktrace()
                 // This will resolve `./out/Debug/angle_end2end_tests` to
                 // `/home/user/angle/out/Debug/angle_end2end_tests` when CWD is
                 // `/home/user/angle/out/Debug`, which is caused by ScopedVkLoaderEnvironment.
-                // This is required for printing traces during RendererVk init.
+                // This is required for printing traces during vk::Renderer init.
                 // Since we do not store the initial CWD globally we need to reconstruct here
                 // by removing the overlapping path.
                 std::string removeOverlappingPath = RemoveOverlappingPath(resolvedModule);
@@ -646,7 +651,7 @@ void PrintStackBacktrace()
 
 static void Handler(int sig)
 {
-    printf("\nSignal %d [%s]:\n", sig, strsignal(sig));
+    ANGLE_UNSAFE_TODO(printf("\nSignal %d [%s]:\n", sig, strsignal(sig)));
 
     if (gCrashHandlerCallback)
     {

@@ -87,9 +87,16 @@ def check_trace_before_upload(trace):
             jtrace = json.load(f)
         additional_files = set([trace_json, trace + '.angledata.gz'])
         extra_files = set(files) - set(jtrace['TraceFiles']) - additional_files
+        required_extensions = 'RequiredExtensions' in jtrace
         if extra_files:
             logging.error('Unexpected files, not listed in %s.json [TraceFiles]:\n%s', trace,
                           '\n'.join(extra_files))
+        if not required_extensions:
+            logging.error(
+                '"RequiredExtensions" missing from %s.json. Please run retrace_restricted_traces.py with "get_min_reqs":\n'
+                '  ./src/tests/restricted_traces/retrace_restricted_traces.py get_min_reqs out/LinuxDebug --traces "%s"\n',
+                trace, trace)
+        if extra_files or not required_extensions:
             sys.exit(1)
 
 
@@ -104,7 +111,9 @@ def main(args):
     trace_versions = {}
     with futures.ThreadPoolExecutor(max_workers=args.threads) as executor:
         for trace_info in traces['traces']:
-            trace, trace_version = trace_info.split(' ')
+            parts = trace_info.split(' ')
+            trace = parts[0]
+            trace_version = parts[1]
             trace_versions[trace] = trace_version
             if args.filter and not fnmatch.fnmatch(trace, args.filter):
                 logging.debug('Skipping %s because it does not match the test filter.' % trace)

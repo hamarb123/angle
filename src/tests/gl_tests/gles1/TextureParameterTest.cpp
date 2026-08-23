@@ -6,6 +6,7 @@
 
 // TextureParameterTest.cpp: Tests GLES1-specific usage of glTexParameter.
 
+#include "common/unsafe_buffers.h"
 #include "test_utils/ANGLETest.h"
 #include "test_utils/gl_raii.h"
 
@@ -75,9 +76,13 @@ TEST_P(TextureParameterTest, NegativeEnum)
     glGetTexParameteriv(GL_TEXTURE_2D, 0, nullptr);
     EXPECT_GL_ERROR(GL_INVALID_ENUM);
 
-    // Not enough buffer
+    // Non-vector command for a vector param
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_CROP_RECT_OES, 3);
+    EXPECT_GL_ERROR(GL_INVALID_ENUM);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_CROP_RECT_OES, 3);
-    EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+    EXPECT_GL_ERROR(GL_INVALID_ENUM);
+    glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_CROP_RECT_OES, 3);
+    EXPECT_GL_ERROR(GL_INVALID_ENUM);
 
     // Not supported in GLES1
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
@@ -107,7 +112,7 @@ TEST_P(TextureParameterTest, Set)
 
     for (int i = 0; i < 4; i++)
     {
-        EXPECT_EQ(cropRect[i], params[i]);
+        ANGLE_UNSAFE_TODO(EXPECT_EQ(cropRect[i], params[i]));
     }
 }
 
@@ -161,6 +166,17 @@ TEST_P(TextureParameterTest, SetFixedPoint)
     glGetTexParameterxv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, params.data());
     EXPECT_GL_NO_ERROR();
     EXPECT_EQ(GL_LINEAR, params[0]);
+
+    if (IsGLExtensionEnabled("GL_OES_texture_mirrored_repeat"))
+    {
+        glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+        EXPECT_GL_NO_ERROR();
+    }
+    else
+    {
+        glTexParameterx(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+        EXPECT_GL_ERROR(GL_INVALID_ENUM);
+    }
 }
 
 ANGLE_INSTANTIATE_TEST_ES1(TextureParameterTest);

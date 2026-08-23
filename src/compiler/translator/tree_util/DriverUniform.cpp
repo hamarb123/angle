@@ -14,7 +14,6 @@
 #include "compiler/translator/SymbolTable.h"
 #include "compiler/translator/tree_util/FindMain.h"
 #include "compiler/translator/tree_util/IntermNode_util.h"
-#include "compiler/translator/tree_util/IntermTraverse.h"
 #include "compiler/translator/util.h"
 
 namespace sh
@@ -22,16 +21,13 @@ namespace sh
 
 namespace
 {
-constexpr ImmutableString kEmulatedDepthRangeParams = ImmutableString("ANGLEDepthRangeParams");
-constexpr ImmutableString kDriverUniformsBlockName  = ImmutableString("ANGLEUniformBlock");
-constexpr ImmutableString kDriverUniformsVarName    = ImmutableString("ANGLEUniforms");
 
-constexpr const char kAcbBufferOffsets[] = "acbBufferOffsets";
 constexpr const char kDepthRange[]       = "depthRange";
 constexpr const char kRenderArea[]       = "renderArea";
 constexpr const char kFlipXY[]           = "flipXY";
-constexpr const char kDither[]           = "dither";
 constexpr const char kMisc[]             = "misc";
+constexpr const char kBaseInstance[]     = "baseInstance";
+constexpr const char kAcbBufferOffsets[] = "acbBufferOffsets";
 
 // Extended uniforms
 constexpr const char kXfbBufferOffsets[]       = "xfbBufferOffsets";
@@ -69,9 +65,11 @@ bool DriverUniform::addComputeDriverUniformsToShader(TIntermBlock *root, TSymbol
     layoutQualifier.blockStorage     = EbsStd140;
     layoutQualifier.pushConstant     = true;
 
-    mDriverUniforms = DeclareInterfaceBlock(root, symbolTable, driverFieldList, EvqUniform,
-                                            layoutQualifier, TMemoryQualifier::Create(), 0,
-                                            kDriverUniformsBlockName, kDriverUniformsVarName);
+    const TInterfaceBlock *interfaceBlock = DeclareInterfaceBlock(
+        symbolTable, driverFieldList, layoutQualifier, kDriverUniformsBlockName);
+    mDriverUniforms = DeclareInterfaceBlockVariable(root, symbolTable, EvqUniform, interfaceBlock,
+                                                    layoutQualifier, TMemoryQualifier::Create(), 0,
+                                                    kDriverUniformsVarName);
     return mDriverUniforms != nullptr;
 }
 
@@ -79,30 +77,30 @@ TFieldList *DriverUniform::createUniformFields(TSymbolTable *symbolTable)
 {
     constexpr size_t kNumGraphicsDriverUniforms                                                = 6;
     constexpr std::array<const char *, kNumGraphicsDriverUniforms> kGraphicsDriverUniformNames = {{
-        kAcbBufferOffsets,
         kDepthRange,
         kRenderArea,
         kFlipXY,
-        kDither,
         kMisc,
+        kBaseInstance,
+        kAcbBufferOffsets,
     }};
 
     // This field list mirrors the structure of GraphicsDriverUniforms in ContextVk.cpp.
     TFieldList *driverFieldList = new TFieldList;
 
     const std::array<TType *, kNumGraphicsDriverUniforms> kDriverUniformTypes = {{
-        // acbBufferOffsets: Packed ubyte8
-        new TType(EbtUInt, EbpHigh, EvqGlobal, 2),
         // depthRange: Near and far depth
         new TType(EbtFloat, EbpHigh, EvqGlobal, 2),
         // renderArea: Packed ushort2
         new TType(EbtUInt, EbpHigh, EvqGlobal),
         // flipXY: Packed snorm4
         new TType(EbtUInt, EbpHigh, EvqGlobal),
-        // dither: ushort
-        new TType(EbtUInt, EbpHigh, EvqGlobal),
         // misc: Various bits of state
         new TType(EbtUInt, EbpHigh, EvqGlobal),
+        // baseInstance: int
+        new TType(EbtInt, EbpHigh, EvqGlobal),
+        // acbBufferOffsets: Packed ubyte8
+        new TType(EbtUInt, EbpHigh, EvqGlobal, 2),
     }};
 
     for (size_t uniformIndex = 0; uniformIndex < kNumGraphicsDriverUniforms; ++uniformIndex)
@@ -170,9 +168,11 @@ bool DriverUniform::addGraphicsDriverUniformsToShader(TIntermBlock *root, TSymbo
         layoutQualifier.blockStorage     = EbsStd140;
         layoutQualifier.pushConstant     = true;
 
-        mDriverUniforms = DeclareInterfaceBlock(root, symbolTable, driverFieldList, EvqUniform,
-                                                layoutQualifier, TMemoryQualifier::Create(), 0,
-                                                kDriverUniformsBlockName, kDriverUniformsVarName);
+        const TInterfaceBlock *interfaceBlock = DeclareInterfaceBlock(
+            symbolTable, driverFieldList, layoutQualifier, kDriverUniformsBlockName);
+        mDriverUniforms = DeclareInterfaceBlockVariable(
+            root, symbolTable, EvqUniform, interfaceBlock, layoutQualifier,
+            TMemoryQualifier::Create(), 0, kDriverUniformsVarName);
     }
     else
     {
@@ -192,6 +192,8 @@ bool DriverUniform::addGraphicsDriverUniformsToShader(TIntermBlock *root, TSymbo
 
 TIntermTyped *DriverUniform::createDriverUniformRef(const char *fieldName) const
 {
+    ASSERT(mDriverUniforms);
+
     size_t fieldIndex = 0;
     if (mMode == DriverUniformMode::InterfaceBlock)
     {
@@ -284,9 +286,8 @@ TIntermTyped *DriverUniform::getHalfRenderArea() const
 TIntermTyped *DriverUniform::getFlipXY(TSymbolTable *symbolTable, DriverUniformFlip stage) const
 {
     TIntermTyped *flipXY = createDriverUniformRef(kFlipXY);
-    TIntermTyped *values = CreateBuiltInUnaryFunctionCallNode(
-        "unpackSnorm4x8", flipXY, *symbolTable,
-        GetESSLOrGLSLVersion(symbolTable->getShaderSpec(), 310, 400));
+    TIntermTyped *values =
+        CreateBuiltInUnaryFunctionCallNode("unpackSnorm4x8", flipXY, *symbolTable, 310);
 
     if (stage == DriverUniformFlip::Fragment)
     {
@@ -304,11 +305,6 @@ TIntermTyped *DriverUniform::getNegFlipXY(TSymbolTable *symbolTable, DriverUnifo
     return new TIntermBinary(EOpMul, flipXY, CreateVecNode(kMultiplier.data(), 2, EbpLow));
 }
 
-TIntermTyped *DriverUniform::getDither() const
-{
-    return createDriverUniformRef(kDither);
-}
-
 TIntermTyped *DriverUniform::getSwapXY() const
 {
     TIntermTyped *miscRef = createDriverUniformRef(kMisc);
@@ -320,6 +316,11 @@ TIntermTyped *DriverUniform::getSwapXY() const
     };
     return TIntermAggregate::CreateConstructor(*StaticType::GetBasic<EbtBool, EbpUndefined>(),
                                                &args);
+}
+
+TIntermTyped *DriverUniform::getBaseInstance() const
+{
+    return createDriverUniformRef(kBaseInstance);
 }
 
 TIntermTyped *DriverUniform::getAdvancedBlendEquation() const
@@ -381,6 +382,22 @@ TIntermTyped *DriverUniform::getAlphaToCoverage() const
 
     TIntermSequence args = {
         alphaToCoverage,
+    };
+    return TIntermAggregate::CreateConstructor(*StaticType::GetBasic<EbtBool, EbpUndefined>(),
+                                               &args);
+}
+
+TIntermTyped *DriverUniform::getLayeredFramebuffer() const
+{
+    TIntermTyped *miscRef            = createDriverUniformRef(kMisc);
+    TIntermTyped *layeredFramebuffer = new TIntermBinary(
+        EOpBitShiftRight, miscRef, CreateUIntNode(vk::kDriverUniformsMiscLayeredFramebufferOffset));
+    layeredFramebuffer =
+        new TIntermBinary(EOpBitwiseAnd, layeredFramebuffer,
+                          CreateUIntNode(vk::kDriverUniformsMiscLayeredFramebufferMask));
+
+    TIntermSequence args = {
+        layeredFramebuffer,
     };
     return TIntermAggregate::CreateConstructor(*StaticType::GetBasic<EbtBool, EbpUndefined>(),
                                                &args);

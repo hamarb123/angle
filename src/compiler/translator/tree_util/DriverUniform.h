@@ -43,6 +43,10 @@ enum class DriverUniformFlip
     PreFragment,
 };
 
+constexpr ImmutableString kEmulatedDepthRangeParams = ImmutableString("ANGLEDepthRangeParams");
+constexpr ImmutableString kDriverUniformsBlockName  = ImmutableString("ANGLEUniformBlock");
+constexpr ImmutableString kDriverUniformsVarName    = ImmutableString("ANGLEUniforms");
+
 class DriverUniform
 {
   public:
@@ -61,13 +65,14 @@ class DriverUniform
     TIntermTyped *getFlipXY(TSymbolTable *symbolTable, DriverUniformFlip stage) const;
     // Returns vec2(flip.x, -flip.y)
     TIntermTyped *getNegFlipXY(TSymbolTable *symbolTable, DriverUniformFlip stage) const;
-    TIntermTyped *getDither() const;
     TIntermTyped *getSwapXY() const;
+    TIntermTyped *getBaseInstance() const;
     TIntermTyped *getAdvancedBlendEquation() const;
     TIntermTyped *getNumSamples() const;
     TIntermTyped *getClipDistancesEnabled() const;
     TIntermTyped *getTransformDepth() const;
     TIntermTyped *getAlphaToCoverage() const;
+    TIntermTyped *getLayeredFramebuffer() const;
 
     virtual TIntermTyped *getViewport() const { return nullptr; }
     virtual TIntermTyped *getXfbBufferOffsets() const { return nullptr; }

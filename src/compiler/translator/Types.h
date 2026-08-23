@@ -9,11 +9,13 @@
 
 #include "common/angleutils.h"
 #include "common/debug.h"
+#include "common/span.h"
 
 #include "compiler/translator/BaseTypes.h"
 #include "compiler/translator/Common.h"
 #include "compiler/translator/ImmutableString.h"
 #include "compiler/translator/SymbolUniqueId.h"
+#include "compiler/translator/ir/src/builder.h"
 
 namespace sh
 {
@@ -25,7 +27,6 @@ class TStructure;
 class TSymbol;
 class TVariable;
 class TIntermSymbol;
-class TSymbolTable;
 
 class TField : angle::NonCopyable
 {
@@ -63,6 +64,7 @@ class TFieldListCollection : angle::NonCopyable
     bool containsMatrices() const;
     bool containsType(TBasicType t) const;
     bool containsSamplers() const;
+    bool containsOnlySamplers() const;
 
     size_t objectSize() const;
     // How many locations the field list consumes as a uniform.
@@ -108,7 +110,7 @@ class TType
                     TQualifier q,
                     uint8_t ps,
                     uint8_t ss,
-                    const TSpan<const unsigned int> arraySizes,
+                    const angle::Span<const unsigned int> arraySizes,
                     const char *mangledName)
         : type(t),
           precision(p),
@@ -169,11 +171,11 @@ class TType
     bool isInterpolant() const { return interpolant; }
     void setInterpolant(bool i) { interpolant = i; }
 
-    TMemoryQualifier getMemoryQualifier() const { return memoryQualifier; }
+    const TMemoryQualifier &getMemoryQualifier() const { return memoryQualifier; }
     void setMemoryQualifier(const TMemoryQualifier &mq) { memoryQualifier = mq; }
 
-    TLayoutQualifier getLayoutQualifier() const { return layoutQualifier; }
-    void setLayoutQualifier(TLayoutQualifier lq) { layoutQualifier = lq; }
+    const TLayoutQualifier &getLayoutQualifier() const { return layoutQualifier; }
+    void setLayoutQualifier(const TLayoutQualifier &lq) { layoutQualifier = lq; }
 
     uint8_t getNominalSize() const { return primarySize; }
     uint8_t getSecondarySize() const { return secondarySize; }
@@ -201,7 +203,7 @@ class TType
     bool isArray() const { return !mArraySizes.empty(); }
     bool isArrayOfArrays() const { return mArraySizes.size() > 1u; }
     size_t getNumArraySizes() const { return mArraySizes.size(); }
-    const TSpan<const unsigned int> &getArraySizes() const { return mArraySizes; }
+    const angle::Span<const unsigned int> &getArraySizes() const { return mArraySizes; }
     unsigned int getArraySizeProduct() const;
     bool isUnsizedArray() const;
     unsigned int getOutermostArraySize() const
@@ -212,14 +214,14 @@ class TType
     void makeArray(unsigned int s);
 
     // sizes contain new outermost array sizes.
-    void makeArrays(const TSpan<const unsigned int> &sizes);
+    void makeArrays(const angle::Span<const unsigned int> &sizes);
     // Here, the array dimension value 0 corresponds to the innermost array.
     void setArraySize(size_t arrayDimension, unsigned int s);
 
     // Will set unsized array sizes according to newArraySizes. In case there are more
     // unsized arrays than there are sizes in newArraySizes, defaults to setting any
     // remaining array sizes to 1.
-    void sizeUnsizedArrays(const TSpan<const unsigned int> &newArraySizes);
+    void sizeUnsizedArrays(const angle::Span<const unsigned int> &newArraySizes);
 
     // Will size the outermost array according to arraySize.
     void sizeOutermostUnsizedArray(unsigned int arraySize);
@@ -251,8 +253,10 @@ class TType
     {
         return primarySize == 1 && secondarySize == 1 && !mStructure && isArray();
     }
+    bool isScalarBool() const { return isScalar() && type == EbtBool; }
     bool isScalarFloat() const { return isScalar() && type == EbtFloat; }
     bool isScalarInt() const { return isScalar() && (type == EbtInt || type == EbtUInt); }
+    bool isSignedInt() const { return type == EbtInt; }
 
     bool canBeConstructed() const;
 
@@ -304,7 +308,13 @@ class TType
                 return mArraySizes[i] < right.mArraySizes[i];
         }
         if (mStructure != right.mStructure)
+        {
             return mStructure < right.mStructure;
+        }
+        if (mInterfaceBlock != right.mInterfaceBlock)
+        {
+            return mInterfaceBlock < right.mInterfaceBlock;
+        }
 
         return false;
     }
@@ -330,15 +340,18 @@ class TType
     // deepest field (nesting2.field1.position).
     int getDeepestStructNesting() const;
 
-    bool isNamelessStruct() const;
-
     bool isStructureContainingArrays() const;
     bool isStructureContainingMatrices() const;
     bool isStructureContainingType(TBasicType t) const;
     bool isStructureContainingSamplers() const;
+    bool isStructureContainingOnlySamplers() const;
     bool isInterfaceBlockContainingType(TBasicType t) const;
 
     bool isStructSpecifier() const { return mIsStructSpecifier; }
+
+    // Whether matrix packing is applicable to this type.  Other types should not have a matrix
+    // packing.
+    bool isMatrixPackingApplicable() const { return isMatrix() || isStructureContainingMatrices(); }
 
     // Return true if variables of this type should be replaced with an inline constant value if
     // such is available. False will be returned in cases where output doesn't support
@@ -346,27 +359,23 @@ class TType
     // several copies of it in the output code is undesirable for performance.
     bool canReplaceWithConstantUnion() const;
 
-    // The char arrays passed in must be pool allocated or static.
-    void createSamplerSymbols(const ImmutableString &namePrefix,
-                              const TString &apiNamePrefix,
-                              TVector<const TVariable *> *outputSymbols,
-                              TMap<const TVariable *, TString> *outputSymbolsToAPINames,
-                              TSymbolTable *symbolTable) const;
-
     // Initializes all lazily-initialized members.
     void realize();
 
     bool isSampler() const { return IsSampler(type); }
     bool isSamplerCube() const { return type == EbtSamplerCube; }
     bool isAtomicCounter() const { return IsAtomicCounter(type); }
-    bool isSamplerVideoWEBGL() const { return type == EbtSamplerVideoWEBGL; }
     bool isImage() const { return IsImage(type); }
     bool isPixelLocal() const { return IsPixelLocal(type); }
+
+    void setTypeId(ir::TypeId typeId) { mTypeId = typeId; }
+    ir::TypeId typeId() const { return mTypeId; }
+    bool isTypeIdSet() const { return ir::IsTypeIdValid(mTypeId); }
 
   private:
     constexpr void invalidateMangledName() { mMangledName = nullptr; }
     const char *buildMangledName() const;
-    constexpr void onArrayDimensionsChange(const TSpan<const unsigned int> &sizes)
+    constexpr void onArrayDimensionsChange(const angle::Span<const unsigned int> &sizes)
     {
         mArraySizes = sizes;
         invalidateMangledName();
@@ -386,7 +395,7 @@ class TType
 
     // Used to make an array type. Outermost array size is stored at the end of the vector. Having 0
     // in this vector means an unsized array.
-    TSpan<const unsigned int> mArraySizes;
+    angle::Span<const unsigned int> mArraySizes;
     // Storage for mArraySizes, if any.  This is usually the case, except for constexpr TTypes which
     // only have a valid mArraySizes (with mArraySizesStorage being nullptr).  Therefore, all
     // modifications to array sizes happen on the storage (and if dimensions change, mArraySizes is
@@ -408,6 +417,8 @@ class TType
     size_t mInterfaceBlockFieldIndex;
 
     mutable const char *mMangledName;
+
+    ir::TypeId mTypeId = ir::kInvalidTypeId;
 };
 
 // TTypeSpecifierNonArray stores all of the necessary fields for type_specifier_nonarray from the
@@ -421,7 +432,12 @@ struct TTypeSpecifierNonArray
     TSourceLoc line;
 
     // true if the type was defined by a struct specifier rather than a reference to a type name.
+    // Some structs may be hoisted out to be declared separately during parse and would have
+    // |isStructSpecifier == false|.  However, validation may still need to know if there was a
+    // struct defined in an invalid location, so |isStructSpecifierForValidation| would be true even
+    // if the type itself is no longer expected to declare the struct.
     bool isStructSpecifier;
+    bool isStructSpecifierForValidation;
 
     void initialize(TBasicType aType, const TSourceLoc &aLine)
     {
@@ -432,18 +448,22 @@ struct TTypeSpecifierNonArray
         userDef           = nullptr;
         line              = aLine;
         isStructSpecifier = false;
+        isStructSpecifierForValidation = false;
     }
 
     void initializeStruct(const TStructure *aUserDef,
                           bool aIsStructSpecifier,
+                          bool aIsStructSpecifierForValidation,
                           const TSourceLoc &aLine)
     {
+        ASSERT(!aIsStructSpecifier || aIsStructSpecifierForValidation);
         type              = EbtStruct;
         primarySize       = 1;
         secondarySize     = 1;
         userDef           = aUserDef;
         line              = aLine;
         isStructSpecifier = aIsStructSpecifier;
+        isStructSpecifierForValidation = aIsStructSpecifierForValidation;
     }
 
     void setAggregate(uint8_t size) { primarySize = size; }
@@ -460,15 +480,9 @@ struct TTypeSpecifierNonArray
     bool isVector() const { return primarySize > 1 && secondarySize == 1; }
 };
 
-//
-// This is a workaround for a problem with the yacc stack,  It can't have
-// types that it thinks have non-trivial constructors.  It should
-// just be used while recognizing the grammar, not anything else.  Pointers
-// could be used, but also trying to avoid lots of memory management overhead.
-//
-// Not as bad as it looks, there is no actual assumption that the fields
-// match up or are name the same or anything like that.
-//
+// Type representing parsed type specifier on a struct or variable declaration or
+// parameter declaration.
+// Note: must be trivially constructible.
 struct TPublicType
 {
     // Must have a trivial default constructor since it is used in YYSTYPE.
@@ -476,9 +490,14 @@ struct TPublicType
 
     void initialize(const TTypeSpecifierNonArray &typeSpecifier, TQualifier q);
     void initializeBasicType(TBasicType basicType);
+    const char *getBasicString() const { return sh::getBasicString(getBasicType()); }
 
     TBasicType getBasicType() const { return typeSpecifierNonArray.type; }
     void setBasicType(TBasicType basicType) { typeSpecifierNonArray.type = basicType; }
+    void setQualifier(TQualifier value) { qualifier = value; }
+    void setPrecision(TPrecision value) { precision = value; }
+    void setMemoryQualifier(const TMemoryQualifier &value) { memoryQualifier = value; }
+    void setPrecise(bool value) { precise = value; }
 
     uint8_t getPrimarySize() const { return typeSpecifierNonArray.primarySize; }
     uint8_t getSecondarySize() const { return typeSpecifierNonArray.secondarySize; }
@@ -487,6 +506,10 @@ struct TPublicType
     const TSourceLoc &getLine() const { return typeSpecifierNonArray.line; }
 
     bool isStructSpecifier() const { return typeSpecifierNonArray.isStructSpecifier; }
+    bool isStructSpecifierForValidation() const
+    {
+        return typeSpecifierNonArray.isStructSpecifierForValidation;
+    }
 
     bool isStructureContainingArrays() const;
     bool isStructureContainingType(TBasicType t) const;
@@ -494,6 +517,9 @@ struct TPublicType
     bool isArray() const;
     void clearArrayness();
     bool isAggregate() const;
+    bool isUnsizedArray() const;
+    void sizeUnsizedArrays();
+    void makeArrays(TVector<unsigned int> *sizes);
 
     TTypeSpecifierNonArray typeSpecifierNonArray;
     TLayoutQualifier layoutQualifier;

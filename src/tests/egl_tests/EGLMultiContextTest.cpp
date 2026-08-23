@@ -7,6 +7,7 @@
 //   Tests relating to multiple non-shared Contexts.
 
 #include <gtest/gtest.h>
+#include "common/unsafe_buffers.h"
 
 #include "test_utils/ANGLETest.h"
 #include "test_utils/MultiThreadSteps.h"
@@ -34,7 +35,10 @@ EGLBoolean SafeDestroyContext(EGLDisplay display, EGLContext &context)
 class EGLMultiContextTest : public ANGLETest<>
 {
   public:
-    EGLMultiContextTest() : mContexts{EGL_NO_CONTEXT, EGL_NO_CONTEXT}, mTexture(0) {}
+    EGLMultiContextTest() : mContexts{EGL_NO_CONTEXT, EGL_NO_CONTEXT}, mTexture(0)
+    {
+        setPbuffer(true);
+    }
 
     void testTearDown() override
     {
@@ -115,6 +119,12 @@ class EGLMultiContextTest : public ANGLETest<>
         Flush,
         Finish,
     };
+
+    bool hasFenceSyncExtension() const
+    {
+        return IsEGLDisplayExtensionEnabled(getEGLWindow()->getDisplay(), "EGL_KHR_fence_sync");
+    }
+
     void testFenceWithOpenRenderPass(FenceTest test, FlushMethod flushMethod);
 
     EGLContext mContexts[2];
@@ -203,11 +213,11 @@ TEST_P(EGLMultiContextTest, ComputeShaderOkayWithRendering)
 
     for (size_t t = 0; t < kThreadCount; ++t)
     {
-        surface[t] = eglCreatePbufferSurface(dpy, config, pbufferAttributes);
+        ANGLE_UNSAFE_TODO(surface[t]) = eglCreatePbufferSurface(dpy, config, pbufferAttributes);
         EXPECT_EGL_SUCCESS();
 
-        ctx[t] = window->createContext(EGL_NO_CONTEXT, nullptr);
-        EXPECT_NE(EGL_NO_CONTEXT, ctx[t]);
+        ANGLE_UNSAFE_TODO(ctx[t]) = window->createContext(EGL_NO_CONTEXT, nullptr);
+        ANGLE_UNSAFE_TODO(EXPECT_NE(EGL_NO_CONTEXT, ctx[t]));
     }
 
     // Synchronization tools to ensure the two threads are interleaved as designed by this test.
@@ -339,8 +349,8 @@ void main()
     EXPECT_EGL_TRUE(eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT));
     for (size_t t = 0; t < kThreadCount; ++t)
     {
-        eglDestroySurface(dpy, surface[t]);
-        eglDestroyContext(dpy, ctx[t]);
+        eglDestroySurface(dpy, ANGLE_UNSAFE_TODO(surface[t]));
+        eglDestroyContext(dpy, ANGLE_UNSAFE_TODO(ctx[t]));
     }
 }
 
@@ -358,15 +368,19 @@ TEST_P(EGLMultiContextTest, RepeatedEglInitAndTerminate)
     EGLDisplay dpy;
     EGLSurface srf;
     EGLContext ctx;
-    EGLint dispattrs[] = {EGL_PLATFORM_ANGLE_TYPE_ANGLE, GetParam().getRenderer(),
-                          EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE, GetParam().getDeviceType(),
-                          EGL_NONE};
+    EGLAttrib dispattrs[] = {EGL_PLATFORM_ANGLE_TYPE_ANGLE,
+                             GetParam().getRenderer(),
+                             EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE,
+                             GetParam().getDeviceType(),
+                             EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE,
+                             static_cast<EGLAttrib>(GetPbufferOnlyDefaultPlatformType()),
+                             EGL_NONE};
 
     for (int i = 0; i < 50; i++)  // Note: this test is fairly slow b/303089709
     {
         std::thread thread = std::thread([&]() {
-            dpy = eglGetPlatformDisplayEXT(
-                EGL_PLATFORM_ANGLE_ANGLE, reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY), dispattrs);
+            dpy = eglGetPlatformDisplay(GetEglPlatform(),
+                                        reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY), dispattrs);
             EXPECT_TRUE(dpy != EGL_NO_DISPLAY);
             EXPECT_EGL_TRUE(eglInitialize(dpy, nullptr, nullptr));
 
@@ -405,13 +419,17 @@ TEST_P(EGLMultiContextTest, ReuseUnterminatedDisplay)
     getEGLWindow()->destroyGL();
 
     EGLDisplay dpy;
-    EGLint dispattrs[] = {EGL_PLATFORM_ANGLE_TYPE_ANGLE, GetParam().getRenderer(),
-                          EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE, GetParam().getDeviceType(),
-                          EGL_NONE};
+    EGLAttrib dispattrs[] = {EGL_PLATFORM_ANGLE_TYPE_ANGLE,
+                             GetParam().getRenderer(),
+                             EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE,
+                             GetParam().getDeviceType(),
+                             EGL_PLATFORM_ANGLE_NATIVE_PLATFORM_TYPE_ANGLE,
+                             static_cast<EGLAttrib>(GetPbufferOnlyDefaultPlatformType()),
+                             EGL_NONE};
 
     std::thread threadA = std::thread([&]() {
-        dpy = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE,
-                                       reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY), dispattrs);
+        dpy = eglGetPlatformDisplay(GetEglPlatform(), reinterpret_cast<void *>(EGL_DEFAULT_DISPLAY),
+                                    dispattrs);
         EXPECT_TRUE(dpy != EGL_NO_DISPLAY);
         EXPECT_EGL_TRUE(eglInitialize(dpy, nullptr, nullptr));
     });
@@ -455,6 +473,7 @@ TEST_P(EGLMultiContextTest, ReuseUnterminatedDisplay)
 void EGLMultiContextTest::testFenceWithOpenRenderPass(FenceTest test, FlushMethod flushMethod)
 {
     ANGLE_SKIP_TEST_IF(!platformSupportsMultithreading());
+    ANGLE_SKIP_TEST_IF(!hasFenceSyncExtension());
 
     constexpr uint32_t kWidth  = 100;
     constexpr uint32_t kHeight = 200;
@@ -724,6 +743,38 @@ TEST_P(EGLMultiContextTest, ThreadBCanSubmitWhileThreadAWaiting)
 
     RunLockStepThreads(getEGLWindow(), threadFuncs.size(), threadFuncs.data());
     ASSERT_NE(currentStep, Step::Abort);
+}
+
+// Test that if there are any placeholder objects when the programs don't use any resources
+// (such as textures), they can correctly be used in non-shared contexts (without causing
+// double-free).
+TEST_P(EGLMultiContextTest, NonSharedContextsReuseDescritorSetLayoutHandle)
+{
+    EGLWindow *window   = getEGLWindow();
+    EGLDisplay dpy      = window->getDisplay();
+    EGLSurface surface  = window->getSurface();
+    EGLContext context1 = window->createContext(EGL_NO_CONTEXT, nullptr);
+    EGLContext context2 = window->createContext(EGL_NO_CONTEXT, nullptr);
+
+    EXPECT_EGL_TRUE(eglMakeCurrent(dpy, surface, surface, context1));
+    EXPECT_EGL_SUCCESS();
+
+    ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Simple(), essl1_shaders::fs::Green());
+    drawQuad(program, essl1_shaders::PositionAttrib(), 0.5f);
+    ASSERT_GL_NO_ERROR();
+
+    EXPECT_EGL_TRUE(eglMakeCurrent(dpy, surface, surface, context2));
+    EXPECT_EGL_SUCCESS();
+
+    ANGLE_GL_PROGRAM(program1, essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
+    drawQuad(program1, essl1_shaders::PositionAttrib(), 0.5f);
+    ASSERT_GL_NO_ERROR();
+
+    // Cleanup
+    EXPECT_EGL_TRUE(eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT));
+    EXPECT_EGL_TRUE(eglDestroyContext(dpy, context1));
+    EXPECT_EGL_TRUE(eglDestroyContext(dpy, context2));
+    EXPECT_EGL_SUCCESS();
 }
 
 }  // anonymous namespace

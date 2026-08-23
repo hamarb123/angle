@@ -28,9 +28,11 @@ extern bool gVerboseLogging;
 extern bool gWarmup;
 extern int gTrialTimeSeconds;
 extern int gTestTrials;
+extern int gSleepBetweenTrialMs;
 extern bool gNoFinish;
 extern bool gRetraceMode;
 extern bool gMinimizeGPUWork;
+extern bool gSkipBlitInOffscreen;
 extern bool gTraceTestValidation;
 extern const char *gTraceInterpreter;
 extern const char *gPerfCounters;
@@ -38,16 +40,28 @@ extern const char *gUseANGLE;
 extern const char *gUseGL;
 extern bool gOffscreen;
 extern bool gVsync;
+extern int gFpsLimit;
+extern bool gFpsLimitUsesBusyWait;
 extern const char *gPrintExtensionsToFile;
 extern const char *gRequestedExtensions;
 extern bool gIncludeInactiveResources;
+extern bool gTrackGPUTime;
+extern bool gAddSwapIntoGPUTime;
+extern bool gTrackFrameWallTime;
+extern bool gAddSwapIntoFrameWallTime;
+extern int gTrackVulkanApiWallTime;
+extern bool gCapturedFrameCountOnly;
 
 // Constant for when trace's frame count should be used
 constexpr int kAllFrames = -1;
 
 constexpr int kDefaultScreenshotFrame   = 1;
 constexpr int kDefaultMaxStepsPerformed = 0;
-
+#ifdef ANGLE_STANDALONE_BENCHMARK
+constexpr bool kStandaloneBenchmark = true;
+#else
+constexpr bool kStandaloneBenchmark = false;
+#endif
 inline bool OneFrame()
 {
     return gStepsPerTrial == 1 || gMaxStepsPerformed == 1;

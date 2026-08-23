@@ -22,10 +22,12 @@ import sys
 import tempfile
 import time
 
+from difflib import unified_diff
 from gen_restricted_traces import read_json as read_json, write_json as write_json
 from pathlib import Path
 
-from gen_restricted_traces import read_json as read_json
+from contextlib import contextmanager
+from check_attribute_interleaving import analyze_trace_for_interleaved_attributes, apply_change_list_to_trace_files
 
 SCRIPT_DIR = str(pathlib.Path(__file__).resolve().parent)
 PY_UTILS = str(pathlib.Path(SCRIPT_DIR) / '..' / 'py_utils')
@@ -225,11 +227,11 @@ def upgrade_single_trace(args, trace_binary, trace, out_path, no_overwrite, c_so
             'ANGLE_FEATURE_OVERRIDES_ENABLED'] = 'allocateNonZeroMemory:forceInitShaderVariables'
     if args.validation_expr:
         additional_env['ANGLE_CAPTURE_VALIDATION_EXPR'] = args.validation_expr
-    # TODO: Remove when default. http://anglebug.com/7753
+    # TODO: Remove when default. http://anglebug.com/42266223
     if c_sources:
         additional_env['ANGLE_CAPTURE_SOURCE_EXT'] = 'c'
 
-    additional_args = ['--retrace-mode']
+    additional_args = ['--retrace-mode', '--include-inactive-resources']
 
     try:
         if not os.path.isdir(trace_path):
@@ -256,6 +258,66 @@ def upgrade_single_trace(args, trace_binary, trace, out_path, no_overwrite, c_so
     return True
 
 
+@contextmanager
+def preprocessed_trace_for_upgrade(args, trace):
+    """This context analyzes the trace code for potential interleaved attributes.
+
+    If such cases are found in the trace code and the feature flag `-m` (`--merge-attributes`) is enabled,
+    the existing trace code is temporarily updated and re-compiled to enable the retracing script to
+    incorporate the interleaved property of the client data attributes into the upgraded trace.
+    """
+    trace_dir = os.path.join(SCRIPT_DIR, trace)
+    backup_dir = os.path.join(SCRIPT_DIR, '_tmp_attrib_check_backup')
+
+    output_stats, change_list = analyze_trace_for_interleaved_attributes(trace_dir)
+
+    trace_attributes_already_merged = output_stats['ExistingNonZeroOffsetForClientArray'] != 0
+    interleaved_attribute_detected = output_stats['FullyMergedGroupCount'] != 0 or output_stats[
+        'PartiallyMergedGroupCount'] != 0
+    code_changes_exist = len(change_list) > 0
+    if interleaved_attribute_detected and trace_attributes_already_merged:
+        print('Trace code found to include both merged and unmerged interleaved attributes.')
+
+    should_merge_attributes = args.merge_attributes and interleaved_attribute_detected and code_changes_exist
+
+    try:
+        if should_merge_attributes:
+            # If there is interleaving, make a backup of the trace in backup_dir, and change the trace.
+            ensure_rmdir(backup_dir)
+            shutil.copytree(trace_dir, backup_dir)
+
+            # Apply the updates
+            chmod_directory(trace_dir, stat.S_IWRITE | stat.S_IREAD)
+            apply_change_list_to_trace_files(trace_dir, change_list)
+
+            # Recompile
+            run_autoninja(args)
+
+        elif interleaved_attribute_detected:
+            print(
+                'Potential interleaved attributes detected (Total group count: {}, Groups with fully merged attributes: {}, Groups with partially merged attributes: {})'
+                .format(output_stats['TotalGroupCount'], output_stats['FullyMergedGroupCount'],
+                        output_stats['PartiallyMergedGroupCount']))
+            print(
+                'To upgrade the trace with the detected interleaved attributes merged, please use the flag `-m` or `--merge-attributes`.'
+            )
+
+        yield
+
+    finally:
+        if should_merge_attributes:
+            # Restore the original trace code from the backup directory.
+            shutil.rmtree(trace_dir)
+            shutil.copytree(backup_dir, trace_dir)
+            ensure_rmdir(backup_dir)
+
+            # Clean up object files to avoid running a stale trace later.
+            shutil.rmtree(
+                os.path.join(
+                    args.gn_path,
+                    'obj/src/tests/restricted_traces/angle_restricted_traces_{}'.format(trace)))
+
+
 def upgrade_traces(args, traces):
     run_autoninja(args)
     trace_binary = os.path.join(args.gn_path, args.test_suite)
@@ -263,9 +325,10 @@ def upgrade_traces(args, traces):
     failures = []
 
     for trace in angle_test_util.FilterTests(traces, args.traces):
-        if not upgrade_single_trace(args, trace_binary, trace, args.out_path, args.no_overwrite,
-                                    args.c_sources):
-            failures += [trace]
+        with preprocessed_trace_for_upgrade(args, trace):
+            if not upgrade_single_trace(args, trace_binary, trace, args.out_path,
+                                        args.no_overwrite, args.c_sources):
+                failures += [trace]
 
     if failures:
         print('The following traces failed to upgrade:\n')
@@ -386,6 +449,14 @@ def get_min_reqs(args, traces):
     run_autoninja(args)
 
     env = {}
+    # List of extensions that impliclity enable *other* extensions
+    extension_deny_list = [
+        'GL_ANGLE_shader_pixel_local_storage', 'GL_ANGLE_shader_pixel_local_storage_coherent'
+    ]
+    # List of extensions which de facto imply others. The implied extensions are removed
+    # from the RequiredExtensions list for wider platform support: http://anglebug.com/380026310
+    implied_extension_filter = [("GL_OES_compressed_ETC1_RGB8_texture",
+                                 "GL_EXT_compressed_ETC1_RGB8_sub_texture")]
     default_args = ["--no-warmup"]
 
     skipped_traces = []
@@ -395,13 +466,15 @@ def get_min_reqs(args, traces):
         print(f"Finding requirements for {trace}")
         extensions = []
         json_data = load_trace_json(trace)
+        original_json_data = json.dumps(json_data, sort_keys=True, indent=4)
         max_steps = get_num_frames(json_data)
 
         # exts: a list of extensions to use with run_test_suite. If empty,
         #       then run_test_suite runs with all extensions enabled by default.
         def run_test_suite_with_exts(exts):
             additional_args = default_args.copy()
-            additional_args += ['--request-extensions', ' '.join(exts)]
+            if len(exts) > 0:
+                additional_args += ['--request-extensions', ' '.join(exts)]
 
             try:
                 run_test_suite(args, trace_binary, trace, max_steps, additional_args, env)
@@ -456,7 +529,8 @@ def get_min_reqs(args, traces):
                     run_test_suite(args, trace_binary, trace, max_steps, additional_args, env)
                     with open(tmp.name) as f:
                         for line in f:
-                            extensions.append(line.strip())
+                            if line.strip() not in extension_deny_list:
+                                extensions.append(line.strip())
             except Exception:
                 skipped_traces.append(
                     (trace, "Failed to read extension list, likely that test is skipped"))
@@ -475,7 +549,7 @@ def get_min_reqs(args, traces):
             # Use a divide and conquer strategy to find the required extensions.
             # Max depth is log(N) where N is the number of extensions. Expected
             # runtime is p*log(N), where p is the number of required extensions.
-            # p*log(N)
+            # p*log(N). Assume a single possible solution - see 'extension_deny_list'.
             # others: A list that contains one or more required extensions,
             #         but is not actively being searched
             # exts: The list of extensions actively being searched
@@ -509,9 +583,29 @@ def get_min_reqs(args, traces):
                     return left_reqs + right_reqs
 
             recurse_reqs = recurse_run([], extensions, 0)
+            # Handle extensions which de facto imply others
+            for extension in implied_extension_filter:
+                if extension[0] in recurse_reqs and extension[1] in recurse_reqs:
+                    recurse_reqs.remove(extension[1])
+
+            # For replay portability, if GL_EXT_separate_shader_sources is required
+            #  bump version to 3.1 where this functionality is core
+            if "GL_EXT_separate_shader_objects" in recurse_reqs and min_version < (3, 1):
+                set_gles_version(json_data, (3, 1))
+                recurse_reqs.remove("GL_EXT_separate_shader_objects")
 
             json_data['RequiredExtensions'] = recurse_reqs
             save_trace_json(trace, json_data)
+
+            # Output json file diff
+            min_reqs_json_data = json.dumps(json_data, sort_keys=True, indent=4)
+            if original_json_data == min_reqs_json_data:
+                print(f"\nNo changes made to {trace}.json")
+            else:
+                json_diff = unified_diff(
+                    original_json_data.splitlines(), min_reqs_json_data.splitlines(), lineterm='')
+                print(f"\nGet Min Requirements modifications to {trace}.json:")
+                print('\n'.join(list(json_diff)))
         except BaseException as e:
             restore_trace()
             raise e
@@ -576,6 +670,11 @@ def main():
         action='store_true')
     upgrade_parser.add_argument(
         '-c', '--c-sources', help='Output to c sources instead of cpp.', action='store_true')
+    upgrade_parser.add_argument(
+        '-m',
+        '--merge-attributes',
+        help='Merge detected interleaved attributes (if any).',
+        action='store_true')
     add_upgrade_args(upgrade_parser)
     upgrade_parser.add_argument(
         '--show-test-stdout', help='Log test output.', action='store_true', default=False)

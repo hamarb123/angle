@@ -12,12 +12,14 @@
 #ifndef LIBANGLE_RENDERER_FORMAT_H_
 #define LIBANGLE_RENDERER_FORMAT_H_
 
+#include "common/unsafe_buffers.h"
+#include "libANGLE/cl_types.h"
 #include "libANGLE/renderer/FormatID_autogen.h"
 #include "libANGLE/renderer/renderer_utils.h"
 
 namespace angle
 {
-enum class FormatID;
+enum class FormatID : uint8_t;
 
 extern const Format gFormatInfoTable[];
 
@@ -47,9 +49,24 @@ struct Format final : private angle::NonCopyable
                             bool isYUV,
                             gl::VertexAttribType vertexAttribType);
 
-    static const Format &Get(FormatID id) { return gFormatInfoTable[static_cast<int>(id)]; }
+    static const Format &Get(FormatID id)
+    {
+        return ANGLE_UNSAFE_TODO(gFormatInfoTable[static_cast<int>(id)]);
+    }
 
     static FormatID InternalFormatToID(GLenum internalFormat);
+
+#if defined(ANGLE_ENABLE_CL)
+    static FormatID CLAFormatToID(cl_channel_type internalChannelType);
+    static FormatID CLRFormatToID(cl_channel_type internalChannelType);
+    static FormatID CLRGFormatToID(cl_channel_type internalChannelType);
+    static FormatID CLRGBFormatToID(cl_channel_type internalChannelType);
+    static FormatID CLRGBAFormatToID(cl_channel_type internalChannelType);
+    static FormatID CLBGRAFormatToID(cl_channel_type internalChannelType);
+    static FormatID CLsRGBAFormatToID(cl_channel_type internalChannelType);
+    static FormatID CLDEPTHFormatToID(cl_channel_type internalChannelType);
+    static FormatID CLDEPTHSTENCILFormatToID(cl_channel_type internalChannelType);
+#endif  // ANGLE_ENABLE_CL
 
     constexpr bool hasDepthOrStencilBits() const;
     constexpr bool hasDepthAndStencilBits() const;

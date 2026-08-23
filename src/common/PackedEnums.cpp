@@ -40,8 +40,6 @@ TextureType TextureTargetToType(TextureTarget target)
             return TextureType::_2DMultisampleArray;
         case TextureTarget::_3D:
             return TextureType::_3D;
-        case TextureTarget::VideoImage:
-            return TextureType::VideoImage;
         case TextureTarget::Buffer:
             return TextureType::Buffer;
         case TextureTarget::InvalidEnum:
@@ -77,8 +75,6 @@ TextureTarget NonCubeTextureTypeToTarget(TextureType type)
             return TextureTarget::_3D;
         case TextureType::CubeMapArray:
             return TextureTarget::CubeMapArray;
-        case TextureType::VideoImage:
-            return TextureTarget::VideoImage;
         case TextureType::Buffer:
             return TextureTarget::Buffer;
         default:
@@ -176,9 +172,6 @@ TextureType SamplerTypeToTextureType(GLenum samplerType)
         case GL_SAMPLER_2D_RECT_ANGLE:
             return TextureType::Rectangle;
 
-        case GL_SAMPLER_VIDEO_IMAGE_WEBGL:
-            return TextureType::VideoImage;
-
         default:
             UNREACHABLE();
             return TextureType::InvalidEnum;
@@ -243,6 +236,21 @@ bool IsArrayTextureType(TextureType type)
     {
         case TextureType::_2DArray:
         case TextureType::_2DMultisampleArray:
+        case TextureType::CubeMapArray:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool IsLayeredTextureType(TextureType type)
+{
+    switch (type)
+    {
+        case TextureType::_2DArray:
+        case TextureType::_2DMultisampleArray:
+        case TextureType::_3D:
+        case TextureType::CubeMap:
         case TextureType::CubeMapArray:
             return true;
         default:
@@ -472,6 +480,50 @@ std::ostream &operator<<(std::ostream &os, BlendFactorType value)
     return os;
 }
 
+std::ostream &operator<<(std::ostream &os, PackUnpackParameter value)
+{
+    switch (value)
+    {
+        case PackUnpackParameter::UnpackRowLength:
+            os << "GL_UNPACK_ROW_LENGTH";
+            break;
+        case PackUnpackParameter::UnpackSkipRows:
+            os << "GL_UNPACK_SKIP_ROWS";
+            break;
+        case PackUnpackParameter::UnpackSkipPixels:
+            os << "GL_UNPACK_SKIP_PIXELS";
+            break;
+        case PackUnpackParameter::UnpackAlignment:
+            os << "GL_UNPACK_ALIGNMENT";
+            break;
+        case PackUnpackParameter::PackRowLength:
+            os << "GL_PACK_ROW_LENGTH";
+            break;
+        case PackUnpackParameter::PackSkipRows:
+            os << "GL_PACK_SKIP_ROWS";
+            break;
+        case PackUnpackParameter::PackSkipPixels:
+            os << "GL_PACK_SKIP_PIXELS";
+            break;
+        case PackUnpackParameter::PackAlignment:
+            os << "GL_PACK_ALIGNMENT";
+            break;
+        case PackUnpackParameter::UnpackSkipImages:
+            os << "GL_UNPACK_SKIP_IMAGES";
+            break;
+        case PackUnpackParameter::UnpackImageHeight:
+            os << "GL_UNPACK_IMAGE_HEIGHT";
+            break;
+        case PackUnpackParameter::PackReverseRowOrder:
+            os << "GL_PACK_REVERSE_ROW_ORDER_ANGLE";
+            break;
+        default:
+            os << "GL_INVALID_ENUM";
+            break;
+    }
+    return os;
+}
+
 std::ostream &operator<<(std::ostream &os, VertexAttribType value)
 {
     switch (value)
@@ -582,7 +634,8 @@ bool operator<(const UniformLocation &lhs, const UniformLocation &rhs)
 
 bool IsEmulatedCompressedFormat(GLenum format)
 {
-    // TODO(anglebug.com/6177): Check for all formats ANGLE will use to emulate a compressed texture
+    // TODO(anglebug.com/42264702): Check for all formats ANGLE will use to emulate a compressed
+    // texture
     return format == GL_RGBA || format == GL_RG || format == GL_RED;
 }
 }  // namespace gl

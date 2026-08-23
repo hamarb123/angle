@@ -8,8 +8,8 @@
 //
 
 #include "libANGLE/renderer/vulkan/linux/xcb/DisplayVkXcb.h"
+#include "common/unsafe_buffers.h"
 
-#include <X11/Xutil.h>
 #include <xcb/xcb.h>
 
 #include "common/system_utils.h"
@@ -59,7 +59,7 @@ egl::Error DisplayVkXcb::initialize(egl::Display *display)
             ERR() << "xcb_connect() failed, error " << xcb_connection_error;
             xcb_disconnect(mXcbConnection);
             mXcbConnection = nullptr;
-            return egl::EglNotInitialized();
+            return egl::Error(EGL_NOT_INITIALIZED);
         }
     }
     return DisplayVk::initialize(display);
@@ -105,7 +105,8 @@ egl::ConfigSet DisplayVkXcb::generateConfigs()
 
     std::vector<GLenum> depthStencilFormats(
         egl_vk::kConfigDepthStencilFormats,
-        egl_vk::kConfigDepthStencilFormats + ArraySize(egl_vk::kConfigDepthStencilFormats));
+        ANGLE_UNSAFE_TODO(egl_vk::kConfigDepthStencilFormats +
+                          ArraySize(egl_vk::kConfigDepthStencilFormats)));
 
     if (getCaps().stencil8)
     {
@@ -126,7 +127,7 @@ void DisplayVkXcb::checkConfigSupport(egl::Config *config)
     }
 
     // TODO(geofflang): Test for native support and modify the config accordingly.
-    // http://anglebug.com/2692
+    // http://anglebug.com/42261400
 
     // Find the screen the window was created on:
     xcb_screen_iterator_t screenIterator = xcb_setup_roots_iterator(xcb_get_setup(mXcbConnection));
@@ -157,7 +158,10 @@ DisplayImpl *CreateVulkanXcbDisplay(const egl::DisplayState &state)
 
 angle::Result DisplayVkXcb::waitNativeImpl()
 {
-    XSync(reinterpret_cast<Display *>(mState.displayId), False);
+    // The following is the implementation of xcb_aux_sync (equivalent of XSync).  xcb_aux_sync is
+    // not called directly because it's in the libxcb-util package, which Chrome does not want to
+    // depend on (due to different package versions in popular distros).
+    free(xcb_get_input_focus_reply(mXcbConnection, xcb_get_input_focus(mXcbConnection), nullptr));
     return angle::Result::Continue;
 }
 }  // namespace rx

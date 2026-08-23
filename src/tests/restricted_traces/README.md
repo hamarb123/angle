@@ -7,7 +7,7 @@ to share publicly.
 ## Accessing the traces
 
 In order to compile and run with these, you must be granted access by Google,
-then authenticate with [CIPD](CIPD). Googlers, use your @google account.
+then authenticate with [CIPD](https://chromium.googlesource.com/infra/luci/luci-go/+/main/cipd/README.md). Googlers, use your @google account.
 ```
 cipd auth-login
 ```
@@ -17,6 +17,23 @@ Add the following to ANGLE's .gclient file:
       "checkout_angle_restricted_traces": True
     },
 ```
+The above will get you a selection of ~50 traces that are considered representative of the entire set, covering major engines, benchmarks, and some
+custom engines.  If you want the entire collection of 300+ traces, add an addition arg like below, but be ready to wait a while and dedicate 30+ GB of storage:
+```
+    "custom_vars": {
+      "checkout_angle_restricted_traces": True,
+      "checkout_extra_traces": True
+    },
+```
+Note: alternatively, you can checkout only a few specific traces using the following format (`angle_restricted_traces` in gn args below should be a matching list or a subset):
+```
+    "custom_vars": {
+      "checkout_angle_restricted_trace_{trace_name_1}": True,
+      "checkout_angle_restricted_trace_{trace_name_2}": True,
+      ...
+    },
+```
+
 Then use gclient to pull down binary files from CIPD.
 ```
 gclient sync -D
@@ -37,8 +54,6 @@ src/tests/restricted_traces/clash_royale/
 src/tests/restricted_traces/cod_mobile/
 ...
 ```
-
-[CIPD]: https://chromium.googlesource.com/infra/luci/luci-go/+/main/cipd/README.md
 
 ## Building the trace tests
 
@@ -114,6 +129,47 @@ After [building](../../../doc/DevSetupAndroid.md#building-angle-for-android) and
 [installing](../../../doc/DevSetupAndroid.md#install-the-angle-apk) the APK with the above arg,
 we're ready to start capturing.
 
+If capturing a new trace using OpenCL, also add the following to your Debug setup:
+```
+angle_enable_cl = true
+```
+
+<details>
+  <summary>Example of full OpenCL GN arg Debug setup for Capture</summary>
+  <br>
+
+    # Target information
+    is_clang = true
+    target_cpu = "arm64"
+    target_os = "android"
+
+    # Enable CL + backends
+    angle_enable_cl = true
+    angle_enable_vulkan = true
+
+    # Debug mode flags
+    is_debug = true
+    symbol_level = 2
+    strip_debug_info = false
+    android_full_debug = true
+    ignore_elf32_limitations = true
+
+    # Other flag settings
+    is_official_build = false
+    is_component_build = false
+    angle_extract_native_libs = true
+</details>
+
+## Capturing long traces
+
+The tracer will capture traces larger than the available physical memory on the
+target device. However, for very long traces there may be noticeable hitching
+during disk-writes once available memory is exhausted. If this becomes problematic a
+release build can be used, or to minimize hitching completely, disable binary data
+file compression. To do this ensure that the following property is set for capture:
+```
+adb shell setprop debug.angle.capture.compression 0
+```
 ## Determine the target app
 
 We first need to identify which application we want to trace.  That can generally be done by
@@ -155,6 +211,8 @@ export LABEL=angry_birds_2
 
 ## Opt the application into ANGLE
 
+Note: If running an executable, not an application/APK, these settings don't apply.
+
 Next, opt the application into using your ANGLE with capture enabled by default:
 ```
 adb shell settings put global angle_debug_package org.chromium.angle
@@ -187,12 +245,42 @@ require more. Use your discretion here:
 adb shell setprop debug.angle.capture.trigger 10
 ```
 
+For OpenCL capture, a trigger most likely won't be wanted. So, set the frame_start and frame_end values accordingly. Each ```clEnqueueNDRangeKernel``` is considered the end of a frame.
+```
+adb shell setprop debug.angle.capture.frame_start 1
+adb shell setprop debug.angle.capture.frame_end 100.
+```
+
+But if you do want to capture OpenCL and the end frame isn't clear, use the end_capture feature. See [End the capture early](./README.md#end-the-capture-early) for more information.
+
 ## Create output location
 
 We need to write out the trace file in a location accessible by the app. We use the app's data
 storage on sdcard, but create a subfolder to isolate ANGLE's files:
 ```
 adb shell mkdir -p /sdcard/Android/data/$PACKAGE_NAME/angle_capture
+```
+
+If the [capture](#Trigger the capture) failed due
+to these errors:
+
+```
+Output directory
+'/sdcard/Android/data/$PACKAGE_NAME/angle_capture/' does not exist.
+Create it over adb using mkdir.
+```
+
+```
+Could not open binary data file /sdcard/Android/data/$PACKAGE_NAME/angle_capture/$LABEL.angledata.gz
+```
+
+It means the app does not have access to /sdcard/. We will need to use the app's
+own data storage, which requires enabling adb root first:
+
+```
+adb root
+adb shell setprop debug.angle.capture.out_dir /data/data/$PACKAGE_NAME/angle_capture
+adb shell mkdir -p /data/data/$PACKAGE_NAME/angle_capture
 ```
 
 ## Start the target app
@@ -211,6 +299,8 @@ ANGLE   : INFO: Limiting draw buffer count to 4 while FrameCapture enabled
 ```
 ## Trigger the capture
 
+Note: If you have set the start and end frame, this step does not apply.
+
 When you have reached the content in your application that you want to record, set the trigger
 value to zero:
 ```
@@ -225,26 +315,75 @@ the file system:
 ```
 adb shell ls -la /sdcard/Android/data/$PACKAGE_NAME/angle_capture
 ```
-Allow the app to run until the `*angledata.gz` file is non-zero and no longer growing. The app
-should continue rendering after that:
+Allow the app to run until the logcat entry indicating the end of the API
+capture. The app should continue rendering after that:
 ```
-$ adb shell ls -s -w 1 /sdcard/Android/data/$PACKAGE_NAME/angle_capture
-30528 angry_birds_2.angledata.gz
-    8 angry_birds_2.cpp
-    4 angry_birds_2.json
-  768 angry_birds_2_001.cpp
-  100 angry_birds_2_002.cpp
-  100 angry_birds_2_003.cpp
-  100 angry_birds_2_004.cpp
-  100 angry_birds_2_005.cpp
-  104 angry_birds_2_006.cpp
-  100 angry_birds_2_007.cpp
-  100 angry_birds_2_008.cpp
-  100 angry_birds_2_009.cpp
-  100 angry_birds_2_010.cpp
-  120 angry_birds_2_011.cpp
-    8 angry_birds_2.h
+ANGLE   : INFO: Finished recording graphics API capture
 ```
+
+## Optionally trigger additional captures
+
+It is possible to capture an arbitrary number of traces.
+
+After each trace completes, set the trigger value to the desired number of frames to capture
+for the next trace, optionally create and specify a different out_dir for the new trace data,
+and then start the new trace by again resetting the trigger value to zero.
+
+Example workflow for multiple captures:
+
+```
+adb shell mkdir -p /data/data/$PACKAGE_NAME/angle_capture_1
+adb shell mkdir -p /data/data/$PACKAGE_NAME/angle_capture_2
+adb shell mkdir -p /data/data/$PACKAGE_NAME/angle_capture_3
+
+# Set initial output dir and frame count
+adb shell setprop debug.angle.capture.out_dir /data/data/$PACKAGE_NAME/angle_capture_1
+adb shell setprop debug.angle.capture.trigger 100
+
+# Trigger capture
+adb shell setprop debug.angle.capture.trigger 0
+
+# Set the next output dir and frame count
+adb shell setprop debug.angle.capture.out_dir /data/data/$PACKAGE_NAME/angle_capture_2
+adb shell setprop debug.angle.capture.trigger 30
+
+# Trigger capture
+adb shell setprop debug.angle.capture.trigger 0
+
+# Set the next output dir and frame count
+adb shell setprop debug.angle.capture.out_dir /data/data/$PACKAGE_NAME/angle_capture_3
+adb shell setprop debug.angle.capture.trigger 60
+
+# Trigger capture
+adb shell setprop debug.angle.capture.trigger 0
+
+# Pull the traces
+adb pull /data/data/$PACKAGE_NAME/angle_capture_1
+adb pull /data/data/$PACKAGE_NAME/angle_capture_2
+adb pull /data/data/$PACKAGE_NAME/angle_capture_3
+```
+
+Note that multiple captures are incompatible with applications using persistent coherent memory.
+If more than one capture is attempted in this situation the tracer will exit immediately.
+The initial capture will remain valid.
+
+## End the capture early
+
+If the application doesn't have a clear known ending frame, use ```debug.angle.capture.end_capture```.
+
+Set frame_start. frame_end is irrelevant for ending the capture early.
+```
+adb shell setprop debug.angle.capture.frame_start 1
+```
+Set end_capture to any number greater than 0. The value doesn't matter, as long as it's greater than 0.
+```
+adb shell setprop debug.angle.capture.end_capture 1
+```
+Run the application. At the moment you want the capture to be done, set end_capture to 0
+```
+adb shell setprop debug.angle.capture.end_capture 0
+```
+This will capture everything up to the time you triggered the end of the capture.
 
 ## Pull the trace files
 
@@ -259,6 +398,13 @@ adb pull /sdcard/Android/data/$PACKAGE_NAME/angle_capture/. $LABEL/
 
 The list of traces is tracked in [restricted_traces.json](restricted_traces.json). Manually add your
 new trace to this list. Use version "1" for the trace version.
+
+New traces added to this list run on CQ (unconditional checkout) by default and require no extra
+tags (e.g., `"my_new_trace 1"`).
+
+We enforce a limit of 10 extra (non-representative) traces on CQ to keep CQ build/test times low. If
+the limit is exceeded when adding a new trace, you must add the `ci` tag to older traces to make
+them conditional (e.g., change `"old_trace 1"` to `"old_trace 1 ci"`).
 
 On Linux, you can also use a tool called `jq` to update the list. This ensures we get them in
 alphabetical order with no duplicates. It can also be done by hand if you are unable to install it,
@@ -352,7 +498,7 @@ cd screenshots
 
 And run the compare script:
 ```
-python3 ../src/tests/restricted_traces/compare_trace_screenshots.py versus_native --trace-list-path ../src/tests/restricted_traces/
+python3 ../src/tests/restricted_traces/compare_trace_screenshots.py versus_native --screenshot-dir . --trace-list-path ../src/tests/restricted_traces/
 ```
 
 The script will print out results comparing ANGLE vs. native screenshots at different fuzz factors.
@@ -364,6 +510,30 @@ asphalt_8 angle_vulkan_asphalt_8.png angle_native_asphalt_8.png 641849 222157 11
 asphalt_9 angle_vulkan_asphalt_9.png angle_native_asphalt_9.png 17919 420 305 293 232 3
 ...
 ```
+
+Script will also save difference PNG files for each fuzz factor into the `--screenshot-dir`. These
+files will be saved even if there is no difference. To discard such files you may add
+`--discard_zero_diff_png` (or `-d`) argument **before** the `versus_native` command.
+
+# Comparing screenshots in two directories at different fuzz factors
+
+In some cases it may be useful to compare screenshots in two directories. For example: to compare
+different runs on the same device, different loops of the same replay run, runs on different
+devices, and so on.
+
+After you have prepared screenshots for comparison, run the `fuzz_ab` command:
+
+```
+python3 compare_trace_screenshots.py -d fuzz_ab --a_dir /my/trace/a --b_dir /my/trace/b --out /my/trace/diff
+```
+
+It will compare screenshots in these directories at different fuzz factors (similar to the
+`versus_native` command). In this example `-d` (`--discard_zero_diff_png`) argument was added to
+only keep PNG files with the difference.
+
+Command also has `--relaxed_file_list_match` (`-r`) argument, allowing to compare directories with
+at least single match, which may be handy in some situations.
+
 # Upgrading existing traces
 
 With tracer updates sometimes we want to re-run tracing to upgrade the trace file format or to
@@ -382,6 +552,41 @@ export TRACE_GN_PATH=out/Debug
 export TRACE_NAME=octopath_traveler
 src/tests/restricted_traces/retrace_restricted_traces.py upgrade $TRACE_GN_PATH retrace-wip -f $TRACE_NAME
 ```
+
+### Interleaved client attribute analysis
+Apps can use client attribute arrays without binding to the array buffer (e.g., via glVertexAttribPointer())
+to draw.
+The capture tool has been updated to detect interleaved client vertex attributes, i.e., vertex attributes that
+use the same client array data at different offsets for draw. In that case, the client array data is captured
+along with the offsets for each attribute. However, this will not be reflected on the traces captured before
+this feature was introduced. In those traces, each client attribute data is recorded as a separate attribute
+array (`gClientArrays[]`) and treated as an attribute separate from the rest, which can result in different
+behavior between the trace and the real app (such as instruction count).
+
+For example, take a draw using three interleaved client array pointers, each using a 4-byte float value.
+* In the real app, this would look like three glVertexAttribPointer() calls with the pointer
+set to `ptr`, `ptr + 4` and `ptr + 8`.
+* However, before this feature was introduced in the capture tool, these attributes would be recorded as
+`gClientArrays[0]`, `gClientArrays[1]`, and `gClientArrays[2]`.
+
+The script [`check_attribute_interleaving.py`](check_attribute_interleaving.py) has been added to close the gap
+further between the trace and the real app, which the retracing script will use during an upgrade to analyze the
+client array attribute pointers in the trace (`gClientArrays[]`) and their corresponding data.
+Its goal is to detect and restore the interleaved property of such attributes.
+
+If the attributes were found to have matching data with an offset, it will print a notification indicating the
+existence of such cases in the existing trace. However, it will **not** try to merge those attributes yet.
+**To apply the attribute merges to the trace code during the upgrade, the flag `-m` or `--merge-attributes`
+should be used for the retracing script:**
+```
+src/tests/restricted_traces/retrace_restricted_traces.py upgrade $TRACE_GN_PATH retrace-wip -m -f $TRACE_NAME
+```
+
+After this, the attributes determined to be part of the same client array are updated to use the same unified
+data with their respective offsets.
+
+Note that the script [`check_attribute_interleaving.py`](check_attribute_interleaving.py) can also be used as a
+standalone tool to analyze trace code for potential interleaved client attributes.
 
 ## Part 2: Verify it
 
@@ -403,7 +608,8 @@ We need two loops to verify Reset, so you'll need to inspect how many frames
 are in the trace. In this case, `octopath_traveler` has 500 frames, so we need
 1000 screenshots. We use -1 as the screenshot frame so we get all images:
 ```
-out/Debug/angle_trace_tests --gtest_filter=TraceTest.${TRACE_NAME} --use-angle=swiftshader --max-steps-performed 1000 --screenshot-dir retrace-wip/${TRACE_NAME}_before --screenshot-frame -1
+export FRAME_COUNT=1000
+out/Debug/angle_trace_tests --gtest_filter=TraceTest.${TRACE_NAME} --use-angle=swiftshader --max-steps-performed ${FRAME_COUNT} --screenshot-dir retrace-wip/${TRACE_NAME}_before --screenshot-frame -1
 ```
 
 Then move the new trace in and run it again:
@@ -411,13 +617,13 @@ Then move the new trace in and run it again:
 mv src/tests/restricted_traces/${TRACE_NAME} retrace-wip/${TRACE_NAME}_orig
 cp -r retrace-wip/${TRACE_NAME} src/tests/restricted_traces
 autoninja -C out/Debug angle_trace_tests
-out/Debug/angle_trace_tests --gtest_filter=TraceTest.${TRACE_NAME} --use-angle=swiftshader --max-steps-performed 1000 --screenshot-dir retrace-wip/${TRACE_NAME}_after --screenshot-frame -1
+out/Debug/angle_trace_tests --gtest_filter=TraceTest.${TRACE_NAME} --use-angle=swiftshader --max-steps-performed ${FRAME_COUNT} --screenshot-dir retrace-wip/${TRACE_NAME}_after --screenshot-frame -1
 ```
 
 After that, we have a script that will compare the before and after screenshots,
 saving the results:
 ```
-src/tests/restricted_traces/compare_trace_screenshots.py versus_upgrade --before retrace-wip/${TRACE_NAME}_before --after retrace-wip/${TRACE_NAME}_after --outdir retrace-wip/${TRACE_NAME}_compare
+vpython3 src/tests/restricted_traces/compare_trace_screenshots.py versus_upgrade --before retrace-wip/${TRACE_NAME}_before --after retrace-wip/${TRACE_NAME}_after --outdir retrace-wip/${TRACE_NAME}_compare
 ```
 
 If you have any diffs, they will pop out like this, and you need to investigate:
@@ -434,46 +640,43 @@ We need to ensure we're getting the same frame times and memory usage.
 
 The easiest way to do that is on Android, which can show us GPU and CPU memory.
 
-First, restore the original trace, then build and install the most optimized build,
-along with the ANGLE apk itself:
+First, restore the original trace, then build and install the most optimized build:
 ```
 rm -r src/tests/restricted_traces/${TRACE_NAME}
 cp -r retrace-wip/${TRACE_NAME}_orig src/tests/restricted_traces/${TRACE_NAME}
-autoninja -C out/AndroidPerformance angle_trace_tests angle_apks
-adb install -r --force-queryable ./out/AndroidPerformance/apks/AngleLibraries.apk
-out/AndroidPerformance/angle_trace_tests --gtest_filter=TraceTest.${TRACE_NAME} --run-to-key-frame --no-warmup
+autoninja -C out/AndroidPerformance angle_trace_tests
 ```
 
 Then run the `restricted_trace_perf.py` script to gather frame times and memory:
 ```
 pushd src/tests/restricted_traces
-vpython3 restricted_trace_perf.py --fixedtime 10 --sleep 10 --power --output-tag ${TRACE_NAME}.before --loop-count 5 --renderer vulkan --filter ${TRACE_NAME}
+vpython3 restricted_trace_perf.py --fixedtime 10 --sleep 10 --memory --cpu-inst user_and_kernel --output-tag ${TRACE_NAME}.before --loop-count 5 --build-dir ../../../out/AndroidPerformance --renderer vulkan --filter ${TRACE_NAME}
 popd
 ```
 
 You should get output like this:
 ```
-trace                                    wall_time       gpu_time        cpu_time        gpu_power  cpu_power  gpu_mem_sustained    gpu_mem_peak    proc_mem_median      proc_mem_peak
+trace                                    wall_time       gpu_time        frame_wall_time cpu_time        gpu_power  cpu_power  infra_power gpu_mem_sustained    gpu_mem_peak    proc_mem_median      proc_mem_peak   process_cpuinst      gfxlib_cpuinst       angle_cpuinst        vulkan_cpuinst       gles_cpuinst         libc_cpuinst
 
 Starting run 1 with vulkan at 2023-08-17 16:26:29
 
-vulkan_octopath_traveler                 2.9650          0               3.8901000000    5183       5659       186837550            206241792       586976000            591528000
+vulkan_octopath_traveler                 2.8125          0               2.0213284872    2.6833208333    0.000      0.000      0.000      157458432            157458432       581324000            581536000       9814450.073333334    1907805.1666666667   30495.19861111111    0.0                  1877309.9680555556   9814093.243888889
 
 Starting run 2 with vulkan at 2023-08-17 16:26:54
 
-vulkan_octopath_traveler                 3.0038          0               3.9452525714    5295       5128       186467084            205910016       584568000            589196000
+vulkan_octopath_traveler                 2.7942          0               2.0026349672    2.6582661111    0.000      0.000      0.000      157167616            157167616       580976000            581120000       9940974.378611112    1930372.9425         29421.109166666665   0.0                  1900951.8333333333   9940970.091666667
 
 Starting run 3 with vulkan at 2023-08-17 16:27:18
 
-vulkan_octopath_traveler                 3.0061          0               3.9361028571    5203       5182       187197952            205262848       586596000            590324000
+vulkan_octopath_traveler                 2.8087          0               2.0104668258    2.6753233333    0.000      0.000      0.000      155391744            155398144       578784000            578844000       9849789.568611111    1897764.1875         27965.308333333334   0.0                  1869798.8791666667   9849162.080555556
 
 Starting run 4 with vulkan at 2023-08-17 16:27:42
 
-vulkan_octopath_traveler                 2.9901          0               3.9330551429    5461       5165       194881803            197480448       585268000            588384000
+vulkan_octopath_traveler                 2.8126          0               2.0338224075    2.6839755556    0.000      0.000      0.000      148413982            157356032       580764000            580808000       9858647.521944445    1891151.5491666666   27062.17777777778    0.0                  1864089.371388889    9857876.606944444
 
 Starting run 5 with vulkan at 2023-08-17 16:28:05
 
-vulkan_octopath_traveler                 3.0749          0               3.9652568571    5197       5096       193443742            203177984       583636000            586380000
+vulkan_octopath_traveler                 2.8193          0               2.0375366431    2.6894483333    0.000      0.000      0.000      148760576            148770816       572796000            572820000       9813130.877222221    1892703.2255555557   25800.17             0.0                  1866903.0555555555   9812411.621388888
 ```
 
 Bring in the upgraded trace, build and install the trace again:
@@ -481,14 +684,11 @@ Bring in the upgraded trace, build and install the trace again:
 rm -rf src/tests/restricted_traces/${TRACE_NAME}
 cp -r retrace-wip/${TRACE_NAME} src/tests/restricted_traces/${TRACE_NAME}
 autoninja -C out/AndroidPerformance angle_trace_tests
-out/AndroidPerformance/angle_trace_tests --gtest_filter=TraceTest.${TRACE_NAME} --run-to-key-frame --no-warmup
 ```
 
 And collect performance data:
 ```
-pushd src/tests/restricted_traces
-vpython3 restricted_trace_perf.py --fixedtime 10 --sleep 10 --power --output-tag ${TRACE_NAME}.after --loop-count 5 --renderer vulkan --filter ${TRACE_NAME}
-popd
+vpython3 restricted_trace_perf.py --fixedtime 10 --sleep 10 --memory --cpu-inst user_and_kernel --output-tag ${TRACE_NAME}.after --loop-count 5 --build-dir ../../../out/AndroidPerformance --renderer vulkan --filter ${TRACE_NAME}
 ```
 
 Verify using a spreadsheet that the values are relatively the same.
@@ -515,11 +715,14 @@ number beginning with 'x'. For example:
 Then run:
 
 ```
-src/tests/restricted_traces/sync_restricted_traces_to_cipd.py --filter ${TRACE_NAME}
-scripts/run_code_generation.py
+vpython3 src/tests/restricted_traces/sync_restricted_traces_to_cipd.py --filter ${TRACE_NAME}
+vpython3 scripts/run_code_generation.py
 ```
 
 After these commands complete succesfully, create and upload a CL as normal.
+```
+git cl upload
+```
 
 Before running tests, you need to grant the bots access to your experimental
 CIPD files (substituting your account name):
@@ -541,7 +744,7 @@ Readers:
 Run CQ +1 Dry-Run. If you find a test regression, see the section below on
 diagnosing tracer errors. Otherwise proceed with the steps below.
 
-## Part 5: Upload the verified traces to CIPD under the stable prefix
+## Part 4: Upload the verified traces to CIPD under the stable prefix
 
 Now that you've validated the traces on the CQ, update
 [`restricted_traces.json`](restricted_traces.json) to remove the 'x' prefix
@@ -549,8 +752,8 @@ and incrementing the version of the traces (skipping versions if you prefer)
 and then run:
 
 ```
-src/tests/restricted_traces/sync_restricted_traces_to_cipd.py --filter ${TRACE_NAME}
-scripts/run_code_generation.py
+vpython3 src/tests/restricted_traces/sync_restricted_traces_to_cipd.py --filter ${TRACE_NAME}
+vpython3 scripts/run_code_generation.py
 ```
 
 Then create and upload a CL as normal. Congratulations, you've finished the
@@ -575,6 +778,21 @@ command:
 
 ```
 src/tests/restricted_traces/retrace_restricted_traces.py --no-swiftshader get_min_reqs $TRACE_GN_PATH [--traces "*"]
+```
+
+If retracing an existing trace, any associated `addExtensionPrerequisite()` calls must be removed from `TracePerfTest.cpp` and
+the tracename.json file must be made writable.
+
+Traces are run with all extensions enabled by default. It may be useful to test with only a subset of extensions.
+This can be done by adding the `--request-extensions` argument to `angle_trace_tests`. Multiple extensions must be contained by quotation
+marks and only a single space can be used as a separator. To run with no extensions enabled, specify a null list -- `""`:
+
+```
+./out/Debug/angle_trace_tests --gtest_filter=*tracename --request-extensions "EXT_color_buffer_float GL_EXT_texture_filter_anisotropic"
+```
+  or
+```
+./out/Debug/angle_trace_tests --gtest_filter=*tracename --request-extensions ""
 ```
 
 ## Extended testing and full trace upgrades

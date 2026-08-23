@@ -8,8 +8,14 @@
 #ifndef LIBANGLE_CLKERNEL_H_
 #define LIBANGLE_CLKERNEL_H_
 
+#include <angle_cl.h>
+
 #include "libANGLE/CLObject.h"
+#include "libANGLE/cl_types.h"
 #include "libANGLE/renderer/CLKernelImpl.h"
+
+#include <cstddef>
+#include <string>
 
 namespace cl
 {
@@ -19,21 +25,42 @@ class Kernel final : public _cl_kernel, public Object
   public:
     // Front end entry functions, only called from OpenCL entry points
 
-    cl_int setArg(cl_uint argIndex, size_t argSize, const void *argValue);
+    angle::Result setArg(cl_uint argIndex, size_t argSize, const void *argValue);
 
-    cl_int getInfo(KernelInfo name, size_t valueSize, void *value, size_t *valueSizeRet) const;
+    angle::Result getInfo(KernelInfo name,
+                          size_t valueSize,
+                          void *value,
+                          size_t *valueSizeRet) const;
 
-    cl_int getWorkGroupInfo(cl_device_id device,
-                            KernelWorkGroupInfo name,
-                            size_t valueSize,
-                            void *value,
-                            size_t *valueSizeRet) const;
+    angle::Result getWorkGroupInfo(cl_device_id device,
+                                   KernelWorkGroupInfo name,
+                                   size_t valueSize,
+                                   void *value,
+                                   size_t *valueSizeRet) const;
 
-    cl_int getArgInfo(cl_uint argIndex,
-                      KernelArgInfo name,
-                      size_t valueSize,
-                      void *value,
-                      size_t *valueSizeRet) const;
+    angle::Result getSubWorkGroupInfo(cl_device_id in_device,
+                                      KernelSubGroupInfo param_namePacked,
+                                      size_t input_value_size,
+                                      const void *input_value,
+                                      size_t param_value_size,
+                                      void *param_value,
+                                      size_t *param_value_size_ret) const;
+
+    angle::Result getArgInfo(cl_uint argIndex,
+                             KernelArgInfo name,
+                             size_t valueSize,
+                             void *value,
+                             size_t *valueSizeRet) const;
+
+    const std::string &getName() const { return mInfo.functionName; }
+
+    bool areAllArgsSet() const
+    {
+        return std::all_of(mSetArguments.begin(), mSetArguments.end(),
+                           [](KernelArg arg) { return arg.isSet == true; });
+    }
+
+    Kernel *clone() const;
 
   public:
     ~Kernel() override;
@@ -45,12 +72,16 @@ class Kernel final : public _cl_kernel, public Object
     T &getImpl() const;
 
   private:
-    Kernel(Program &program, const char *name, cl_int &errorCode);
-    Kernel(Program &program, const rx::CLKernelImpl::CreateFunc &createFunc, cl_int &errorCode);
+    Kernel(Program &program, const char *name);
+    Kernel(Program &program, const rx::CLKernelImpl::CreateFunc &createFunc);
+
+    void initImpl();
 
     const ProgramPtr mProgram;
-    const rx::CLKernelImpl::Ptr mImpl;
-    const rx::CLKernelImpl::Info mInfo;
+    rx::CLKernelImpl::Ptr mImpl;
+    rx::CLKernelImpl::Info mInfo;
+
+    std::vector<KernelArg> mSetArguments;
 
     friend class Object;
     friend class Program;

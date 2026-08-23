@@ -8,11 +8,13 @@
 //
 
 #include "common/string_utils.h"
+#include "common/unsafe_buffers.h"
 
 #include <stdlib.h>
 #include <string.h>
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <fstream>
 #include <sstream>
 
@@ -27,7 +29,8 @@ bool EndsWithSuffix(const char *str,
                     const char *suffix,
                     const size_t suffixLen)
 {
-    return suffixLen <= strLen && strncmp(str + strLen - suffixLen, suffix, suffixLen) == 0;
+    return suffixLen <= strLen &&
+           ANGLE_UNSAFE_TODO(strncmp(str + strLen - suffixLen, suffix, suffixLen)) == 0;
 }
 
 }  // anonymous namespace
@@ -136,8 +139,13 @@ std::string GetPrefix(const std::string &input, size_t offset, char delimiter)
     return input.substr(offset, match - offset);
 }
 
-bool HexStringToUInt(const std::string &input, unsigned int *uintOut)
+bool HexStringToUInt(const std::string_view &input, unsigned int *uintOut)
 {
+    if (input.empty() || uintOut == nullptr)
+    {
+        return false;
+    }
+
     unsigned int offset = 0;
 
     if (input.size() >= 2 && input[0] == '0' && input[1] == 'x')
@@ -151,9 +159,23 @@ bool HexStringToUInt(const std::string &input, unsigned int *uintOut)
         return false;
     }
 
-    std::stringstream inStream(input);
-    inStream >> std::hex >> *uintOut;
-    return !inStream.fail();
+    std::string_view inputWithOffset = input.substr(offset);
+    const auto result                = std::from_chars(
+        inputWithOffset.data(), ANGLE_UNSAFE_TODO(inputWithOffset.data() + inputWithOffset.size()),
+        *uintOut, 16);
+    if (result.ec != std::errc{})
+    {
+        return false;
+    }
+
+    // A successful conversion should consume the entire input string view.
+    // If result.ptr is not at the end, it means there were extra characters.
+    if (result.ptr != ANGLE_UNSAFE_TODO(inputWithOffset.data() + inputWithOffset.size()))
+    {
+        return false;
+    }
+
+    return true;
 }
 
 bool ReadFileToString(const std::string &path, std::string *stringOut)
@@ -175,22 +197,22 @@ bool ReadFileToString(const std::string &path, std::string *stringOut)
 
 bool BeginsWith(const std::string &str, const std::string &prefix)
 {
-    return strncmp(str.c_str(), prefix.c_str(), prefix.length()) == 0;
+    return ANGLE_UNSAFE_TODO(strncmp(str.c_str(), prefix.c_str(), prefix.length())) == 0;
 }
 
 bool BeginsWith(const std::string &str, const char *prefix)
 {
-    return strncmp(str.c_str(), prefix, strlen(prefix)) == 0;
+    return ANGLE_UNSAFE_TODO(strncmp(str.c_str(), prefix, strlen(prefix))) == 0;
 }
 
 bool BeginsWith(const char *str, const char *prefix)
 {
-    return strncmp(str, prefix, strlen(prefix)) == 0;
+    return ANGLE_UNSAFE_TODO(strncmp(str, prefix, strlen(prefix))) == 0;
 }
 
 bool BeginsWith(const std::string &str, const std::string &prefix, const size_t prefixLength)
 {
-    return strncmp(str.c_str(), prefix.c_str(), prefixLength) == 0;
+    return ANGLE_UNSAFE_TODO(strncmp(str.c_str(), prefix.c_str(), prefixLength)) == 0;
 }
 
 bool EndsWith(const std::string &str, const std::string &suffix)
@@ -319,22 +341,22 @@ std::vector<std::string> GetCachedStringsFromEnvironmentVarOrAndroidProperty(
 bool NamesMatchWithWildcard(const char *glob, const char *name)
 {
     // Find the first * in glob.
-    const char *firstWildcard = strchr(glob, '*');
+    const char *firstWildcard = ANGLE_UNSAFE_TODO(strchr(glob, '*'));
 
     // If there are no wildcards, match the strings precisely.
     if (firstWildcard == nullptr)
     {
-        return strcmp(glob, name) == 0;
+        return ANGLE_UNSAFE_TODO(strcmp(glob, name)) == 0;
     }
 
     // Otherwise, match up to the wildcard first.
     size_t preWildcardLen = firstWildcard - glob;
-    if (strncmp(glob, name, preWildcardLen) != 0)
+    if (ANGLE_UNSAFE_TODO(strncmp(glob, name, preWildcardLen)) != 0)
     {
         return false;
     }
 
-    const char *postWildcardRef = glob + preWildcardLen + 1;
+    const char *postWildcardRef = ANGLE_UNSAFE_TODO(glob + preWildcardLen + 1);
 
     // As a small optimization, if the wildcard is the last character in glob, accept the match
     // already.
@@ -344,15 +366,30 @@ bool NamesMatchWithWildcard(const char *glob, const char *name)
     }
 
     // Try to match the wildcard with a number of characters.
-    for (size_t matchSize = 0; name[matchSize] != '\0'; ++matchSize)
+    for (size_t matchSize = 0; ANGLE_UNSAFE_TODO(name[matchSize]) != '\0'; ++matchSize)
     {
-        if (NamesMatchWithWildcard(postWildcardRef, name + matchSize))
+        if (NamesMatchWithWildcard(postWildcardRef, ANGLE_UNSAFE_TODO(name + matchSize)))
         {
             return true;
         }
     }
 
     return false;
+}
+
+std::vector<uint8_t> HexStringToUintVector(const std::string_view &hexStr)
+{
+    std::vector<uint8_t> bin;
+    bin.reserve(hexStr.length() / 2);
+
+    for (size_t index = 0; index < hexStr.length(); index += 2)
+    {
+        unsigned int hexValue;
+        HexStringToUInt(hexStr.substr(index, 2), &hexValue);
+        bin.push_back(static_cast<uint8_t>(hexValue));
+    }
+
+    return bin;
 }
 
 }  // namespace angle

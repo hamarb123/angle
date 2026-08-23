@@ -8,8 +8,9 @@
 //
 
 #include "libANGLE/renderer/vulkan/win32/DisplayVkWin32.h"
+#include "common/unsafe_buffers.h"
 #include "libANGLE/renderer/vulkan/DisplayVk.h"
-#include "libANGLE/renderer/vulkan/RendererVk.h"
+#include "libANGLE/renderer/vulkan/vk_renderer.h"
 
 #include <windows.h>
 
@@ -86,10 +87,11 @@ egl::Error DisplayVkWin32::initialize(egl::Display *display)
         mWindowClass                        = RegisterClassW(&intermediateClassDesc);
         if (!mWindowClass)
         {
-            return egl::EglNotInitialized()
-                   << "Failed to register intermediate OpenGL window class \""
-                   << gl::FmtHex<egl::Display *, char>(display)
-                   << "\":" << gl::FmtErr(HRESULT_CODE(GetLastError()));
+            std::ostringstream err;
+            err << "Failed to register intermediate OpenGL window class \""
+                << gl::FmtHex<egl::Display *, char>(display)
+                << "\":" << gl::FmtErr(HRESULT_CODE(GetLastError()));
+            return egl::Error(EGL_NOT_INITIALIZED, err.str());
         }
     }
 
@@ -98,7 +100,7 @@ egl::Error DisplayVkWin32::initialize(egl::Display *display)
                                   CW_USEDEFAULT, nullptr, nullptr, nullptr, nullptr);
     if (!mMockWindow)
     {
-        return egl::EglNotInitialized() << "Failed to create mock OpenGL window.";
+        return egl::Error(EGL_NOT_INITIALIZED, "Failed to create mock OpenGL window.");
     }
 
     VkSurfaceKHR surfaceVk;
@@ -108,24 +110,24 @@ egl::Error DisplayVkWin32::initialize(egl::Display *display)
     VkInstance instance         = mRenderer->getInstance();
     VkPhysicalDevice physDevice = mRenderer->getPhysicalDevice();
 
-    if (vkCreateWin32SurfaceKHR(instance, &info, nullptr, &surfaceVk) != VK_SUCCESS)
+    if (VK_CALL(vkCreateWin32SurfaceKHR, instance, &info, nullptr, &surfaceVk) != VK_SUCCESS)
     {
-        return egl::EglNotInitialized() << "vkCreateWin32SurfaceKHR failed";
+        return egl::Error(EGL_NOT_INITIALIZED, "vkCreateWin32SurfaceKHR failed");
     }
     uint32_t surfaceFormatCount;
 
-    if (vkGetPhysicalDeviceSurfaceFormatsKHR(physDevice, surfaceVk, &surfaceFormatCount, nullptr) !=
-        VK_SUCCESS)
+    if (VK_CALL(vkGetPhysicalDeviceSurfaceFormatsKHR, physDevice, surfaceVk, &surfaceFormatCount,
+                nullptr) != VK_SUCCESS)
     {
-        return egl::EglNotInitialized() << "vkGetPhysicalDeviceSurfaceFormatsKHR failed";
+        return egl::Error(EGL_NOT_INITIALIZED, "vkGetPhysicalDeviceSurfaceFormatsKHR failed");
     }
     mSurfaceFormats.resize(surfaceFormatCount);
-    if (vkGetPhysicalDeviceSurfaceFormatsKHR(physDevice, surfaceVk, &surfaceFormatCount,
-                                             mSurfaceFormats.data()) != VK_SUCCESS)
+    if (VK_CALL(vkGetPhysicalDeviceSurfaceFormatsKHR, physDevice, surfaceVk, &surfaceFormatCount,
+                mSurfaceFormats.data()) != VK_SUCCESS)
     {
-        return egl::EglNotInitialized() << "vkGetPhysicalDeviceSurfaceFormatsKHR (2nd) failed";
+        return egl::Error(EGL_NOT_INITIALIZED, "vkGetPhysicalDeviceSurfaceFormatsKHR (2nd) failed");
     }
-    vkDestroySurfaceKHR(instance, surfaceVk, nullptr);
+    VK_CALL(vkDestroySurfaceKHR, instance, surfaceVk, nullptr);
 
     DestroyWindow(mMockWindow);
     mMockWindow = nullptr;
@@ -140,7 +142,8 @@ egl::ConfigSet DisplayVkWin32::generateConfigs()
 
     std::vector<GLenum> depthStencilFormats(
         egl_vk::kConfigDepthStencilFormats,
-        egl_vk::kConfigDepthStencilFormats + ArraySize(egl_vk::kConfigDepthStencilFormats));
+        ANGLE_UNSAFE_TODO(egl_vk::kConfigDepthStencilFormats +
+                          ArraySize(egl_vk::kConfigDepthStencilFormats)));
 
     if (getCaps().stencil8)
     {
@@ -164,7 +167,7 @@ void DisplayVkWin32::checkConfigSupport(egl::Config *config)
 
     for (const VkSurfaceFormatKHR &surfaceFormat : mSurfaceFormats)
     {
-        if (surfaceFormat.format == formatVk.getActualRenderableImageVkFormat())
+        if (surfaceFormat.format == formatVk.getActualRenderableImageVkFormat(this->getRenderer()))
         {
             return;
         }

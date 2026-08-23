@@ -8,6 +8,7 @@
 //
 
 #include <gtest/gtest.h>
+#include "common/unsafe_buffers.h"
 
 #include <stdio.h>
 #include <sstream>
@@ -149,7 +150,7 @@ class GLMark2Benchmark : public testing::TestWithParam<GLMark2TestParams>
         {
             args.push_back("--benchmark");
             args.push_back(benchmark);
-            fprintf(stderr, "Running benchmark: %s\n", benchmark);
+            ANGLE_UNSAFE_TODO(fprintf(stderr, "Running benchmark: %s\n", benchmark));
         }
         args.push_back(nullptr);
 
@@ -181,9 +182,11 @@ class GLMark2Benchmark : public testing::TestWithParam<GLMark2TestParams>
         //     glmark2 2017.07
         // =======================================================
         //     OpenGL Information
-        //     GL_VENDOR:     ...
-        //     GL_RENDERER:   ...
-        //     GL_VERSION:    ...
+        //     GL_VENDOR:      ...
+        //     GL_RENDERER:    ...
+        //     GL_VERSION:     ...
+        //     Surface Config: ...
+        //     Surface Size:   ...
         // =======================================================
         // [test] config: FPS: uint FrameTime: float ms
         // [test] config: Not Supported
@@ -222,6 +225,10 @@ class GLMark2Benchmark : public testing::TestWithParam<GLMark2TestParams>
         // The fourth line is the GL_VERSION.  Expect it to include ANGLE, otherwise we are not
         // running against ANGLE.
         ASSERT_NE(line.find("ANGLE"), std::string::npos);
+
+        // Skip two Surface lines
+        std::getline(glmark2Output, line);
+        std::getline(glmark2Output, line);
 
         // Expect ==== at the bottom of the header
         std::getline(glmark2Output, line);

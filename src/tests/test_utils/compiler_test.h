@@ -61,7 +61,7 @@ class MatchOutputCodeTest : public testing::Test
 
     bool foundInGLSLCode(const char *stringToFind) const
     {
-        return foundInCode(SH_GLSL_COMPATIBILITY_OUTPUT, stringToFind);
+        return foundInCode(SH_GLSL_150_CORE_OUTPUT, stringToFind);
     }
 
     bool foundInCode(ShShaderOutput output, const char *stringToFind) const;
@@ -89,6 +89,8 @@ class MatchOutputCodeTest : public testing::Test
 
     // Test that the string is found in none of the outputs
     bool notFoundInCode(const char *stringToFind) const;
+
+    std::string outputCode(ShShaderOutput output) const;
 
   private:
     bool compileWithSettings(ShShaderOutput output,

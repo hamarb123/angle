@@ -4,6 +4,7 @@
 // found in the LICENSE file.
 //
 
+#include "common/unsafe_buffers.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -112,7 +113,11 @@ TEST(ConfigSetTest, IDs)
     EXPECT_EQ(*std::max_element(ids.begin(), ids.end()), static_cast<EGLint>(set.size()));
 }
 
-TEST(ConfigSetTest, Filtering_BitSizes)
+// Test case to verify filtering of egl::ConfigSet based on bit size attributes
+// (e.g., EGL_RED_SIZE, EGL_GREEN_SIZE, etc.). The test generates configurations
+// with varying bit sizes for each attribute, filters by the attribute, and
+// checks that the number of filtered results matches the expected count.
+TEST(ConfigSetTest, FilteringBitSizes)
 {
     egl::ConfigSet set;
 
@@ -139,12 +144,12 @@ TEST(ConfigSetTest, Filtering_BitSizes)
             // Set all the other tested members of this config to 0
             for (size_t k = 0; k < ArraySize(testMembers); k++)
             {
-                config.*(testMembers[k].ConfigMember) = 0;
+                config.*(ANGLE_UNSAFE_TODO(testMembers[k]).ConfigMember) = 0;
             }
 
             // Set the tested member of this config to i so it ranges from
             // [1, configsPerType]
-            config.*(testMembers[i].ConfigMember) = static_cast<EGLint>(j) + 1;
+            config.*(ANGLE_UNSAFE_TODO(testMembers[i]).ConfigMember) = static_cast<EGLint>(j) + 1;
 
             set.add(config);
         }
@@ -158,7 +163,7 @@ TEST(ConfigSetTest, Filtering_BitSizes)
         for (EGLint j = 0; j < static_cast<EGLint>(configsPerType); j++)
         {
             egl::AttributeMap filter;
-            filter.insert(testMembers[i].Name, j + 1);
+            filter.insert(ANGLE_UNSAFE_TODO(testMembers[i]).Name, j + 1);
 
             std::vector<const egl::Config *> filteredConfigs = set.filter(filter);
 
@@ -174,7 +179,7 @@ TEST(ConfigSetTest, Filtering_BitSizes)
 // and EGL_ALPHA_SIZE).If the requested number of bits in attrib list for a
 // particular color component is 0 or EGL_DONT_CARE, then the number of bits
 // for that component is not considered.
-TEST(ConfigSetTest, Sorting_BitSizes)
+TEST(ConfigSetTest, SortingBitSizes)
 {
     egl::ConfigSet set;
     size_t testConfigCount = 64;

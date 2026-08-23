@@ -28,7 +28,15 @@ class ClipDistanceAPPLETest : public ANGLETest<>
         setConfigDepthBits(24);
         setExtensionsEnabled(false);
     }
+
+    // Given the vertex and fragment shader, writes position to |a_position| and three planes in
+    // |u_plane[i]|.  The vertex shader should evaluate |gl_ClipDistance[i]| as
+    // |dot(position, u_plane[i])|.  The fragment shader should output red.
+    void threeClipDistancesRedeclared(const char *vs, const char *fs);
 };
+
+class ClipDistanceTestES3 : public ClipDistanceAPPLETest
+{};
 
 // Query max clip distances and enable, disable states of clip distances
 TEST_P(ClipDistanceAPPLETest, StateQuery)
@@ -218,11 +226,15 @@ uniform vec4 u_plane;
 
 attribute vec2 a_position;
 
+void write(out float distance)
+{
+    distance = dot(gl_Position, u_plane);
+}
+
 void main()
 {
     gl_Position = vec4(a_position, 0.0, 1.0);
-
-    gl_ClipDistance[0] = dot(gl_Position, u_plane);
+    write(gl_ClipDistance[0]);
 })";
 
     ANGLE_GL_PROGRAM(programRed, kVS, essl1_shaders::fs::Red());
@@ -291,6 +303,54 @@ void main()
     EXPECT_PIXEL_RECT_EQ(x, y, width, height, GLColor::red);
 }
 
+// Write to one gl_ClipDistance element and toggle clip distance from enable to disable without any
+// other state change.
+TEST_P(ClipDistanceAPPLETest, ToggleOneClipDistance)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_APPLE_clip_distance"));
+
+    constexpr char kVS[] = R"(
+#extension GL_APPLE_clip_distance : require
+
+uniform vec4 u_plane;
+
+attribute vec2 a_position;
+
+void main()
+{
+    gl_Position = vec4(a_position, 0.0, 1.0);
+
+    gl_ClipDistance[0] = dot(gl_Position, u_plane);
+})";
+
+    ANGLE_GL_PROGRAM(programRed, kVS, essl1_shaders::fs::Red());
+    glUseProgram(programRed);
+    ASSERT_GL_NO_ERROR();
+
+    glEnable(GL_CLIP_DISTANCE0_APPLE);
+
+    // Clear to blue
+    glClearColor(0, 0, 1, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Draw full screen quad with color red. This should clipped such that All pixels on the left of
+    // the plane x = -0.5 must be blue
+    glUniform4f(glGetUniformLocation(programRed, "u_plane"), 1, 0, 0, 0.5);
+    drawQuad(programRed, "a_position", 0);
+
+    // Disable GL_CLIP_DISTANCE without any other state change
+    glDisable(GL_CLIP_DISTANCE0_APPLE);
+    drawQuad(programRed, "a_position", 0);
+
+    // All pixels must be red
+    GLuint x      = 0;
+    GLuint y      = 0;
+    GLuint width  = getWindowWidth();
+    GLuint height = getWindowHeight();
+    EXPECT_PIXEL_RECT_EQ(x, y, width, height, GLColor::red);
+    EXPECT_GL_NO_ERROR();
+}
+
 // Write to each gl_ClipDistance element
 TEST_P(ClipDistanceAPPLETest, EachClipDistance)
 {
@@ -300,12 +360,12 @@ TEST_P(ClipDistanceAPPLETest, EachClipDistance)
     {
         std::stringstream vertexShaderStr;
         vertexShaderStr << "#extension GL_APPLE_clip_distance : require\n"
-                        << "uniform vec4 u_plane;"
-                        << "attribute vec2 a_position;"
-                        << "void main()"
-                        << "{"
-                        << "    gl_Position = vec4(a_position, 0.0, 1.0);"
-                        << "    gl_ClipDistance[" << i << "] = dot(gl_Position, u_plane);"
+                        << "uniform vec4 u_plane;\n"
+                        << "attribute vec2 a_position;\n"
+                        << "void main()\n"
+                        << "{\n"
+                        << "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
+                        << "    gl_ClipDistance[" << i << "] = dot(gl_Position, u_plane);\n"
                         << "}";
 
         ANGLE_GL_PROGRAM(programRed, vertexShaderStr.str().c_str(), essl1_shaders::fs::Red());
@@ -599,36 +659,9 @@ void main()
     }
 }
 
-// Redeclare gl_ClipDistance in shader with explicit size, also use it in a global function
-// outside main()
-TEST_P(ClipDistanceAPPLETest, ThreeClipDistancesRedeclared)
+void ClipDistanceAPPLETest::threeClipDistancesRedeclared(const char *vs, const char *fs)
 {
-    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_APPLE_clip_distance"));
-
-    constexpr char kVS[] = R"(
-#extension GL_APPLE_clip_distance : require
-
-varying highp float gl_ClipDistance[3];
-
-void computeClipDistances(in vec4 position, in vec4 plane[3])
-{
-    gl_ClipDistance[0] = dot(position, plane[0]);
-    gl_ClipDistance[1] = dot(position, plane[1]);
-    gl_ClipDistance[2] = dot(position, plane[2]);
-}
-
-uniform vec4 u_plane[3];
-
-attribute vec2 a_position;
-
-void main()
-{
-    gl_Position = vec4(a_position, 0.0, 1.0);
-
-    computeClipDistances(gl_Position, u_plane);
-})";
-
-    ANGLE_GL_PROGRAM(programRed, kVS, essl1_shaders::fs::Red());
+    ANGLE_GL_PROGRAM(programRed, vs, fs);
     glUseProgram(programRed);
     ASSERT_GL_NO_ERROR();
 
@@ -691,6 +724,104 @@ void main()
             }
         }
     }
+}
+
+// Redeclare gl_ClipDistance in shader with explicit size, also use it in a global function
+// outside main()
+TEST_P(ClipDistanceAPPLETest, ThreeClipDistancesRedeclared)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_APPLE_clip_distance"));
+
+    constexpr char kVS[] = R"(
+#extension GL_APPLE_clip_distance : require
+
+varying highp float gl_ClipDistance[3];
+
+void computeClipDistances(in vec4 position, in vec4 plane[3])
+{
+    gl_ClipDistance[0] = dot(position, plane[0]);
+    gl_ClipDistance[1] = dot(position, plane[1]);
+    gl_ClipDistance[2] = dot(position, plane[2]);
+}
+
+uniform vec4 u_plane[3];
+
+attribute vec2 a_position;
+
+void main()
+{
+    gl_Position = vec4(a_position, 0.0, 1.0);
+
+    computeClipDistances(gl_Position, u_plane);
+})";
+
+    threeClipDistancesRedeclared(kVS, essl1_shaders::fs::Red());
+}
+
+// Redeclare gl_ClipDistance in shader with explicit size, also pass it to a function.
+TEST_P(ClipDistanceAPPLETest, ThreeClipDistancesRedeclaredAndPassedToFunction)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled("GL_APPLE_clip_distance"));
+
+    constexpr char kVS[] = R"(
+#extension GL_APPLE_clip_distance : require
+
+varying highp float gl_ClipDistance[3];
+
+void computeClipDistances(out float distance[3], in vec4 position, in vec4 plane[3])
+{
+    distance[0] = dot(position, plane[0]);
+    distance[1] = dot(position, plane[1]);
+    distance[2] = dot(position, plane[2]);
+}
+
+uniform vec4 u_plane[3];
+
+attribute vec2 a_position;
+
+void main()
+{
+    gl_Position = vec4(a_position, 0.0, 1.0);
+
+    computeClipDistances(gl_ClipDistance, gl_Position, u_plane);
+})";
+
+    threeClipDistancesRedeclared(kVS, essl1_shaders::fs::Red());
+}
+
+// Redeclare gl_ClipDistance in shader with explicit size, also pass it to a function.
+TEST_P(ClipDistanceTestES3, ThreeClipDistancesRedeclaredAndPassedToFunction)
+{
+    const bool hasExt   = IsGLExtensionEnabled("GL_EXT_clip_cull_distance");
+    const bool hasAngle = IsGLExtensionEnabled("GL_ANGLE_clip_cull_distance");
+    ANGLE_SKIP_TEST_IF(!hasExt && !hasAngle);
+
+    std::stringstream vs;
+    vs << R"(#version 300 es
+#extension )"
+       << (hasExt ? "GL_EXT_clip_cull_distance" : "GL_ANGLE_clip_cull_distance") << R"( : require
+
+varying highp float gl_ClipDistance[3];
+
+void computeClipDistances(out float distance[3], in vec4 position, in vec4 plane[3])
+{
+    distance[0] = dot(position, plane[0]);
+    distance[1] = dot(position, plane[1]);
+    distance[2] = dot(position, plane[2]);
+}
+
+uniform vec4 u_plane[3];
+
+in vec2 a_position;
+
+void main()
+{
+    gl_Position = vec4(a_position, 0.0, 1.0);
+
+    computeClipDistances(gl_ClipDistance, gl_Position, u_plane);
+})";
+
+    threeClipDistancesRedeclared(vs.str().c_str(), essl3_shaders::fs::Red());
 }
 
 using ClipCullDistanceTestParams = std::tuple<angle::PlatformParameters, bool>;
@@ -866,7 +997,7 @@ TEST_P(ClipCullDistanceTest, StorageQualifiers)
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled(kExtensionName));
 
     std::stringstream vertexSource;
-    auto vs = [=, &vertexSource](std::string name, std::string qualifier) {
+    auto vs = [this, &vertexSource](std::string name, std::string qualifier) {
         vertexSource.str(std::string());
         vertexSource.clear();
         vertexSource << "#version 300 es\n"
@@ -880,7 +1011,7 @@ TEST_P(ClipCullDistanceTest, StorageQualifiers)
     };
 
     std::stringstream fragmentSource;
-    auto fs = [=, &fragmentSource](std::string name, std::string qualifier) {
+    auto fs = [this, &fragmentSource](std::string name, std::string qualifier) {
         fragmentSource.str(std::string());
         fragmentSource.clear();
         fragmentSource << "#version 300 es\n"
@@ -943,7 +1074,7 @@ TEST_P(ClipCullDistanceTest, OutOfRangeArraySize)
 {
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled(kExtensionName));
 
-    auto test = [=](std::string name, int maxSize) {
+    auto test = [this](std::string name, int maxSize) {
         std::stringstream vsImplicit;
         vsImplicit << R"(#version 300 es
         #extension )"
@@ -1013,19 +1144,19 @@ TEST_P(ClipCullDistanceTest, SizeCheck)
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled(kExtensionName));
 
     std::stringstream vertexSource;
-    auto vs = [=, &vertexSource](std::string name, bool declare, int size) {
+    auto vs = [this, &vertexSource](std::string name, bool declare, int size) {
         vertexSource.str(std::string());
         vertexSource.clear();
-        vertexSource << "#version 300 es\n"
-                     << "#extension " << kExtensionName << " : require\n";
+        vertexSource << "#version 300 es\n";
+        vertexSource << "#extension " << kExtensionName << " : require\n";
         if (declare)
         {
             ASSERT(size);
             vertexSource << "out highp float " << name << "[" << size << "];\n";
         }
-        vertexSource << "void main()\n"
-                     << "{\n"
-                     << "    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);\n";
+        vertexSource << "void main()\n";
+        vertexSource << "{\n";
+        vertexSource << "    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);\n";
         if (size)
         {
             vertexSource << "    " << name << "[" << (size - 1) << "] = 1.0;\n";
@@ -1034,11 +1165,11 @@ TEST_P(ClipCullDistanceTest, SizeCheck)
     };
 
     std::stringstream fragmentSource;
-    auto fs = [=, &fragmentSource](std::string name, bool declare, int size) {
+    auto fs = [this, &fragmentSource](std::string name, bool declare, int size) {
         fragmentSource.str(std::string());
         fragmentSource.clear();
-        fragmentSource << "#version 300 es\n"
-                       << "#extension " << kExtensionName << " : require\n";
+        fragmentSource << "#version 300 es\n";
+        fragmentSource << "#extension " << kExtensionName << " : require\n";
         if (declare)
         {
             ASSERT(size);
@@ -1056,8 +1187,8 @@ TEST_P(ClipCullDistanceTest, SizeCheck)
         {
             fragmentSource << "1.0";
         }
-        fragmentSource << ", 0.0, 0.0, 1.0);\n"
-                       << "}\n";
+        fragmentSource << ", 0.0, 0.0, 1.0);\n";
+        fragmentSource << "}\n";
     };
 
     auto checkProgram = [=, &vertexSource, &fragmentSource](std::string name, bool declareVertex,
@@ -1149,11 +1280,12 @@ TEST_P(ClipCullDistanceTest, SizeCheckCombined)
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled(kExtensionName));
 
     std::stringstream vertexSource;
-    auto vs = [=, &vertexSource](bool declareClip, int sizeClip, bool declareCull, int sizeCull) {
+    auto vs = [this, &vertexSource](bool declareClip, int sizeClip, bool declareCull,
+                                    int sizeCull) {
         vertexSource.str(std::string());
         vertexSource.clear();
-        vertexSource << "#version 300 es\n"
-                     << "#extension " << kExtensionName << " : require\n";
+        vertexSource << "#version 300 es\n";
+        vertexSource << "#extension " << kExtensionName << " : require\n";
         if (declareClip)
         {
             ASSERT(sizeClip);
@@ -1173,11 +1305,12 @@ TEST_P(ClipCullDistanceTest, SizeCheckCombined)
     };
 
     std::stringstream fragmentSource;
-    auto fs = [=, &fragmentSource](bool declareClip, int sizeClip, bool declareCull, int sizeCull) {
+    auto fs = [this, &fragmentSource](bool declareClip, int sizeClip, bool declareCull,
+                                      int sizeCull) {
         fragmentSource.str(std::string());
         fragmentSource.clear();
-        fragmentSource << "#version 300 es\n"
-                       << "#extension " << kExtensionName << " : require\n";
+        fragmentSource << "#version 300 es\n";
+        fragmentSource << "#extension " << kExtensionName << " : require\n";
         if (declareClip)
         {
             ASSERT(sizeClip);
@@ -1191,10 +1324,10 @@ TEST_P(ClipCullDistanceTest, SizeCheckCombined)
         fragmentSource << "out highp vec4 my_FragColor;\n"
                        << "void main()\n"
                        << "{\n"
-                       << "    my_FragColor = vec4("
-                       << "gl_ClipDistance[" << (sizeClip - 1) << "], "
-                       << "gl_CullDistance[" << (sizeCull - 1) << "], "
-                       << "0.0, 1.0);\n"
+                       << "    my_FragColor = vec4(\n"
+                       << "        gl_ClipDistance[" << (sizeClip - 1) << "],\n"
+                       << "        gl_CullDistance[" << (sizeCull - 1) << "],\n"
+                       << "        0.0, 1.0);\n"
                        << "}\n";
     };
 
@@ -1269,7 +1402,7 @@ TEST_P(ClipCullDistanceTest, Unused)
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled(kExtensionName));
 
     std::stringstream vertexSource;
-    auto vs = [=, &vertexSource](std::string name) {
+    auto vs = [this, &vertexSource](std::string name) {
         vertexSource.str(std::string());
         vertexSource.clear();
         vertexSource << "#version 300 es\n"
@@ -1279,11 +1412,11 @@ TEST_P(ClipCullDistanceTest, Unused)
     };
 
     std::stringstream fragmentSource;
-    auto fs = [=, &fragmentSource](std::string name, bool declare) {
+    auto fs = [this, &fragmentSource](std::string name, bool declare) {
         fragmentSource.str(std::string());
         fragmentSource.clear();
-        fragmentSource << "#version 300 es\n"
-                       << "#extension " << kExtensionName << " : require\n";
+        fragmentSource << "#version 300 es\n";
+        fragmentSource << "#extension " << kExtensionName << " : require\n";
         if (declare)
         {
             fragmentSource << "in highp float " << name << "[8];\n";
@@ -1325,6 +1458,218 @@ TEST_P(ClipCullDistanceTest, Unused)
 
         EXPECT_TRUE(checkProgram(entry.first, false));
         EXPECT_TRUE(checkProgram(entry.first, true));
+    }
+}
+
+// Test that unused gl_ClipDistance does not cause a translator crash
+TEST_P(ClipCullDistanceTest, UnusedVertexVaryingNoCrash)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled(kExtensionName));
+
+    std::string kVS = R"(#version 300 es
+#extension )" + kExtensionName +
+                      R"( : require
+precision highp float;
+void main()
+{
+  float r = gl_ClipDistance[1] + 0.5;
+})";
+
+    GLProgram prg;
+    prg.makeRaster(kVS.c_str(), essl3_shaders::fs::Red());
+
+    EXPECT_TRUE(prg.valid());
+}
+
+// Test that unused gl_ClipDistance does not cause a translator crash
+TEST_P(ClipCullDistanceTest, UnusedFragmentVaryingNoCrash)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled(kExtensionName));
+
+    std::string kFS = R"(#version 300 es
+#extension )" + kExtensionName +
+                      R"( : require
+precision highp float;
+out vec4 my_FragColor;
+void main()
+{
+  float r = gl_ClipDistance[1] + 0.5;
+})";
+
+    GLProgram prg;
+    prg.makeRaster(essl3_shaders::vs::Simple(), kFS.c_str());
+
+    EXPECT_FALSE(prg.valid());
+}
+
+// Test that bad index to gl_ClipDistance does not cause a translator crash
+TEST_P(ClipCullDistanceTest, BadIndexNoCrash)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled(kExtensionName));
+
+    std::string kVS = R"(#version 300 es
+#extension )" + kExtensionName +
+                      R"( : require
+
+void main()
+{
+    gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
+    gl_ClipDistance[float(0)] = gl_Position.w;
+})";
+
+    GLProgram prg;
+    prg.makeRaster(kVS.c_str(), essl1_shaders::fs::Red());
+    EXPECT_FALSE(prg.valid());
+}
+
+// Test that length() does not compile for unsized arrays
+TEST_P(ClipCullDistanceTest, UnsizedArrayLength)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled(kExtensionName));
+
+    for (std::string name : {"gl_ClipDistance", "gl_CullDistance"})
+    {
+        std::stringstream vertexSource;
+        vertexSource << "#version 300 es\n"
+                     << "#extension " << kExtensionName << " : require\n"
+                     << "void main() { " << name << ".length(); }";
+
+        GLProgram program;
+        program.makeRaster(vertexSource.str().c_str(), essl3_shaders::fs::Red());
+        EXPECT_FALSE(program.valid()) << name;
+    }
+}
+
+// Test that length() returns correct values for sized arrays
+TEST_P(ClipCullDistanceTest, SizedArrayLength)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled(kExtensionName));
+
+    std::stringstream vertexSource;
+    auto vs = [this, &vertexSource](std::string name, bool declare, int size) {
+        vertexSource.str(std::string());
+        vertexSource.clear();
+        vertexSource << "#version 300 es\n";
+        vertexSource << "#extension " << kExtensionName << " : require\n";
+        if (declare)
+        {
+            vertexSource << "out highp float " << name << "[" << size << "];\n";
+        }
+        vertexSource << "in vec4 a_position;\n"
+                     << "out float v_length;\n"
+                     << "void main()\n"
+                     << "{\n"
+                     << "    gl_Position = a_position;\n"
+                     << "    v_length = float(" << name << ".length()) / 16.0;\n";
+        // Assign all elements to avoid undefined behavior
+        for (int i = 0; i < size; ++i)
+        {
+            vertexSource << "    " << name << "[" << i << "] = 1.0;\n";
+        }
+        vertexSource << "}";
+    };
+
+    std::string kFS = R"(#version 300 es
+#extension )" + kExtensionName +
+                      R"( : require
+in mediump float v_length;
+out mediump vec4 my_FragColor;
+void main()
+{
+    my_FragColor = vec4(v_length, 0.0, 0.0, 1.0);
+})";
+
+    auto checkLength = [this, vs, kFS, &vertexSource](std::string name, bool declare, int size) {
+        GLProgram program;
+        vs(name, declare, size);
+        program.makeRaster(vertexSource.str().c_str(), kFS.c_str());
+        ASSERT_TRUE(program.valid()) << name;
+
+        glClear(GL_COLOR_BUFFER_BIT);
+        drawQuad(program, "a_position", 0);
+        EXPECT_PIXEL_NEAR(0, 0, size * 16, 0, 0, 255, 1);
+    };
+
+    GLint maxClipDistances = 0;
+    glGetIntegerv(GL_MAX_CLIP_DISTANCES_EXT, &maxClipDistances);
+    ASSERT_GT(maxClipDistances, 0);
+
+    GLint maxCullDistances = 0;
+    glGetIntegerv(GL_MAX_CULL_DISTANCES_EXT, &maxCullDistances);
+    if (mCullDistanceSupportRequired)
+    {
+        ASSERT_GT(maxCullDistances, 0);
+    }
+    else
+    {
+        ASSERT_GE(maxCullDistances, 0);
+    }
+
+    std::pair<std::string, int> entries[2] = {{"gl_ClipDistance", maxClipDistances},
+                                              {"gl_CullDistance", maxCullDistances}};
+    for (auto entry : entries)
+    {
+        const std::string name = entry.first;
+        const int maxSize      = entry.second;
+        for (int i = 1; i <= maxSize; i++)
+        {
+            checkLength(name, false, i);
+            checkLength(name, true, i);
+        }
+    }
+}
+
+// Test that pruning clip/cull distance variables does not cause a translator crash
+TEST_P(ClipCullDistanceTest, Pruned)
+{
+    ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled(kExtensionName));
+
+    std::stringstream vertexSource;
+    auto vs = [this, &vertexSource](std::string name, bool doReturn) {
+        vertexSource.str(std::string());
+        vertexSource.clear();
+        vertexSource << "#version 300 es\n";
+        vertexSource << "#extension " << kExtensionName << " : require\n";
+        vertexSource << "void main()\n"
+                     << "{\n"
+                     << "    " << (doReturn ? "return;\n" : "") << "    " << name << "[1];\n";
+        vertexSource << "}";
+    };
+
+    std::stringstream fragmentSource;
+    auto fs = [this, &fragmentSource](std::string name) {
+        fragmentSource.str(std::string());
+        fragmentSource.clear();
+        fragmentSource << "#version 300 es\n";
+        fragmentSource << "#extension " << kExtensionName << " : require\n";
+        fragmentSource << "out mediump vec4 my_FragColor;\n"
+                       << "void main()\n"
+                       << "{\n"
+                       << "    my_FragColor = vec4(" << name << "[1]);\n";
+        fragmentSource << "}";
+    };
+
+    auto checkPruning = [vs, fs, &vertexSource, &fragmentSource](std::string name, bool doReturn) {
+        GLProgram program;
+        vs(name, doReturn);
+        fs(name);
+        program.makeRaster(vertexSource.str().c_str(), fragmentSource.str().c_str());
+        ASSERT_TRUE(program.valid()) << name << (doReturn ? " after return" : "");
+    };
+
+    GLint maxClipDistances = 0;
+    glGetIntegerv(GL_MAX_CLIP_DISTANCES_EXT, &maxClipDistances);
+    ASSERT_GT(maxClipDistances, 0);
+    checkPruning("gl_ClipDistance", false);
+    checkPruning("gl_ClipDistance", true);
+
+    GLint maxCullDistances = 0;
+    glGetIntegerv(GL_MAX_CULL_DISTANCES_EXT, &maxCullDistances);
+    if (mCullDistanceSupportRequired)
+    {
+        ASSERT_GT(maxCullDistances, 0);
+        checkPruning("gl_CullDistance", false);
+        checkPruning("gl_CullDistance", true);
     }
 }
 
@@ -1424,12 +1769,12 @@ TEST_P(ClipCullDistanceTest, EachClipDistance)
         std::stringstream vertexShaderStr;
         vertexShaderStr << "#version 300 es\n"
                         << "#extension " << kExtensionName << " : require\n"
-                        << "uniform vec4 u_plane;"
-                        << "in vec2 a_position;"
-                        << "void main()"
-                        << "{"
-                        << "    gl_Position = vec4(a_position, 0.0, 1.0);"
-                        << "    gl_ClipDistance[" << i << "] = dot(gl_Position, u_plane);"
+                        << "uniform vec4 u_plane;\n"
+                        << "in vec2 a_position;\n"
+                        << "void main()\n"
+                        << "{\n"
+                        << "    gl_Position = vec4(a_position, 0.0, 1.0);\n"
+                        << "    gl_ClipDistance[" << i << "] = dot(gl_Position, u_plane);\n"
                         << "}";
 
         ANGLE_GL_PROGRAM(programRed, vertexShaderStr.str().c_str(), essl3_shaders::fs::Red());
@@ -2265,7 +2610,7 @@ TEST_P(ClipCullDistanceTest, FourCullDistances)
 {
     ANGLE_SKIP_TEST_IF(!EnsureGLExtensionEnabled(kExtensionName));
 
-    // SwiftShader bug: http://anglebug.com/5451
+    // SwiftShader bug: http://anglebug.com/42263990
     ANGLE_SKIP_TEST_IF(isSwiftshader());
 
     std::string kVS = R"(#version 300 es
@@ -2655,6 +3000,9 @@ void main()
 }
 
 ANGLE_INSTANTIATE_TEST_ES2_AND_ES3(ClipDistanceAPPLETest);
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(ClipDistanceTestES3);
+ANGLE_INSTANTIATE_TEST_ES3(ClipDistanceTestES3);
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(ClipCullDistanceTest);
 ANGLE_INSTANTIATE_TEST_COMBINE_1(ClipCullDistanceTest,

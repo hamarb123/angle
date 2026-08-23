@@ -6,6 +6,10 @@
 
 // GLES1Renderer.cpp: Implements the GLES1Renderer renderer.
 
+#ifdef UNSAFE_BUFFERS_BUILD
+#    pragma allow_unsafe_buffers
+#endif
+
 #include "libANGLE/GLES1Renderer.h"
 
 #include <string.h>
@@ -14,13 +18,15 @@
 #include <vector>
 
 #include "common/hash_utils.h"
+#include "common/span.h"
 #include "libANGLE/Context.h"
 #include "libANGLE/Context.inl.h"
+#include "libANGLE/ErrorStrings.h"
 #include "libANGLE/Program.h"
 #include "libANGLE/ResourceManager.h"
 #include "libANGLE/Shader.h"
 #include "libANGLE/State.h"
-#include "libANGLE/context_private_call_gles_autogen.h"
+#include "libANGLE/context_private_call.inl.h"
 #include "libANGLE/renderer/ContextImpl.h"
 
 namespace
@@ -60,7 +66,7 @@ bool operator!=(const GLES1ShaderState &a, const GLES1ShaderState &b)
 
 size_t GLES1ShaderState::hash() const
 {
-    return angle::ComputeGenericHash(*this);
+    return angle::ComputeGenericHash(angle::byte_span_from_ref(*this));
 }
 
 GLES1Renderer::GLES1Renderer() : mRendererProgramInitialized(false) {}
@@ -141,8 +147,31 @@ angle::Result GLES1Renderer::prepareForDraw(PrimitiveMode mode,
         if (texCubeEnables[i] && currCubeTexture &&
             IsMipmapFiltered(currCubeTexture->getMinFilter()))
         {
-            texCubeEnables[i] = curr2DTexture->isMipmapComplete();
+            texCubeEnables[i] = currCubeTexture->isMipmapComplete();
         }
+    }
+
+    // In case of zero texture bound to draw, do not try to update the vertex attribute array.
+    // However, if the zero texture is enabled on the currently active texture unit, we need to
+    // update the vertex attribute array.
+    unsigned int clientActiveTexture = gles1State->getClientTextureUnit();
+    bool isTextureEnabled =
+        tex2DEnables[clientActiveTexture] || texCubeEnables[clientActiveTexture];
+    const bool needToUpdateVertexAttribArray = !context->isZeroTextureBound(TextureType::_2D) ||
+                                               !context->isZeroTextureBound(TextureType::CubeMap) ||
+                                               isTextureEnabled;
+
+    // If texture has been disabled on the active sampler, texture coordinate data should not be
+    // used. However, according to the spec, a rasterized fragment is passed on unaltered to the
+    // next stage.
+    if (gles1State->isDirty(GLES1State::DIRTY_GLES1_TEXTURE_UNIT_ENABLE) &&
+        needToUpdateVertexAttribArray)
+    {
+        context->getMutablePrivateState()->setEnableVertexAttribArray(
+            TexCoordArrayIndex(clientActiveTexture),
+            isTextureEnabled && gles1State->isTexCoordArrayEnabled(clientActiveTexture));
+
+        context->getStateCache().onGLES1TextureStateChange(context);
     }
 
     GLES1ShaderState::UintTexArray &texEnvModes          = mShaderState.texEnvModes;
@@ -287,6 +316,23 @@ angle::Result GLES1Renderer::prepareForDraw(PrimitiveMode mode,
     setUniform4fv(&executable, programState.drawTextureNormalizedCropRectLoc, kTexUnitCount,
                   reinterpret_cast<GLfloat *>(cropRectBuffer));
 
+    for (int i = 0; i < kTexUnitCount; i++)
+    {
+        // To avoid GL_INVALID_OPERATION caused by samplers of different types pointing to the same
+        // texture unit, the inactive sampler is shifted to a dummy unit (i + kTexUnitCount).
+        if (texCubeEnables[i])
+        {
+            setUniform1i(context, &executable, programState.tex2DSamplerLocs[i], i + kTexUnitCount);
+            setUniform1i(context, &executable, programState.texCubeSamplerLocs[i], i);
+        }
+        else
+        {
+            setUniform1i(context, &executable, programState.tex2DSamplerLocs[i], i);
+            setUniform1i(context, &executable, programState.texCubeSamplerLocs[i],
+                         i + kTexUnitCount);
+        }
+    }
+
     if (gles1State->isDirty(GLES1State::DIRTY_GLES1_LOGIC_OP) && hasLogicOpANGLE)
     {
         // Note: ContextPrivateEnable(GL_COLOR_LOGIC_OP) is not used because that entry point
@@ -386,6 +432,7 @@ angle::Result GLES1Renderer::prepareForDraw(PrimitiveMode mode,
 
     if (gles1State->isDirty(GLES1State::DIRTY_GLES1_TEXTURE_ENVIRONMENT))
     {
+        float maxLodBias = context->getCaps().maxLODBias;
         for (int i = 0; i < kTexUnitCount; i++)
         {
             const auto &env = gles1State->textureEnvironment(i);
@@ -397,6 +444,7 @@ angle::Result GLES1Renderer::prepareForDraw(PrimitiveMode mode,
 
             uniformBuffers.texEnvRgbScales[i]   = env.rgbScale;
             uniformBuffers.texEnvAlphaScales[i] = env.alphaScale;
+            uniformBuffers.texEnvLodBiases[i]   = gl::clamp(env.lodBias, -maxLodBias, maxLodBias);
         }
 
         setUniform4fv(&executable, programState.textureEnvColorLoc, kTexUnitCount,
@@ -405,6 +453,8 @@ angle::Result GLES1Renderer::prepareForDraw(PrimitiveMode mode,
                       uniformBuffers.texEnvRgbScales.data());
         setUniform1fv(&executable, programState.alphaScaleLoc, kTexUnitCount,
                       uniformBuffers.texEnvAlphaScales.data());
+        setUniform1fv(&executable, programState.lodBiasLoc, kTexUnitCount,
+                      uniformBuffers.texEnvLodBiases.data());
     }
 
     // Alpha test
@@ -634,15 +684,17 @@ angle::Result GLES1Renderer::compileShader(Context *context,
     rx::ContextImpl *implementation = context->getImplementation();
     const Limitations &limitations  = implementation->getNativeLimitations();
 
-    ShaderProgramID shader = mShaderPrograms->createShader(implementation, limitations, shaderType);
+    if (!mShaderPrograms->createShader(implementation, limitations, shaderType, shaderOut))
+    {
+        ANGLE_CHECK(context, false, err::kHandleExhaustion, GL_OUT_OF_MEMORY);
+        return angle::Result::Stop;
+    }
 
-    Shader *shaderObject = getShader(shader);
+    Shader *shaderObject = getShader(*shaderOut);
     ANGLE_CHECK(context, shaderObject, "Missing shader object", GL_INVALID_OPERATION);
 
     shaderObject->setSource(context, 1, &src, nullptr);
     shaderObject->compile(context, angle::JobResultExpectancy::Immediate);
-
-    *shaderOut = shader;
 
     if (!shaderObject->isCompiled(context))
     {
@@ -666,17 +718,19 @@ angle::Result GLES1Renderer::linkProgram(Context *context,
                                          const angle::HashMap<GLint, std::string> &attribLocs,
                                          ShaderProgramID *programOut)
 {
-    ShaderProgramID program = mShaderPrograms->createProgram(context->getImplementation());
+    if (!mShaderPrograms->createProgram(context->getImplementation(), programOut))
+    {
+        ANGLE_CHECK(context, false, err::kHandleExhaustion, GL_OUT_OF_MEMORY);
+        return angle::Result::Stop;
+    }
 
-    Program *programObject = getProgram(program);
+    Program *programObject = getProgram(*programOut);
     ANGLE_CHECK(context, programObject, "Missing program object", GL_INVALID_OPERATION);
-
-    *programOut = program;
 
     programObject->attachShader(context, getShader(vertexShader));
     programObject->attachShader(context, getShader(fragmentShader));
 
-    for (auto it : attribLocs)
+    for (const auto &it : attribLocs)
     {
         GLint index             = it.first;
         const std::string &name = it.second;
@@ -926,9 +980,9 @@ angle::Result GLES1Renderer::initializeRendererProgram(Context *context,
     ShaderProgramID vertexShader;
     ShaderProgramID fragmentShader;
 
-    // Set the count of texture units to a minimum (at least one for simplicity), to avoid requiring
-    // unnecessary vertex attributes and take up varying slots.
-    uint32_t maxTexUnitsEnabled = 1;
+    // Set the count of texture units to a minimum to avoid requiring unnecessary vertex attributes
+    // and take up varying slots.
+    uint32_t maxTexUnitsEnabled = 0;
     for (int i = 0; i < kTexUnitCount; i++)
     {
         if (mShaderState.texCubeEnables[i] || mShaderState.tex2DEnables[i])
@@ -1029,13 +1083,14 @@ angle::Result GLES1Renderer::initializeRendererProgram(Context *context,
         ss2d << "tex_sampler" << i;
         sscube << "tex_cube_sampler" << i;
 
-        programState.tex2DSamplerLocs[i]   = executable.getUniformLocation(ss2d.str().c_str());
-        programState.texCubeSamplerLocs[i] = executable.getUniformLocation(sscube.str().c_str());
+        programState.tex2DSamplerLocs[i]   = executable.getUniformLocation(ss2d.str());
+        programState.texCubeSamplerLocs[i] = executable.getUniformLocation(sscube.str());
     }
 
     programState.textureEnvColorLoc = executable.getUniformLocation("texture_env_color");
     programState.rgbScaleLoc        = executable.getUniformLocation("texture_env_rgb_scale");
     programState.alphaScaleLoc      = executable.getUniformLocation("texture_env_alpha_scale");
+    programState.lodBiasLoc         = executable.getUniformLocation("texture_env_lod_bias");
 
     programState.alphaTestRefLoc = executable.getUniformLocation("alpha_test_ref");
 
@@ -1088,10 +1143,11 @@ angle::Result GLES1Renderer::initializeRendererProgram(Context *context,
 
     for (int i = 0; i < kTexUnitCount; i++)
     {
+        // To avoid GL_INVALID_OPERATION caused by samplers of different types pointing to the same
+        // texture unit, the inactive sampler is shifted to a dummy unit (i + kTexUnitCount).
         setUniform1i(context, &executable, programState.tex2DSamplerLocs[i], i);
         setUniform1i(context, &executable, programState.texCubeSamplerLocs[i], i + kTexUnitCount);
     }
-    glState->setObjectDirty(GL_PROGRAM);
 
     // We just created a new program, we need to sync everything
     gles1State->setAllDirty();
@@ -1209,12 +1265,14 @@ void GLES1Renderer::setAttributesEnabled(Context *context,
         if (mask.test(index))
         {
             gles1State->setClientStateEnabled(attrib, true);
-            context->enableVertexAttribArray(index);
+            ContextPrivateEnableVertexAttribArray(context->getMutablePrivateState(),
+                                                  context->getMutablePrivateStateCache(), index);
         }
         else
         {
             gles1State->setClientStateEnabled(attrib, false);
-            context->disableVertexAttribArray(index);
+            ContextPrivateDisableVertexAttribArray(context->getMutablePrivateState(),
+                                                   context->getMutablePrivateStateCache(), index);
         }
     }
 
@@ -1225,12 +1283,14 @@ void GLES1Renderer::setAttributesEnabled(Context *context,
         if (mask.test(index))
         {
             gles1State->setTexCoordArrayEnabled(i, true);
-            context->enableVertexAttribArray(index);
+            ContextPrivateEnableVertexAttribArray(context->getMutablePrivateState(),
+                                                  context->getMutablePrivateStateCache(), index);
         }
         else
         {
             gles1State->setTexCoordArrayEnabled(i, false);
-            context->disableVertexAttribArray(index);
+            ContextPrivateDisableVertexAttribArray(context->getMutablePrivateState(),
+                                                   context->getMutablePrivateStateCache(), index);
         }
     }
 }

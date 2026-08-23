@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include "common/unsafe_buffers.h"
 #include "test_utils/ANGLETest.h"
 #include "util/EGLWindow.h"
 
@@ -94,7 +95,7 @@ TEST_P(EGLSyncTestMetalSharedEvent, BasicEGLSync)
     glFinish();
 
     // Don't wait forever to make sure the test terminates
-    constexpr GLuint64 kTimeout = 1'000'000'000;  // 1 second
+    constexpr GLuint64 kTimeout = 1000'000'000ul;  // 1 second
     EXPECT_EQ(EGL_CONDITION_SATISFIED_KHR,
               eglClientWaitSyncKHR(display, sync, EGL_SYNC_FLUSH_COMMANDS_BIT_KHR, kTimeout));
 
@@ -123,7 +124,7 @@ TEST_P(EGLSyncTestMetalSharedEvent, GetSyncAttrib)
     EGLSync sync = eglCreateSync(display, EGL_SYNC_METAL_SHARED_EVENT_ANGLE, syncAttribs);
     EXPECT_NE(sync, EGL_NO_SYNC);
     // sharedEvent, sync, mtlCommandBuffer
-    EXPECT_EQ([sharedEvent retainCount], 3ul);
+    EXPECT_GT([sharedEvent retainCount], 1ul);
 
     // Fence sync attributes are:
     //
@@ -143,7 +144,7 @@ TEST_P(EGLSyncTestMetalSharedEvent, GetSyncAttrib)
     attribValue = kSentinelAttribValue;
     EXPECT_EGL_TRUE(eglGetSyncAttrib(display, sync, EGL_SYNC_STATUS, &attribValue));
     EXPECT_EQ(attribValue, EGL_UNSIGNALED);
-    EXPECT_EQ([sharedEvent retainCount], 3ul);
+    EXPECT_GT([sharedEvent retainCount], 1ul);
 
     glFinish();
 
@@ -151,7 +152,7 @@ TEST_P(EGLSyncTestMetalSharedEvent, GetSyncAttrib)
     EXPECT_EGL_TRUE(eglGetSyncAttrib(display, sync, EGL_SYNC_STATUS, &attribValue));
     EXPECT_EQ(attribValue, EGL_SIGNALED);
     EXPECT_EQ(sharedEvent.signaledValue, initialSignalValue + 1);
-    EXPECT_EQ([sharedEvent retainCount], 2ul);
+    EXPECT_GT([sharedEvent retainCount], 1ul);
 
     EXPECT_EGL_TRUE(eglDestroySync(display, sync));
     EXPECT_EQ([sharedEvent retainCount], 1ul);
@@ -183,7 +184,8 @@ TEST_P(EGLSyncTestMetalSharedEvent, GetSyncAttrib_ExplicitSyncCondition)
     {
         uint64_t initialSignalValue = sharedEvent.signaledValue;
 
-        EGLSync sync = eglCreateSync(display, EGL_SYNC_METAL_SHARED_EVENT_ANGLE, syncAttribs[i]);
+        EGLSync sync = eglCreateSync(display, EGL_SYNC_METAL_SHARED_EVENT_ANGLE,
+                                     ANGLE_UNSAFE_TODO(syncAttribs[i]));
         EXPECT_NE(sync, EGL_NO_SYNC);
 
         constexpr EGLAttrib kSentinelAttribValue = 123456789;
@@ -193,7 +195,7 @@ TEST_P(EGLSyncTestMetalSharedEvent, GetSyncAttrib_ExplicitSyncCondition)
 
         attribValue = kSentinelAttribValue;
         EXPECT_EGL_TRUE(eglGetSyncAttrib(display, sync, EGL_SYNC_CONDITION, &attribValue));
-        EXPECT_EQ(attribValue, expectedSyncCondition[i]);
+        EXPECT_EQ(attribValue, ANGLE_UNSAFE_TODO(expectedSyncCondition[i]));
 
         attribValue = kSentinelAttribValue;
         EXPECT_EGL_TRUE(eglGetSyncAttrib(display, sync, EGL_SYNC_STATUS, &attribValue));
@@ -313,7 +315,7 @@ TEST_P(EGLSyncTestMetalSharedEvent, AngleMetalSharedEventSync_CopyMetalSharedEve
     id<MTLSharedEvent> sharedEvent =
         sharedEventFromVoidPtr(eglCopyMetalSharedEventANGLE(display, syncWithGeneratedEvent));
     EXPECT_EGL_SUCCESS();
-    EXPECT_EQ([sharedEvent retainCount], 3ul);
+    EXPECT_GT([sharedEvent retainCount], 1ul);
 
     glFinish();
     EXPECT_EGL_TRUE(eglDestroySync(display, syncWithGeneratedEvent));

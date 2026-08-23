@@ -8,6 +8,7 @@
 //
 
 #include <GLSLANG/ShaderLang.h>
+#include "common/unsafe_buffers.h"
 
 #include "common/debug.h"
 #include "common/utilities.h"
@@ -56,6 +57,7 @@ ShaderVariable::ShaderVariable(GLenum typeIn)
       isPatch(false),
       texelFetchStaticUse(false),
       id(0),
+      isFloat16(false),
       flattenedOffsetInParentArrays(-1)
 {}
 
@@ -96,6 +98,7 @@ ShaderVariable::ShaderVariable(const ShaderVariable &other)
       isPatch(other.isPatch),
       texelFetchStaticUse(other.texelFetchStaticUse),
       id(other.id),
+      isFloat16(other.isFloat16),
       flattenedOffsetInParentArrays(other.flattenedOffsetInParentArrays)
 {}
 
@@ -130,6 +133,7 @@ ShaderVariable &ShaderVariable::operator=(const ShaderVariable &other)
     isPatch                       = other.isPatch;
     texelFetchStaticUse           = other.texelFetchStaticUse;
     id                            = other.id;
+    isFloat16                     = other.isFloat16;
     return *this;
 }
 
@@ -148,7 +152,7 @@ bool ShaderVariable::operator==(const ShaderVariable &other) const
         interpolation != other.interpolation || isInvariant != other.isInvariant ||
         isShaderIOBlock != other.isShaderIOBlock || isPatch != other.isPatch ||
         texelFetchStaticUse != other.texelFetchStaticUse ||
-        isFragmentInOut != other.isFragmentInOut)
+        isFragmentInOut != other.isFragmentInOut || isFloat16 != other.isFloat16)
     {
         return false;
     }
@@ -603,9 +607,12 @@ bool WorkGroupSize::isWorkGroupSizeMatching(const WorkGroupSize &right) const
 {
     for (size_t i = 0u; i < size(); ++i)
     {
-        bool result = (localSizeQualifiers[i] == right.localSizeQualifiers[i] ||
-                       (localSizeQualifiers[i] == 1 && right.localSizeQualifiers[i] == -1) ||
-                       (localSizeQualifiers[i] == -1 && right.localSizeQualifiers[i] == 1));
+        bool result = (ANGLE_UNSAFE_TODO(localSizeQualifiers[i]) ==
+                           ANGLE_UNSAFE_TODO(right.localSizeQualifiers[i]) ||
+                       (ANGLE_UNSAFE_TODO(localSizeQualifiers[i]) == 1 &&
+                        ANGLE_UNSAFE_TODO(right.localSizeQualifiers[i]) == -1) ||
+                       (ANGLE_UNSAFE_TODO(localSizeQualifiers[i]) == -1 &&
+                        ANGLE_UNSAFE_TODO(right.localSizeQualifiers[i]) == 1));
         if (!result)
         {
             return false;
@@ -617,13 +624,13 @@ bool WorkGroupSize::isWorkGroupSizeMatching(const WorkGroupSize &right) const
 int &WorkGroupSize::operator[](size_t index)
 {
     ASSERT(index < size());
-    return localSizeQualifiers[index];
+    return ANGLE_UNSAFE_TODO(localSizeQualifiers[index]);
 }
 
 int WorkGroupSize::operator[](size_t index) const
 {
     ASSERT(index < size());
-    return localSizeQualifiers[index];
+    return ANGLE_UNSAFE_TODO(localSizeQualifiers[index]);
 }
 
 size_t WorkGroupSize::size() const

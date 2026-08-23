@@ -5,8 +5,10 @@
 //
 // ProgramExecutable.cpp: Collects the interfaces common to both Programs and
 // ProgramPipelines in order to execute/draw with either.
+//
 
 #include "libANGLE/ProgramExecutable.h"
+#include "common/unsafe_buffers.h"
 
 #include "common/string_utils.h"
 #include "libANGLE/Context.h"
@@ -15,6 +17,7 @@
 #include "libANGLE/queryconversions.h"
 #include "libANGLE/renderer/GLImplFactory.h"
 #include "libANGLE/renderer/ProgramExecutableImpl.h"
+#include "libANGLE/renderer/ProgramImpl.h"
 
 namespace gl
 {
@@ -108,6 +111,7 @@ void AssignOutputLocations(std::vector<VariableLocation> &outputLocations,
                            unsigned int elementCount,
                            const std::vector<VariableLocation> &reservedLocations,
                            unsigned int variableIndex,
+                           bool locationAssignedByApi,
                            ProgramOutput &outputVariable)
 {
     if (baseLocation + elementCount > outputLocations.size())
@@ -125,6 +129,7 @@ void AssignOutputLocations(std::vector<VariableLocation> &outputLocations,
             outputLocations[location]   = locationInfo;
         }
     }
+    outputVariable.pod.hasApiAssignedLocation = locationAssignedByApi;
 }
 
 int GetOutputLocationForLink(const ProgramAliasedBindings &fragmentOutputLocations,
@@ -142,24 +147,29 @@ int GetOutputLocationForLink(const ProgramAliasedBindings &fragmentOutputLocatio
     return -1;
 }
 
-bool IsOutputSecondaryForLink(const ProgramAliasedBindings &fragmentOutputIndexes,
-                              const ProgramOutput &outputVariable)
+void AssignOutputIndex(const ProgramAliasedBindings &fragmentOutputIndexes,
+                       ProgramOutput &outputVariable)
 {
-    if (outputVariable.pod.index != -1)
+    if (outputVariable.pod.hasShaderAssignedLocation)
     {
+        // Already assigned through a layout qualifier
         ASSERT(outputVariable.pod.index == 0 || outputVariable.pod.index == 1);
-        return (outputVariable.pod.index == 1);
+        return;
     }
+
     int apiIndex = fragmentOutputIndexes.getBinding(outputVariable);
     if (apiIndex != -1)
     {
         // Index layout qualifier from the shader takes precedence, so the index from the API is
         // checked only if the index was not set in the shader. This is not specified in the EXT
         // spec, but is specified in desktop OpenGL specs.
-        return (apiIndex == 1);
+        ASSERT(apiIndex == 0 || apiIndex == 1);
+        outputVariable.pod.index = apiIndex;
+        return;
     }
+
     // EXT_blend_func_extended: Outputs get index 0 by default.
-    return false;
+    outputVariable.pod.index = 0;
 }
 
 RangeUI AddUniforms(const ShaderMap<SharedProgramExecutable> &executables,
@@ -195,12 +205,23 @@ RangeUI AddUniforms(const ShaderMap<SharedProgramExecutable> &executables,
 template <typename BlockT>
 void AppendActiveBlocks(ShaderType shaderType,
                         const std::vector<BlockT> &blocksIn,
-                        std::vector<BlockT> &blocksOut)
+                        std::vector<BlockT> &blocksOut,
+                        ProgramUniformBlockArray<GLuint> *ppoBlockMap)
 {
-    for (const BlockT &block : blocksIn)
+    for (size_t index = 0; index < blocksIn.size(); ++index)
     {
+        const BlockT &block = blocksIn[index];
         if (block.isActive(shaderType))
         {
+            // Have a way for the PPO to know how to map the program's UBO index into its own UBO
+            // array.  This is used to propagate changes to the program's UBOs to the PPO's UBO
+            // list.
+            if (ppoBlockMap != nullptr)
+            {
+                (*ppoBlockMap)[static_cast<uint32_t>(index)] =
+                    static_cast<uint32_t>(blocksOut.size());
+            }
+
             blocksOut.push_back(block);
         }
     }
@@ -306,13 +327,13 @@ void LoadBufferVariable(BinaryInputStream *stream, BufferVariable *var)
     stream->readStruct(&var->pod);
 }
 
-void WriteShaderVariableBuffer(BinaryOutputStream *stream, const ShaderVariableBuffer &var)
+void WriteAtomicCounterBuffer(BinaryOutputStream *stream, const AtomicCounterBuffer &var)
 {
     stream->writeVector(var.memberIndexes);
     stream->writeStruct(var.pod);
 }
 
-void LoadShaderVariableBuffer(BinaryInputStream *stream, ShaderVariableBuffer *var)
+void LoadAtomicCounterBuffer(BinaryInputStream *stream, AtomicCounterBuffer *var)
 {
     stream->readVector(&var->memberIndexes);
     stream->readStruct(&var->pod);
@@ -341,8 +362,8 @@ void CopyStringToBuffer(GLchar *buffer,
 {
     ASSERT(bufSize > 0);
     size_t length = std::min<size_t>(bufSize - 1, string.length());
-    memcpy(buffer, string.c_str(), length);
-    buffer[length] = '\0';
+    ANGLE_UNSAFE_TODO(memcpy(buffer, string.c_str(), length));
+    ANGLE_UNSAFE_TODO(buffer[length]) = '\0';
 
     if (lengthOut)
     {
@@ -557,6 +578,11 @@ void GetInterfaceBlockName(const UniformBlockIndex index,
 
     const auto &block = list[index.value];
 
+    if (length)
+    {
+        *length = 0;
+    }
+
     if (bufSize > 0)
     {
         std::string blockName = block.name;
@@ -651,8 +677,9 @@ void UniformStateQueryCastLoop(DestT *dataOut, const uint8_t *srcPointer, int co
         // We only work with strides of 4 bytes for uniform components. (GLfloat/GLint)
         // Don't use SrcT stride directly since GLboolean has a stride of 1 byte.
         size_t offset               = comp * 4;
-        const SrcT *typedSrcPointer = reinterpret_cast<const SrcT *>(&srcPointer[offset]);
-        dataOut[comp]               = UniformStateQueryCast<DestT>(*typedSrcPointer);
+        const SrcT *typedSrcPointer =
+            reinterpret_cast<const SrcT *>(&ANGLE_UNSAFE_TODO(srcPointer[offset]));
+        ANGLE_UNSAFE_TODO(dataOut[comp]) = UniformStateQueryCast<DestT>(*typedSrcPointer);
     }
 }
 }  // anonymous namespace
@@ -708,35 +735,48 @@ ProgramOutput::ProgramOutput(const sh::ShaderVariable &var)
     SetBitField(pod.isBuiltIn, IsBuiltInName(var.name));
     SetBitField(pod.isArray, var.isArray());
     SetBitField(pod.hasImplicitLocation, var.hasImplicitLocation);
+    SetBitField(pod.hasShaderAssignedLocation, var.location != -1);
+    SetBitField(pod.hasApiAssignedLocation, false);
     SetBitField(pod.pad, 0);
+
+    if (pod.hasShaderAssignedLocation && pod.index == -1)
+    {
+        // Location was assigned but index was not. Equivalent to setting index to 0.
+        pod.index = 0;
+    }
 }
 
 // ProgramExecutable implementation.
 ProgramExecutable::ProgramExecutable(rx::GLImplFactory *factory, InfoLog *infoLog)
     : mImplementation(factory->createProgramExecutable(this)),
       mInfoLog(infoLog),
-      mActiveSamplerRefCounts{},
       mCachedBaseVertex(0),
-      mCachedBaseInstance(0)
+      mCachedBaseInstance(0),
+      mIsPPO(false),
+      mBinaryRetrieveableHint(false)
 {
-    memset(&mPod, 0, sizeof(mPod));
-    mPod.geometryShaderInputPrimitiveType  = PrimitiveMode::Triangles;
-    mPod.geometryShaderOutputPrimitiveType = PrimitiveMode::TriangleStrip;
-    mPod.geometryShaderInvocations         = 1;
-    mPod.transformFeedbackBufferMode       = GL_INTERLEAVED_ATTRIBS;
-    mPod.computeShaderLocalSize.fill(1);
-
+    ANGLE_UNSAFE_TODO(memset(&mPod, 0, sizeof(mPod)));
     reset();
 }
 
 ProgramExecutable::~ProgramExecutable()
 {
+    ASSERT(mPostLinkSubTasks.empty());
+    ASSERT(mPostLinkSubTaskWaitableEvents.empty());
     ASSERT(mImplementation == nullptr);
 }
 
 void ProgramExecutable::destroy(const Context *context)
 {
     ASSERT(mImplementation != nullptr);
+
+    for (SharedProgramExecutable &executable : mPPOProgramExecutables)
+    {
+        if (executable)
+        {
+            UninstallExecutable(context, &executable);
+        }
+    }
 
     mImplementation->destroy(context);
     SafeDelete(mImplementation);
@@ -755,12 +795,16 @@ void ProgramExecutable::reset()
     mPod.samplerUniformRange       = RangeUI(0, 0);
     mPod.imageUniformRange         = RangeUI(0, 0);
     mPod.atomicCounterUniformRange = RangeUI(0, 0);
-    mPod.fragmentInoutRange        = RangeUI(0, 0);
 
-    mPod.hasClipDistance         = false;
-    mPod.hasDiscard              = false;
-    mPod.enablesPerSampleShading = false;
-    mPod.hasYUVOutput            = false;
+    mPod.fragmentInoutIndices.reset();
+
+    mPod.hasClipDistance           = false;
+    mPod.hasDiscard                = false;
+    mPod.enablesPerSampleShading   = false;
+    mPod.hasYUVOutput              = false;
+    mPod.hasDepthInputAttachment   = false;
+    mPod.hasStencilInputAttachment = false;
+    mPod.hasFragCoord              = false;
 
     mPod.advancedBlendEquations.reset();
 
@@ -768,6 +812,8 @@ void ProgramExecutable::reset()
     mPod.geometryShaderOutputPrimitiveType = PrimitiveMode::TriangleStrip;
     mPod.geometryShaderInvocations         = 1;
     mPod.geometryShaderMaxVertices         = 0;
+
+    mPod.transformFeedbackBufferMode = GL_INTERLEAVED_ATTRIBS;
 
     mPod.numViews = -1;
 
@@ -784,7 +830,7 @@ void ProgramExecutable::reset()
     mPod.drawBufferTypeMask.reset();
     mPod.computeShaderLocalSize.fill(1);
 
-    mPod.specConstUsageBits.reset();
+    mPod.padding = 0;
 
     mActiveSamplersMask.reset();
     mActiveSamplerRefCounts = {};
@@ -793,6 +839,11 @@ void ProgramExecutable::reset()
     mActiveSamplerFormats.fill(SamplerFormat::InvalidEnum);
 
     mActiveImagesMask.reset();
+
+    mActiveUniformBufferBlocks.reset();
+    mActiveStorageBufferBlocks.reset();
+
+    mUniformBlockIndexToBufferBinding = {};
 
     mProgramInputs.clear();
     mLinkedTransformFeedbackVaryings.clear();
@@ -811,6 +862,10 @@ void ProgramExecutable::reset()
     mSamplerBindings.clear();
     mSamplerBoundTextureUnits.clear();
     mImageBindings.clear();
+    mPixelLocalStorageLayouts.clear();
+
+    mPostLinkSubTasks.clear();
+    mPostLinkSubTaskWaitableEvents.clear();
 }
 
 void ProgramExecutable::load(gl::BinaryInputStream *stream)
@@ -834,8 +889,6 @@ void ProgramExecutable::load(gl::BinaryInputStream *stream)
     {
         InterfaceBlock &uniformBlock = mUniformBlocks[uniformBlockIndex];
         LoadInterfaceBlock(stream, &uniformBlock);
-        ASSERT(mPod.activeUniformBlockBindings.test(uniformBlockIndex) ==
-               (uniformBlock.pod.binding != 0));
     }
 
     size_t shaderStorageBlockCount = stream->readInt<size_t>();
@@ -854,7 +907,7 @@ void ProgramExecutable::load(gl::BinaryInputStream *stream)
     for (size_t bufferIndex = 0; bufferIndex < atomicCounterBufferCount; ++bufferIndex)
     {
         AtomicCounterBuffer &atomicCounterBuffer = mAtomicCounterBuffers[bufferIndex];
-        LoadShaderVariableBuffer(stream, &atomicCounterBuffer);
+        LoadAtomicCounterBuffer(stream, &atomicCounterBuffer);
     }
 
     size_t bufferVariableCount = stream->readInt<size_t>();
@@ -909,6 +962,12 @@ void ProgramExecutable::load(gl::BinaryInputStream *stream)
             imageBinding.boundImageUnits[elementIndex] = stream->readInt<unsigned int>();
         }
     }
+
+    // ANGLE_shader_pixel_local_storage.
+    size_t plsCount = stream->readInt<size_t>();
+    ASSERT(mPixelLocalStorageLayouts.empty());
+    mPixelLocalStorageLayouts.resize(plsCount);
+    stream->readBytes(angle::as_writable_byte_span(mPixelLocalStorageLayouts));
 
     // These values are currently only used by PPOs, so only load them when the program is marked
     // separable to save memory.
@@ -969,7 +1028,7 @@ void ProgramExecutable::save(gl::BinaryOutputStream *stream) const
     stream->writeInt(mAtomicCounterBuffers.size());
     for (const AtomicCounterBuffer &atomicCounterBuffer : getAtomicCounterBuffers())
     {
-        WriteShaderVariableBuffer(stream, atomicCounterBuffer);
+        WriteAtomicCounterBuffer(stream, atomicCounterBuffer);
     }
 
     stream->writeInt(getBufferVariables().size());
@@ -1010,6 +1069,10 @@ void ProgramExecutable::save(gl::BinaryOutputStream *stream) const
             stream->writeInt(imageBinding.boundImageUnits[i]);
         }
     }
+
+    // ANGLE_shader_pixel_local_storage.
+    stream->writeInt<size_t>(mPixelLocalStorageLayouts.size());
+    stream->writeBytes(angle::as_byte_span(mPixelLocalStorageLayouts));
 
     // These values are currently only used by PPOs, so only save them when the program is marked
     // separable to save memory.
@@ -1237,12 +1300,7 @@ bool ProgramExecutable::linkMergedVaryings(const Caps &caps,
     // Map the varyings to the register file
     // In WebGL, we use a slightly different handling for packing variables.
     gl::PackMode packMode = PackMode::ANGLE_RELAXED;
-    if (limitations.noFlexibleVaryingPacking)
-    {
-        // D3D9 pack mode is strictly more strict than WebGL, so takes priority.
-        packMode = PackMode::ANGLE_NON_CONFORMANT_D3D9;
-    }
-    else if (webglCompatibility)
+    if (webglCompatibility)
     {
         packMode = PackMode::WEBGL_STRICT;
     }
@@ -1588,11 +1646,13 @@ bool ProgramExecutable::linkValidateOutputVariables(
     for (unsigned int outputVariableIndex = 0; outputVariableIndex < mOutputVariables.size();
          outputVariableIndex++)
     {
-        const ProgramOutput &outputVariable = mOutputVariables[outputVariableIndex];
+        ProgramOutput &outputVariable = mOutputVariables[outputVariableIndex];
 
         // Don't store outputs for gl_FragDepth, gl_FragColor, etc.
         if (outputVariable.isBuiltIn())
+        {
             continue;
+        }
 
         int fixedLocation = GetOutputLocationForLink(fragmentOutputLocations, outputVariable);
         if (fixedLocation == -1)
@@ -1602,10 +1662,10 @@ bool ProgramExecutable::linkValidateOutputVariables(
         }
         unsigned int baseLocation = static_cast<unsigned int>(fixedLocation);
 
+        AssignOutputIndex(fragmentOutputIndices, outputVariable);
+        ASSERT(outputVariable.pod.index == 0 || outputVariable.pod.index == 1);
         std::vector<VariableLocation> &outputLocations =
-            IsOutputSecondaryForLink(fragmentOutputIndices, outputVariable)
-                ? mSecondaryOutputLocations
-                : mOutputLocations;
+            outputVariable.pod.index == 0 ? mOutputLocations : mSecondaryOutputLocations;
 
         // GLSL ES 3.10 section 4.3.6: Output variables cannot be arrays of arrays or arrays of
         // structures, so we may use getBasicTypeElementCount().
@@ -1617,8 +1677,10 @@ bool ProgramExecutable::linkValidateOutputVariables(
                       << " conflicts with another variable.";
             return false;
         }
+        bool hasApiAssignedLocation = !outputVariable.pod.hasShaderAssignedLocation &&
+                                      (fragmentOutputLocations.getBinding(outputVariable) != -1);
         AssignOutputLocations(outputLocations, baseLocation, elementCount, reservedLocations,
-                              outputVariableIndex, mOutputVariables[outputVariableIndex]);
+                              outputVariableIndex, hasApiAssignedLocation, outputVariable);
     }
 
     // Here we assign locations for the output variables that don't yet have them. Note that we're
@@ -1637,17 +1699,20 @@ bool ProgramExecutable::linkValidateOutputVariables(
     for (unsigned int outputVariableIndex = 0; outputVariableIndex < mOutputVariables.size();
          outputVariableIndex++)
     {
-        const ProgramOutput &outputVariable = mOutputVariables[outputVariableIndex];
+        ProgramOutput &outputVariable = mOutputVariables[outputVariableIndex];
 
         // Don't store outputs for gl_FragDepth, gl_FragColor, etc.
         if (outputVariable.isBuiltIn())
+        {
             continue;
+        }
+
+        AssignOutputIndex(fragmentOutputIndices, outputVariable);
+        ASSERT(outputVariable.pod.index == 0 || outputVariable.pod.index == 1);
+        std::vector<VariableLocation> &outputLocations =
+            outputVariable.pod.index == 0 ? mOutputLocations : mSecondaryOutputLocations;
 
         int fixedLocation = GetOutputLocationForLink(fragmentOutputLocations, outputVariable);
-        std::vector<VariableLocation> &outputLocations =
-            IsOutputSecondaryForLink(fragmentOutputIndices, outputVariable)
-                ? mSecondaryOutputLocations
-                : mOutputLocations;
         unsigned int baseLocation = 0;
         unsigned int elementCount = outputVariable.pod.basicTypeElementCount;
         if (fixedLocation != -1)
@@ -1667,7 +1732,7 @@ bool ProgramExecutable::linkValidateOutputVariables(
                 baseLocation++;
             }
             AssignOutputLocations(outputLocations, baseLocation, elementCount, reservedLocations,
-                                  outputVariableIndex, mOutputVariables[outputVariableIndex]);
+                                  outputVariableIndex, false, outputVariable);
         }
 
         // Check for any elements assigned above the max location that are actually used.
@@ -1818,17 +1883,7 @@ void ProgramExecutable::linkSamplerAndImageBindings(GLuint *combinedImageUniform
 
     // Note that uniform block uniforms are not yet appended to this list.
     ASSERT(mUniforms.empty() || highIter->isAtomicCounter() || highIter->isImage() ||
-           highIter->isSampler() || highIter->isInDefaultBlock() || highIter->isFragmentInOut());
-
-    for (; lowIter != mUniforms.rend() && lowIter->isFragmentInOut(); ++lowIter)
-    {
-        --low;
-    }
-
-    mPod.fragmentInoutRange = RangeUI(low, high);
-
-    highIter = lowIter;
-    high     = low;
+           highIter->isSampler() || highIter->isInDefaultBlock());
 
     for (; lowIter != mUniforms.rend() && lowIter->isAtomicCounter(); ++lowIter)
     {
@@ -1909,8 +1964,9 @@ bool ProgramExecutable::linkAtomicCounterBuffers(const Caps &caps)
     {
         auto &uniform = mUniforms[index];
 
-        uniform.pod.blockOffset                    = uniform.getOffset();
-        uniform.pod.blockArrayStride               = uniform.isArray() ? 4 : 0;
+        uniform.pod.blockArrayStride = uniform.isArray() ? 4 : 0;
+        uniform.pod.blockOffset =
+            uniform.getOffset() + uniform.pod.blockArrayStride * uniform.getOuterArrayOffset();
         uniform.pod.blockMatrixStride              = 0;
         uniform.pod.flagBits.blockIsRowMajorMatrix = false;
         uniform.pod.flagBits.isBlock               = true;
@@ -1919,7 +1975,7 @@ bool ProgramExecutable::linkAtomicCounterBuffers(const Caps &caps)
         for (size_t bufferIndex = 0; bufferIndex < mAtomicCounterBuffers.size(); ++bufferIndex)
         {
             AtomicCounterBuffer &buffer = mAtomicCounterBuffers[bufferIndex];
-            if (buffer.pod.binding == uniform.getBinding())
+            if (buffer.pod.inShaderBinding == uniform.getBinding())
             {
                 buffer.memberIndexes.push_back(index);
                 SetBitField(uniform.pod.bufferIndex, bufferIndex);
@@ -1931,7 +1987,7 @@ bool ProgramExecutable::linkAtomicCounterBuffers(const Caps &caps)
         if (!found)
         {
             AtomicCounterBuffer atomicCounterBuffer;
-            atomicCounterBuffer.pod.binding = uniform.getBinding();
+            atomicCounterBuffer.pod.inShaderBinding = uniform.getBinding();
             atomicCounterBuffer.memberIndexes.push_back(index);
             atomicCounterBuffer.unionReferencesWith(uniform);
             mAtomicCounterBuffers.push_back(atomicCounterBuffer);
@@ -1975,12 +2031,36 @@ void ProgramExecutable::copyInputsFromProgram(const ProgramExecutable &executabl
     mProgramInputs = executable.getProgramInputs();
 }
 
-void ProgramExecutable::copyShaderBuffersFromProgram(const ProgramExecutable &executable,
-                                                     ShaderType shaderType)
+void ProgramExecutable::copyUniformBuffersFromProgram(
+    const ProgramExecutable &executable,
+    ShaderType shaderType,
+    ProgramUniformBlockArray<GLuint> *ppoUniformBlockMap)
 {
-    AppendActiveBlocks(shaderType, executable.getUniformBlocks(), mUniformBlocks);
-    AppendActiveBlocks(shaderType, executable.getShaderStorageBlocks(), mShaderStorageBlocks);
-    AppendActiveBlocks(shaderType, executable.getAtomicCounterBuffers(), mAtomicCounterBuffers);
+    AppendActiveBlocks(shaderType, executable.getUniformBlocks(), mUniformBlocks,
+                       ppoUniformBlockMap);
+
+    const std::vector<InterfaceBlock> &blocks = executable.getUniformBlocks();
+    for (size_t blockIndex = 0; blockIndex < blocks.size(); ++blockIndex)
+    {
+        if (!blocks[blockIndex].isActive(shaderType))
+        {
+            continue;
+        }
+        const uint32_t blockIndexInPPO = (*ppoUniformBlockMap)[static_cast<uint32_t>(blockIndex)];
+        ASSERT(blockIndexInPPO < mUniformBlocks.size());
+
+        // Set the block buffer binding in the PPO to the same binding as the program's.
+        remapUniformBlockBinding({blockIndexInPPO}, executable.getUniformBlockBinding(blockIndex));
+    }
+}
+
+void ProgramExecutable::copyStorageBuffersFromProgram(const ProgramExecutable &executable,
+                                                      ShaderType shaderType)
+{
+    AppendActiveBlocks(shaderType, executable.getShaderStorageBlocks(), mShaderStorageBlocks,
+                       nullptr);
+    AppendActiveBlocks(shaderType, executable.getAtomicCounterBuffers(), mAtomicCounterBuffers,
+                       nullptr);
 
     // Buffer variable info is queried through the program, and program pipelines don't access it.
     ASSERT(mBufferVariables.empty());
@@ -2050,13 +2130,6 @@ void ProgramExecutable::copyUniformsFromProgramMap(
     mPod.atomicCounterUniformRange =
         AddUniforms(executables, mPod.linkedShaderStages, &mUniforms, &mUniformNames,
                     &mUniformMappedNames, getAtomicRange);
-
-    // Merge fragment in/out uniforms.
-    auto getInoutRange = [](const ProgramExecutable &state) {
-        return state.getFragmentInoutRange();
-    };
-    mPod.fragmentInoutRange = AddUniforms(executables, mPod.linkedShaderStages, &mUniforms,
-                                          &mUniformNames, &mUniformMappedNames, getInoutRange);
 
     // Note: uniforms are set through the program, and the program pipeline never needs it.
     ASSERT(mUniformLocations.empty());
@@ -2270,11 +2343,6 @@ void ProgramExecutable::getTransformFeedbackVarying(GLuint index,
     ASSERT(index < mLinkedTransformFeedbackVaryings.size());
     const auto &var     = mLinkedTransformFeedbackVaryings[index];
     std::string varName = var.nameWithArrayIndex();
-    GLsizei lastNameIdx = std::min(bufSize - 1, static_cast<GLsizei>(varName.length()));
-    if (length)
-    {
-        *length = lastNameIdx;
-    }
     if (size)
     {
         *size = var.size();
@@ -2283,10 +2351,14 @@ void ProgramExecutable::getTransformFeedbackVarying(GLuint index,
     {
         *type = var.type;
     }
-    if (name)
+
+    if (length)
     {
-        memcpy(name, varName.c_str(), lastNameIdx);
-        name[lastNameIdx] = '\0';
+        *length = 0;
+    }
+    if (name && bufSize > 0)
+    {
+        CopyStringToBuffer(name, varName, bufSize, length);
     }
 }
 
@@ -2297,17 +2369,17 @@ void ProgramExecutable::getActiveAttribute(GLuint index,
                                            GLenum *type,
                                            GLchar *name) const
 {
+    if (length)
+    {
+        *length = 0;
+    }
+
     if (mProgramInputs.empty())
     {
         // Program is not successfully linked
         if (bufsize > 0)
         {
             name[0] = '\0';
-        }
-
-        if (length)
-        {
-            *length = 0;
         }
 
         *type = GL_NONE;
@@ -2360,6 +2432,11 @@ void ProgramExecutable::getActiveUniform(GLuint index,
                                          GLenum *type,
                                          GLchar *name) const
 {
+    if (length)
+    {
+        *length = 0;
+    }
+
     if (mUniforms.empty())
     {
         // Program is not successfully linked
@@ -2368,13 +2445,15 @@ void ProgramExecutable::getActiveUniform(GLuint index,
             name[0] = '\0';
         }
 
-        if (length)
+        if (size)
         {
-            *length = 0;
+            *size = 0;
         }
 
-        *size = 0;
-        *type = GL_NONE;
+        if (type)
+        {
+            *type = GL_NONE;
+        }
     }
 
     ASSERT(index < mUniforms.size());
@@ -2386,8 +2465,14 @@ void ProgramExecutable::getActiveUniform(GLuint index,
         CopyStringToBuffer(name, string, bufsize, length);
     }
 
-    *size = clampCast<GLint>(uniform.getBasicTypeElementCount());
-    *type = uniform.getType();
+    if (size)
+    {
+        *size = clampCast<GLint>(uniform.getBasicTypeElementCount());
+    }
+    if (type)
+    {
+        *type = uniform.getType();
+    }
 }
 
 GLint ProgramExecutable::getActiveUniformMaxLength() const
@@ -2442,19 +2527,10 @@ GLuint ProgramExecutable::getUniformIndex(const std::string &name) const
 
 bool ProgramExecutable::shouldIgnoreUniform(UniformLocation location) const
 {
-    if (location.value < 0)
-    {
-        return true;
-    }
-
-    if (static_cast<size_t>(location.value) >= mUniformLocations.size())
-    {
-        ERR() << "Invalid uniform location " << location.value << ", expected [0, "
-              << mUniformLocations.size() << ")";
-        return true;
-    }
-
-    return mUniformLocations[location.value].ignored;
+    // Casting to size_t will convert negative values to large positive avoiding double check.
+    // Adding ERR() log to report out of bound location harms performance on Android.
+    return ANGLE_UNLIKELY(static_cast<size_t>(location.value) >= mUniformLocations.size() ||
+                          mUniformLocations[location.value].ignored);
 }
 
 GLuint ProgramExecutable::getUniformIndexFromName(const std::string &name) const
@@ -2579,7 +2655,6 @@ void ProgramExecutable::setUniformGeneric(UniformLocation location,
     const VariableLocation &locationInfo = mUniformLocations[location.value];
     GLsizei clampedCount                 = clampUniformCount(locationInfo, count, UniformSize, v);
     (mImplementation->*SetUniformFunc)(location.value, clampedCount, v);
-    onStateChange(angle::SubjectMessage::ProgramUniformUpdated);
 }
 
 void ProgramExecutable::setUniform1fv(UniformLocation location, GLsizei count, const GLfloat *v)
@@ -2620,10 +2695,6 @@ void ProgramExecutable::setUniform1iv(Context *context,
     if (isSamplerUniformIndex(locationInfo.index))
     {
         updateSamplerUniform(context, locationInfo, clampedCount, v);
-    }
-    else
-    {
-        onStateChange(angle::SubjectMessage::ProgramUniformUpdated);
     }
 }
 
@@ -2679,7 +2750,6 @@ void ProgramExecutable::setUniformMatrixGeneric(UniformLocation location,
 
     GLsizei clampedCount = clampMatrixUniformCount<MatrixC, MatrixR>(location, count, transpose, v);
     (mImplementation->*SetUniformMatrixFunc)(location.value, clampedCount, transpose, v);
-    onStateChange(angle::SubjectMessage::ProgramUniformUpdated);
 }
 
 void ProgramExecutable::setUniformMatrix2fv(UniformLocation location,
@@ -2853,6 +2923,54 @@ void ProgramExecutable::getUniformuiv(const Context *context,
     }
 }
 
+void ProgramExecutable::initInterfaceBlockBindings()
+{
+    // Set initial bindings from shader.
+    for (size_t blockIndex = 0; blockIndex < mUniformBlocks.size(); blockIndex++)
+    {
+        InterfaceBlock &uniformBlock = mUniformBlocks[blockIndex];
+        // All interface blocks either have |binding| defined, or default to binding 0.
+        ASSERT(uniformBlock.pod.inShaderBinding >= 0);
+        remapUniformBlockBinding({static_cast<uint32_t>(blockIndex)},
+                                 uniformBlock.pod.inShaderBinding);
+
+        // This is called on program link/binary, which means the executable has changed.  There is
+        // no need to send any additional notifications to the contexts (where the program may be
+        // current) or program pipeline objects (that have this program attached), because they
+        // already assume all blocks are dirty.
+    }
+}
+
+void ProgramExecutable::remapUniformBlockBinding(UniformBlockIndex uniformBlockIndex,
+                                                 GLuint uniformBlockBinding)
+{
+    // Remove previous binding
+    const GLuint previousBinding = mUniformBlockIndexToBufferBinding[uniformBlockIndex.value];
+    mUniformBufferBindingToUniformBlocks[previousBinding].reset(uniformBlockIndex.value);
+
+    // Set new binding
+    mUniformBlockIndexToBufferBinding[uniformBlockIndex.value] = uniformBlockBinding;
+    mUniformBufferBindingToUniformBlocks[uniformBlockBinding].set(uniformBlockIndex.value);
+}
+
+void ProgramExecutable::updateActiveUniformBufferBlocks()
+{
+    for (size_t blockIndex = 0; blockIndex < mUniformBlocks.size(); blockIndex++)
+    {
+        mActiveUniformBufferBlocks.set(blockIndex,
+                                       mUniformBlocks[blockIndex].activeShaderCount() > 0);
+    }
+}
+
+void ProgramExecutable::updateActiveStorageBufferBlocks()
+{
+    for (size_t blockIndex = 0; blockIndex < mShaderStorageBlocks.size(); blockIndex++)
+    {
+        mActiveStorageBufferBlocks.set(blockIndex,
+                                       mShaderStorageBlocks[blockIndex].activeShaderCount() > 0);
+    }
+}
+
 void ProgramExecutable::setUniformValuesFromBindingQualifiers()
 {
     for (unsigned int samplerIndex : mPod.samplerUniformRange)
@@ -2885,7 +3003,9 @@ GLsizei ProgramExecutable::clampUniformCount(const VariableLocation &locationInf
                                              const T *v)
 {
     if (count == 1)
+    {
         return 1;
+    }
 
     const LinkedUniform &linkedUniform = mUniforms[locationInfo.index];
 
@@ -2933,7 +3053,7 @@ void ProgramExecutable::updateSamplerUniform(Context *context,
 {
     ASSERT(isSamplerUniformIndex(locationInfo.index));
     GLuint samplerIndex                    = getSamplerIndexFromUniformIndex(locationInfo.index);
-    SamplerBinding &samplerBinding         = mSamplerBindings[samplerIndex];
+    const SamplerBinding &samplerBinding   = mSamplerBindings[samplerIndex];
     std::vector<GLuint> &boundTextureUnits = mSamplerBoundTextureUnits;
 
     if (locationInfo.arrayIndex >= samplerBinding.textureUnitsCount)
@@ -2949,7 +3069,7 @@ void ProgramExecutable::updateSamplerUniform(Context *context,
     {
         GLint oldTextureUnit =
             samplerBinding.getTextureUnit(boundTextureUnits, arrayIndex + locationInfo.arrayIndex);
-        GLint newTextureUnit = v[arrayIndex];
+        GLint newTextureUnit = ANGLE_UNSAFE_TODO(v[arrayIndex]);
 
         if (oldTextureUnit == newTextureUnit)
         {
@@ -3108,11 +3228,17 @@ void ProgramExecutable::setBaseInstanceUniform(GLuint baseInstance)
     mImplementation->setUniform1iv(mPod.baseInstanceLocation, 1, &baseInstanceInt);
 }
 
-gl::ProgramExecutable::DirtyBits ProgramExecutable::getAndResetDirtyBits() const
+void ProgramExecutable::waitForPostLinkTasks(const Context *context)
 {
-    DirtyBits dirtyBits = mDirtyBits;
-    mDirtyBits.reset();
-    return dirtyBits;
+    if (mPostLinkSubTasks.empty())
+    {
+        return;
+    }
+
+    mImplementation->waitForPostLinkTasks(context);
+
+    // Implementation is expected to call |onPostLinkTasksComplete|.
+    ASSERT(mPostLinkSubTasks.empty());
 }
 
 void InstallExecutable(const Context *context,

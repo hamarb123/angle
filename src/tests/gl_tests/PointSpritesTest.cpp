@@ -68,7 +68,7 @@ class PointSpritesTest : public ANGLETest<>
         GLfloat pixelOffset = ((int)maxPointSize % 2) ? (1.0f / (GLfloat)windowWidth) : 0;
         GLBuffer vertexObject;
 
-        glBindBuffer(GL_ARRAY_BUFFER, vertexObject.get());
+        glBindBuffer(GL_ARRAY_BUFFER, vertexObject);
         ASSERT_GL_NO_ERROR();
 
         GLfloat thePoints[] = {-0.5f + pixelOffset, -0.5f + pixelOffset, 0.5f + pixelOffset,
@@ -139,7 +139,7 @@ TEST_P(PointSpritesTest, UsingPointCoordInsideFunction)
 {
     constexpr char fs[] =
         R"(precision mediump float;
-        void foo() 
+        void foo()
         {
             gl_FragColor = vec4(gl_PointCoord.x, gl_PointCoord.y, 0, 1);
         }
@@ -235,7 +235,7 @@ void main()
     GLBuffer vertexObject;
     ASSERT_GL_NO_ERROR();
 
-    glBindBuffer(GL_ARRAY_BUFFER, vertexObject.get());
+    glBindBuffer(GL_ARRAY_BUFFER, vertexObject);
     ASSERT_GL_NO_ERROR();
 
     GLfloat thePoints[] = {0.0f, 0.0f};
@@ -296,7 +296,7 @@ void main()
     GLBuffer vertexObject;
     ASSERT_GL_NO_ERROR();
 
-    glBindBuffer(GL_ARRAY_BUFFER, vertexObject.get());
+    glBindBuffer(GL_ARRAY_BUFFER, vertexObject);
     ASSERT_GL_NO_ERROR();
 
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices) + sizeof(colors), nullptr, GL_STATIC_DRAW);
@@ -396,7 +396,7 @@ void main(void)
 // spites.
 TEST_P(PointSpritesTest, PointSpriteAlternatingDrawTypes)
 {
-    // TODO(anglebug.com/4349): Investigate possible ARM driver bug.
+    // TODO(anglebug.com/42262976): Investigate possible ARM driver bug.
     ANGLE_SKIP_TEST_IF(IsFuchsia() && IsARM() && IsVulkan());
 
     GLfloat pointSizeRange[2] = {};
@@ -450,18 +450,11 @@ void main()
 // 3.4.
 TEST_P(PointSpritesTest, PointSizeAboveMaxIsClamped)
 {
-    // Failed on NVIDIA GeForce GTX 1080 - no pixels from the point were detected in the
-    // framebuffer. http://anglebug.com/2111
-    ANGLE_SKIP_TEST_IF(IsD3D9());
-
     // Failed on AMD OSX and Windows trybots - no pixels from the point were detected in the
-    // framebuffer. http://anglebug.com/2113
+    // framebuffer. http://anglebug.com/42260859
     ANGLE_SKIP_TEST_IF(IsAMD() && IsOpenGL());
 
-    // TODO(anglebug.com/5491)
-    ANGLE_SKIP_TEST_IF(IsIOS() && IsOpenGLES());
-
-    // TODO(anglebug.com/6800)
+    // TODO(anglebug.com/40096805)
     ANGLE_SKIP_TEST_IF(IsMetal() && IsAMD());
 
     GLfloat pointSizeRange[2] = {};
@@ -512,7 +505,7 @@ TEST_P(PointSpritesTest, PointSizeAboveMaxIsClamped)
     GLfloat pointXPosition = 1;
 
     GLBuffer vertexBuffer;
-    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer.get());
+    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
     GLfloat thePoints[] = {pointXPosition, 0.0f};
     glBufferData(GL_ARRAY_BUFFER, sizeof(thePoints), thePoints, GL_STATIC_DRAW);
     ASSERT_GL_NO_ERROR();
@@ -537,10 +530,6 @@ TEST_P(PointSpritesTest, PointSizeAboveMaxIsClamped)
 
 // Use this to select which configurations (e.g. which renderer, which GLES
 // major version) these tests should be run against.
-//
-// We test on D3D11 9_3 because the existing D3D11 PointSprite implementation
-// uses Geometry Shaders which are not supported for 9_3.
-// D3D9 and D3D11 are also tested to ensure no regressions.
 ANGLE_INSTANTIATE_TEST_ES2_AND(PointSpritesTest,
                                ES2_VULKAN().enable(Feature::EmulatedPrerotation90),
                                ES2_VULKAN().enable(Feature::EmulatedPrerotation180),

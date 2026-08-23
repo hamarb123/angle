@@ -23,7 +23,6 @@
 #include "libANGLE/renderer/ContextImpl.h"
 #include "libANGLE/renderer/TextureImpl.h"
 #include "libANGLE/renderer/d3d/BufferD3D.h"
-#include "libANGLE/renderer/d3d/DeviceD3D.h"
 #include "libANGLE/renderer/d3d/DisplayD3D.h"
 #include "libANGLE/renderer/d3d/IndexDataManager.h"
 #include "libANGLE/renderer/d3d/ProgramExecutableD3D.h"
@@ -210,9 +209,6 @@ GLenum DefaultGLErrorCode(HRESULT hr)
 {
     switch (hr)
     {
-#ifdef ANGLE_ENABLE_D3D9
-        case D3DERR_OUTOFVIDEOMEMORY:
-#endif
         case E_OUTOFMEMORY:
             return GL_OUT_OF_MEMORY;
         default:

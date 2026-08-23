@@ -8,8 +8,13 @@
 #ifndef LIBANGLE_CLSAMPLER_H_
 #define LIBANGLE_CLSAMPLER_H_
 
+#include <angle_cl.h>
+
 #include "libANGLE/CLObject.h"
+#include "libANGLE/cl_types.h"
 #include "libANGLE/renderer/CLSamplerImpl.h"
+
+#include <cstddef>
 
 namespace cl
 {
@@ -19,7 +24,10 @@ class Sampler final : public _cl_sampler, public Object
   public:
     // Front end entry functions, only called from OpenCL entry points
 
-    cl_int getInfo(SamplerInfo name, size_t valueSize, void *value, size_t *valueSizeRet) const;
+    angle::Result getInfo(SamplerInfo name,
+                          size_t valueSize,
+                          void *value,
+                          size_t *valueSizeRet) const;
 
   public:
     using PropArray = std::vector<cl_sampler_properties>;
@@ -35,20 +43,21 @@ class Sampler final : public _cl_sampler, public Object
     template <typename T = rx::CLSamplerImpl>
     T &getImpl() const;
 
+    static Sampler *Cast(cl_sampler sampler);
+
   private:
     Sampler(Context &context,
             PropArray &&properties,
             cl_bool normalizedCoords,
             AddressingMode addressingMode,
-            FilterMode filterMode,
-            cl_int &errorCode);
+            FilterMode filterMode);
 
     const ContextPtr mContext;
     const PropArray mProperties;
     const cl_bool mNormalizedCoords;
     const AddressingMode mAddressingMode;
     const FilterMode mFilterMode;
-    const rx::CLSamplerImpl::Ptr mImpl;
+    rx::CLSamplerImpl::Ptr mImpl;
 
     friend class Object;
 };
@@ -82,6 +91,11 @@ template <typename T>
 inline T &Sampler::getImpl() const
 {
     return static_cast<T &>(*mImpl);
+}
+
+inline Sampler *Sampler::Cast(cl_sampler sampler)
+{
+    return static_cast<Sampler *>(sampler);
 }
 
 }  // namespace cl

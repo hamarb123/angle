@@ -15,6 +15,8 @@
 #include <string.h>
 #include <algorithm>
 #include <limits>
+#include <ostream>
+#include "common/unsafe_buffers.h"
 
 #include <anglebase/numerics/safe_math.h>
 
@@ -41,7 +43,7 @@ inline constexpr bool isPow2(T x)
 }
 
 template <typename T>
-inline int log2(T x)
+inline constexpr int log2(T x)
 {
     static_assert(std::is_integral<T>::value, "log2 must be called on an integer type.");
     int r = 0;
@@ -120,6 +122,13 @@ inline T clamp(T x, MIN min, MAX max)
 }
 
 template <typename T>
+inline bool isOutsideOfBounds(T value, T min, T max)
+{
+    // Since NaNs fail all comparison tests, a NaN value will return true (out of bounds).
+    return !(value >= min && value <= max);
+}
+
+template <typename T>
 T clampForBitCount(T value, size_t bitCount)
 {
     static_assert(std::numeric_limits<T>::is_integer, "T must be an integer.");
@@ -175,43 +184,12 @@ inline unsigned int unorm(float x)
     }
 }
 
-inline bool supportsSSE2()
-{
-#if defined(ANGLE_USE_SSE)
-    static bool checked  = false;
-    static bool supports = false;
-
-    if (checked)
-    {
-        return supports;
-    }
-
-#    if defined(ANGLE_PLATFORM_WINDOWS) && !defined(_M_ARM) && !defined(_M_ARM64)
-    {
-        int info[4];
-        __cpuid(info, 0);
-
-        if (info[0] >= 1)
-        {
-            __cpuid(info, 1);
-
-            supports = (info[3] >> 26) & 1;
-        }
-    }
-#    endif  // defined(ANGLE_PLATFORM_WINDOWS) && !defined(_M_ARM) && !defined(_M_ARM64)
-    checked = true;
-    return supports;
-#else  // defined(ANGLE_USE_SSE)
-    return false;
-#endif
-}
-
 template <typename destType, typename sourceType>
 destType bitCast(const sourceType &source)
 {
     size_t copySize = std::min(sizeof(destType), sizeof(sourceType));
     destType output;
-    memcpy(&output, &source, copySize);
+    ANGLE_UNSAFE_TODO(memcpy(&output, &source, copySize));
     return output;
 }
 
@@ -547,11 +525,23 @@ inline float normalizedToFloat(T input)
     {
         // float has only a 23 bit mantissa, so we need to do the calculation in double precision
         constexpr double inverseMax = 1.0 / std::numeric_limits<T>::max();
+        if constexpr (std::is_signed<T>::value)
+        {
+            static_assert(static_cast<float>(std::numeric_limits<T>::min() * inverseMax) == -1.0f);
+        }
         return static_cast<float>(input * inverseMax);
     }
     else
     {
         constexpr float inverseMax = 1.0f / std::numeric_limits<T>::max();
+        if constexpr (std::is_signed<T>::value)
+        {
+            // If the input is signed and equals to the type's min value, the multiplication result
+            // would be less than -1. This step is not needed for int32_t because the difference is
+            // not representable with single-precision floats in that case. For the best codegen,
+            // std::max with the first constant parameter must be used here.
+            return std::max(-1.0f, input * inverseMax);
+        }
         return input * inverseMax;
     }
 }
@@ -560,20 +550,73 @@ template <unsigned int inputBitCount, typename T>
 inline float normalizedToFloat(T input)
 {
     static_assert(std::numeric_limits<T>::is_integer, "T must be an integer.");
-    static_assert(inputBitCount < (sizeof(T) * 8), "T must have more bits than inputBitCount.");
-    ASSERT((input & ~((1 << inputBitCount) - 1)) == 0);
+    static_assert(inputBitCount > 0u && inputBitCount < 32u);
+    if constexpr (std::is_signed<T>::value)
+    {
+        static_assert(inputBitCount > 1 && inputBitCount < sizeof(T) * 8 - 1);
+    }
+    else
+    {
+        static_assert(inputBitCount < sizeof(T) * 8);
+    }
 
-    if (inputBitCount > 23)
+    // Account for the sign bit
+    constexpr uint32_t effectiveBitCount =
+        std::is_unsigned<T>::value ? inputBitCount : inputBitCount - 1u;
+
+    constexpr T maxValue = static_cast<T>((1u << effectiveBitCount) - 1u);
+
+    // Ensure that the input value fits in the declared number of bits.
+    ASSERT(input <= maxValue);
+    if constexpr (std::is_signed<T>::value)
+    {
+        ASSERT(input >= -maxValue - 1);
+    }
+
+    if constexpr (effectiveBitCount > 23)
     {
         // float has only a 23 bit mantissa, so we need to do the calculation in double precision
-        constexpr double inverseMax = 1.0 / ((1 << inputBitCount) - 1);
+        constexpr double inverseMax = 1.0 / maxValue;
+        if constexpr (std::is_signed<T>::value)
+        {
+            if constexpr (effectiveBitCount < 25)
+            {
+                return std::max(-1.0f, static_cast<float>(input * inverseMax));
+            }
+            else
+            {
+                static_assert(static_cast<float>((-maxValue - 1) * inverseMax) == -1.0f);
+            }
+        }
         return static_cast<float>(input * inverseMax);
     }
     else
     {
-        constexpr float inverseMax = 1.0f / ((1 << inputBitCount) - 1);
+        constexpr float inverseMax = 1.0f / maxValue;
+        if constexpr (std::is_signed<T>::value)
+        {
+            return std::max(-1.0f, input * inverseMax);
+        }
         return input * inverseMax;
     }
+}
+
+template <typename T, typename R>
+inline R roundToNearest(T input)
+{
+    static_assert(std::is_floating_point<T>::value);
+    static_assert(std::numeric_limits<R>::is_integer);
+#if defined(__aarch64__) || defined(_M_ARM64)
+    // On armv8, this expression is compiled to a dedicated round-to-nearest instruction
+    return static_cast<R>(std::round(input));
+#else
+    static_assert(0.49999997f < 0.5f);
+    static_assert(0.49999997f + 0.5f == 1.0f);
+    static_assert(0.49999999999999994 < 0.5);
+    static_assert(0.49999999999999994 + 0.5 == 1.0);
+    constexpr T bias = sizeof(T) == 8 ? 0.49999999999999994 : 0.49999997f;
+    return static_cast<R>(input + (std::is_signed<R>::value ? std::copysign(bias, input) : bias));
+#endif
 }
 
 template <typename T>
@@ -582,11 +625,12 @@ inline T floatToNormalized(float input)
     if constexpr (sizeof(T) > 2)
     {
         // float has only a 23 bit mantissa, so we need to do the calculation in double precision
-        return static_cast<T>(std::numeric_limits<T>::max() * static_cast<double>(input) + 0.5);
+        return roundToNearest<double, T>(std::numeric_limits<T>::max() *
+                                         static_cast<double>(input));
     }
     else
     {
-        return static_cast<T>(std::numeric_limits<T>::max() * input + 0.5f);
+        return roundToNearest<float, T>(std::numeric_limits<T>::max() * input);
     }
 }
 
@@ -594,15 +638,18 @@ template <unsigned int outputBitCount, typename T>
 inline T floatToNormalized(float input)
 {
     static_assert(outputBitCount < (sizeof(T) * 8), "T must have more bits than outputBitCount.");
+    static_assert(outputBitCount > (std::is_unsigned<T>::value ? 0 : 1),
+                  "outputBitCount must be at least 1 not counting the sign bit.");
+    constexpr unsigned int bits = std::is_unsigned<T>::value ? outputBitCount : outputBitCount - 1;
 
-    if (outputBitCount > 23)
+    if (bits > 23)
     {
         // float has only a 23 bit mantissa, so we need to do the calculation in double precision
-        return static_cast<T>(((1 << outputBitCount) - 1) * static_cast<double>(input) + 0.5);
+        return roundToNearest<double, T>(((1 << bits) - 1) * static_cast<double>(input));
     }
     else
     {
-        return static_cast<T>(((1 << outputBitCount) - 1) * input + 0.5f);
+        return roundToNearest<float, T>(((1 << bits) - 1) * input);
     }
 }
 
@@ -724,9 +771,14 @@ class Range
     Range() {}
     Range(T lo, T hi) : mLow(lo), mHigh(hi) {}
 
+    bool operator==(const Range<T> &other) const
+    {
+        return mLow == other.mLow && mHigh == other.mHigh;
+    }
+
     T length() const { return (empty() ? 0 : (mHigh - mLow)); }
 
-    bool intersects(Range<T> other)
+    bool intersects(const Range<T> &other) const
     {
         if (mLow <= other.mLow)
         {
@@ -735,6 +787,33 @@ class Range
         else
         {
             return mLow < other.mHigh;
+        }
+    }
+
+    bool intersectsOrContinuous(const Range<T> &other) const
+    {
+        ASSERT(!empty());
+        ASSERT(!other.empty());
+        if (mLow <= other.mLow)
+        {
+            return mHigh >= other.mLow;
+        }
+        else
+        {
+            return mLow <= other.mHigh;
+        }
+    }
+
+    void merge(const Range<T> &other)
+    {
+        if (mLow > other.mLow)
+        {
+            mLow = other.mLow;
+        }
+
+        if (mHigh < other.mHigh)
+        {
+            mHigh = other.mHigh;
         }
     }
 
@@ -790,28 +869,48 @@ typedef Range<unsigned int> RangeUI;
 static_assert(std::is_trivially_copyable<RangeUI>(),
               "RangeUI should be trivial copyable so that we can memcpy");
 
+// Inclusive vertex index range [start(), end()].
 struct IndexRange
 {
     struct Undefined
     {};
     IndexRange(Undefined) {}
-    IndexRange() : IndexRange(0, 0, 0) {}
-    IndexRange(size_t start_, size_t end_, size_t vertexIndexCount_)
-        : start(start_), end(end_), vertexIndexCount(vertexIndexCount_)
+    IndexRange() = default;
+    IndexRange(uint32_t start, uint32_t end)
+        : mStart(start), mEnd(end), mCount(static_cast<uint64_t>(end - start) + 1)
     {
         ASSERT(start <= end);
     }
+    bool isEmpty() const { return mCount == 0; }
+    uint32_t start() const
+    {
+        ASSERT(!isEmpty());
+        return mStart;
+    }
+    uint32_t end() const
+    {
+        ASSERT(!isEmpty());
+        return mEnd;
+    }
 
     // Number of vertices in the range.
-    size_t vertexCount() const { return (end - start) + 1; }
+    uint64_t vertexCount() const { return mCount; }
 
-    // Inclusive range of indices that are not primitive restart
-    size_t start;
-    size_t end;
+  private:
+    uint32_t mStart{0};
+    uint32_t mEnd{0};
 
-    // Number of non-primitive restart indices
-    size_t vertexIndexCount;
+    // Since the range is inclusive, mCount == 0 indicates an empty range
+    uint64_t mCount{0};
 };
+
+inline bool operator==(const IndexRange &a, const IndexRange &b)
+{
+    return a.vertexCount() == b.vertexCount() &&
+           ((a.vertexCount() == 0) || (a.start() == b.start()));
+}
+
+std::ostream &operator<<(std::ostream &s, const IndexRange &a);
 
 // Combine a floating-point value representing a mantissa (x) and an integer exponent (exp) into a
 // floating-point value. As in GLSL ldexp() built-in.
@@ -914,7 +1013,7 @@ inline uint32_t PackUnorm4x8(float f1, float f2, float f3, float f4)
     for (int i = 0; i < 4; ++i)
     {
         int shift = i * 8;
-        result |= (static_cast<uint32_t>(bits[i]) << shift);
+        result |= (static_cast<uint32_t>(ANGLE_UNSAFE_TODO(bits[i])) << shift);
     }
     return result;
 }
@@ -928,7 +1027,7 @@ inline void UnpackUnorm4x8(uint32_t u, float *f)
     {
         int shift    = i * 8;
         uint8_t bits = static_cast<uint8_t>((u >> shift) & 0xFF);
-        f[i]         = static_cast<float>(bits) / 255.0f;
+        ANGLE_UNSAFE_TODO(f[i]) = static_cast<float>(bits) / 255.0f;
     }
 }
 
@@ -946,7 +1045,7 @@ inline uint32_t PackSnorm4x8(float f1, float f2, float f3, float f4)
     for (int i = 0; i < 4; ++i)
     {
         int shift = i * 8;
-        result |= ((static_cast<uint32_t>(bits[i]) & 0xFF) << shift);
+        result |= ((static_cast<uint32_t>(ANGLE_UNSAFE_TODO(bits[i])) & 0xFF) << shift);
     }
     return result;
 }
@@ -960,7 +1059,7 @@ inline void UnpackSnorm4x8(uint32_t u, float *f)
     {
         int shift   = i * 8;
         int8_t bits = static_cast<int8_t>((u >> shift) & 0xFF);
-        f[i]        = clamp(static_cast<float>(bits) / 127.0f, -1.0f, 1.0f);
+        ANGLE_UNSAFE_TODO(f[i]) = clamp(static_cast<float>(bits) / 127.0f, -1.0f, 1.0f);
     }
 }
 
@@ -1414,7 +1513,7 @@ template <typename T>
 constexpr T roundUpPow2(const T value, const T alignment)
 {
     ASSERT(gl::isPow2(alignment));
-    return (value + alignment - 1) & ~(alignment - 1);
+    return (value + (alignment - 1)) & ~(alignment - 1);
 }
 
 template <typename T>
@@ -1422,6 +1521,15 @@ constexpr T roundDownPow2(const T value, const T alignment)
 {
     ASSERT(gl::isPow2(alignment));
     return value & ~(alignment - 1);
+}
+
+template <typename T>
+angle::CheckedNumeric<T> CheckedRoundUpPow2(const T value, const T alignment)
+{
+    ASSERT(gl::isPow2(alignment));
+    angle::CheckedNumeric<T> checkedValue(value);
+    angle::CheckedNumeric<T> checkedAlignment(alignment);
+    return (checkedValue + checkedAlignment - 1) & ~(checkedAlignment - 1);
 }
 
 template <typename T>
@@ -1435,6 +1543,12 @@ angle::CheckedNumeric<T> CheckedRoundUp(const T value, const T alignment)
 inline constexpr unsigned int UnsignedCeilDivide(unsigned int value, unsigned int divisor)
 {
     unsigned int divided = value / divisor;
+    return (divided + ((value % divisor == 0) ? 0 : 1));
+}
+
+inline constexpr uint64_t UnsignedCeilDivide64(uint64_t value, uint64_t divisor)
+{
+    uint64_t divided = value / divisor;
     return (divided + ((value % divisor == 0) ? 0 : 1));
 }
 
@@ -1478,12 +1592,8 @@ inline uint16_t RotR16(uint16_t x, int8_t r)
 #    define ANGLE_ROTL64(x, y) ::rx::RotL64(x, y)
 #    define ANGLE_ROTR16(x, y) ::rx::RotR16(x, y)
 
-#endif  // namespace rx
+#endif  // defined(_MSC_VER)
 
-constexpr unsigned int Log2(unsigned int bytes)
-{
-    return bytes == 1 ? 0 : (1 + Log2(bytes / 2));
-}
 }  // namespace rx
 
 #endif  // COMMON_MATHUTIL_H_

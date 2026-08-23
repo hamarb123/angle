@@ -17,10 +17,11 @@ Once the editor is up, paste the following GN args to generate an Android build,
 ```
 target_os = "android"
 target_cpu = "arm64"
+arm_control_flow_integrity = "none"
 is_component_build = false
 is_debug = false
 angle_assert_always_on = true   # Recommended for debugging. Turn off for performance.
-use_goma = true                 # Googlers-only! If you're not a Googler remove this.
+use_remoteexec = true           # Googlers-only! If you're not a Googler remove this.
 ```
 
 More targeted GN arg combinations can be found [below](#android-gn-args-combinations).
@@ -29,8 +30,7 @@ If you run into any problems with the above, you can copy the canonical args fro
  - Visit the ANGLE [CI Waterfall](https://ci.chromium.org/p/angle/g/ci/console).
  - Open any recent Android build.
  - Expand the for "lookup GN args" step and copy the GN args.
- - Always omit the `goma_dir` flag.
- - If you are not a Googler, also omit the `use_goma` flag.
+ - If you are not a Googler, also omit the `use_remoteexec` flag.
 
 ## Building ANGLE for Android
 
@@ -109,6 +109,8 @@ the installed package.
 adb shell settings put global angle_debug_package org.chromium.angle
 ```
 Remember that ANGLE can only be used by applications launched by the Java runtime.
+
+Note: Side-loading apk on Cuttlefish currently requires [special setup](#Cuttlefish-setup)
 
 ## ANGLE driver choices
 
@@ -199,13 +201,14 @@ gn args --list <dir>
 ### Performance config
 
 This config is designed to get maximum performance by disabling debug configs and validation layers.
-Note: The oddly named `is_official_build` is a more aggressive optimization level than `Release`. Its name is historical.
 ```
 target_os = "android"
 target_cpu = "arm64"
+arm_control_flow_integrity = "none"
+use_thin_lto = true
+thin_lto_enable_optimizations = true
 angle_enable_vulkan = true
 is_component_build = false
-is_official_build = true
 is_debug = false
 ```
 
@@ -216,6 +219,7 @@ enables asserts and allows validation errors.
 ```
 target_os = "android"
 target_cpu = "arm64"
+arm_control_flow_integrity = "none"
 is_component_build = false
 is_debug = true
 ```
@@ -227,6 +231,23 @@ a GN arg:
 
 ```
 angle_expose_non_conformant_extensions_and_versions = true
+```
+
+### Cuttlefish setup
+
+Cuttlefish uses ANGLE as a system GL driver, on top of SwiftShader. It also uses SkiaGL (not SkiaVk)
+due to a SwiftShader limitation. This enables preloading of GL libs - so in this case, ANGLE - into Zygote,
+which with the current implementation of the loader results in system libs being loaded instead of
+loading them from the debug apk. To workaround, a custom library name can be set via a GN arg:
+
+```
+angle_libs_suffix = _angle_in_apk
+```
+
+and enabled in the platform with this setting (mind the lack of a leading underscore compared to the above):
+
+```
+adb shell setprop debug.angle.libs.suffix angle_in_apk
 ```
 
 ## Accessing ANGLE traces

@@ -1,4 +1,4 @@
-#!/usr/bin/env vpython
+#!/usr/bin/env vpython3
 #
 # Copyright 2021 The ANGLE Project Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -30,7 +30,12 @@ logging.basicConfig(
     format='(%(levelname)s) %(asctime)s pid=%(process)d'
     '  %(module)s.%(funcName)s:%(lineno)d  %(message)s')
 
-PY_UTILS = str(pathlib.Path(__file__).resolve().parents[1] / 'src' / 'tests' / 'py_utils')
+ANGLE_ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(ANGLE_ROOT) not in sys.path:
+    sys.path.insert(0, str(ANGLE_ROOT))
+from src import commit_id
+
+PY_UTILS = str(ANGLE_ROOT / 'src' / 'tests' / 'py_utils')
 if PY_UTILS not in sys.path:
     os.stat(PY_UTILS) and sys.path.insert(0, PY_UTILS)
 import angle_metrics
@@ -71,7 +76,7 @@ def _upload_perf_results(json_to_upload, name, configuration_name, build_propert
         '--buildername',
         build_properties['buildername'],
         '--buildnumber',
-        build_properties['buildnumber'],
+        str(build_properties['buildnumber']),
         '--name',
         name,
         '--configuration-name',
@@ -396,7 +401,8 @@ def _add_build_info(results, benchmark_name, build_properties):
         reserved_infos.BOTS:
             build_properties['buildername'],
         reserved_infos.POINT_ID:
-            build_properties['angle_commit_pos'],
+            build_properties.get('angle_commit_pos',
+                                 commit_id.get_commit_position(str(ANGLE_ROOT))),
         reserved_infos.BENCHMARKS:
             benchmark_name,
         reserved_infos.ANGLE_REVISIONS:
@@ -464,13 +470,12 @@ def _upload_individual(benchmark_name, directories, configuration_name, build_pr
         results_size_in_mib = os.path.getsize(results_filename) / (2**20)
         logging.info('Uploading perf results from %s benchmark (size %s Mib)' %
                      (benchmark_name, results_size_in_mib))
-        with open(output_json_file, 'w') as oj:
-            upload_return_code = _upload_perf_results(results_filename, benchmark_name,
-                                                      configuration_name, build_properties, oj)
-            upload_end_time = time.time()
-            print_duration(('%s upload time' % (benchmark_name)), upload_begin_time,
-                           upload_end_time)
-            return (benchmark_name, upload_return_code == 0)
+        upload_return_code = _upload_perf_results(results_filename, benchmark_name,
+                                                  configuration_name, build_properties,
+                                                  output_json_file)
+        upload_end_time = time.time()
+        print_duration(('%s upload time' % (benchmark_name)), upload_begin_time, upload_end_time)
+        return (benchmark_name, upload_return_code == 0)
     finally:
         shutil.rmtree(tmpfile_dir)
 
@@ -690,7 +695,7 @@ def _write_perf_data_to_logfile(benchmark_name, output_file, configuration_name,
         if upload_failure:
             logdog_dict[base_benchmark_name]['ref_upload_failed'] = 'True'
     else:
-        # TODO(jmadill): Figure out if we can get a dashboard URL here. http://anglebug.com/6090
+        # TODO(jmadill): Figure out if we can get a dashboard URL here. http://anglebug.com/40096778
         # logdog_dict[base_benchmark_name]['dashboard_url'] = (
         #     upload_results_to_perf_dashboard.GetDashboardUrl(benchmark_name, configuration_name,
         #                                                      RESULTS_URL,

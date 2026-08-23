@@ -7,9 +7,10 @@
 #include <algorithm>
 #include <limits>
 
+#include "common/unsafe_buffers.h"
 #include "compiler/translator/ImmutableStringBuilder.h"
+#include "compiler/translator/IntermRebuild.h"
 #include "compiler/translator/msl/AstHelpers.h"
-#include "compiler/translator/msl/IntermRebuild.h"
 #include "compiler/translator/msl/SymbolEnv.h"
 #include "compiler/translator/util.h"
 
@@ -273,7 +274,7 @@ void SymbolEnv::TemplateName::assign(const Name &name, size_t argCount, const Te
     templateArgs.clear();
     for (size_t i = 0; i < argCount; ++i)
     {
-        templateArgs.push_back(args[i]);
+        templateArgs.push_back(ANGLE_UNSAFE_TODO(args[i]));
     }
 }
 
@@ -345,7 +346,7 @@ const TFunction &SymbolEnv::getFunctionOverload(const Name &name,
 
     for (size_t i = 0; i < paramCount; ++i)
     {
-        mReusableSigBuffer.push_back(*paramTypes[i]);
+        mReusableSigBuffer.push_back(ANGLE_UNSAFE_TODO(*paramTypes[i]));
     }
     mReusableSigBuffer.push_back(returnType);
     mReusableTemplateNameBuffer.assign(name, templateArgCount, templateArgs);
@@ -448,7 +449,7 @@ const AddressSpace *SymbolEnv::isSpace(VarField x,
     }
     const AddressSpace space = iter->second;
     const auto index         = static_cast<std::underlying_type_t<AddressSpace>>(space);
-    return &kAddressSpaces[index];
+    return ANGLE_UNSAFE_TODO(&kAddressSpaces[index]);
 }
 
 void SymbolEnv::markAsPointer(VarField x, AddressSpace space)
@@ -511,18 +512,12 @@ static TBasicType GetTextureBasicType(TBasicType basicType)
         case EbtSampler2DRect:
         case EbtSampler2DMS:
         case EbtSampler2DMSArray:
-        case EbtSamplerVideoWEBGL:
         case EbtSampler2DShadow:
         case EbtSamplerCubeShadow:
         case EbtSampler2DArrayShadow:
-        case EbtSampler1D:
-        case EbtSampler1DArray:
-        case EbtSampler1DArrayShadow:
         case EbtSamplerBuffer:
         case EbtSamplerCubeArray:
         case EbtSamplerCubeArrayShadow:
-        case EbtSampler1DShadow:
-        case EbtSampler2DRectShadow:
             return TBasicType::EbtFloat;
 
         case EbtISampler2D:
@@ -531,8 +526,6 @@ static TBasicType GetTextureBasicType(TBasicType basicType)
         case EbtISampler2DArray:
         case EbtISampler2DMS:
         case EbtISampler2DMSArray:
-        case EbtISampler1D:
-        case EbtISampler1DArray:
         case EbtISampler2DRect:
         case EbtISamplerBuffer:
         case EbtISamplerCubeArray:
@@ -544,8 +537,6 @@ static TBasicType GetTextureBasicType(TBasicType basicType)
         case EbtUSampler2DArray:
         case EbtUSampler2DMS:
         case EbtUSampler2DMSArray:
-        case EbtUSampler1D:
-        case EbtUSampler1DArray:
         case EbtUSampler2DRect:
         case EbtUSamplerBuffer:
         case EbtUSamplerCubeArray:
@@ -587,20 +578,6 @@ Name sh::GetTextureTypeName(TBasicType samplerType)
 
     switch (samplerType)
     {
-        // 1d
-        case EbtSampler1D:  // Desktop GLSL sampler type:
-        case EbtISampler1D:
-        case EbtUSampler1D:
-            HANDLE_TEXTURE_NAME("texture1d");
-            break;
-
-        // 1d array
-        case EbtSampler1DArray:
-        case EbtISampler1DArray:
-        case EbtUSampler1DArray:
-            HANDLE_TEXTURE_NAME("texture1d_array");
-            break;
-
         // Buffer textures
         case EbtSamplerBuffer:
         case EbtISamplerBuffer:
@@ -659,13 +636,6 @@ Name sh::GetTextureTypeName(TBasicType samplerType)
             break;
 
         // Shadow
-        case EbtSampler1DShadow:
-        case EbtSampler1DArrayShadow:
-            UNIMPLEMENTED();
-            HANDLE_TEXTURE_NAME("TODO");
-            break;
-
-        case EbtSampler2DRectShadow:
         case EbtSampler2DShadow:
             HANDLE_TEXTURE_NAME("depth2d");
             break;
@@ -685,7 +655,6 @@ Name sh::GetTextureTypeName(TBasicType samplerType)
         // Extentions
         case EbtSamplerExternalOES:       // Only valid if OES_EGL_image_external exists:
         case EbtSamplerExternal2DY2YEXT:  // Only valid if GL_EXT_YUV_target exists:
-        case EbtSamplerVideoWEBGL:
             UNIMPLEMENTED();
             HANDLE_TEXTURE_NAME("TODO");
             break;

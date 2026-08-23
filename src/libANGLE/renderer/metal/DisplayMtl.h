@@ -100,7 +100,6 @@ class DisplayMtl : public DisplayImpl
                                                          const egl::AttributeMap &attribs) override;
     gl::Version getMaxSupportedESVersion() const override;
     gl::Version getMaxConformantESVersion() const override;
-    Optional<gl::Version> getMaxSupportedDesktopVersion() const override;
 
     EGLSyncImpl *createSync() override;
 
@@ -138,10 +137,9 @@ class DisplayMtl : public DisplayImpl
     bool supportsEitherGPUFamily(uint8_t iOSFamily, uint8_t macFamily) const;
     bool supportsAppleGPUFamily(uint8_t iOSFamily) const;
     bool supportsMacGPUFamily(uint8_t macFamily) const;
-    bool supportsMetal2_1() const;
-    bool supportsMetal2_2() const;
     bool supportsDepth24Stencil8PixelFormat() const;
     bool supports32BitFloatFiltering() const;
+    bool supportsBCTextureCompression() const;
     bool isAMD() const;
     bool isAMDBronzeDriver() const;
     bool isAMDFireProDevice() const;
@@ -157,6 +155,7 @@ class DisplayMtl : public DisplayImpl
     mtl::StateCache &getStateCache() { return mStateCache; }
     mtl::LibraryCache &getLibraryCache() { return mLibraryCache; }
     uint32_t getMaxColorTargetBits() { return mMaxColorTargetBits; }
+    uint32_t getMaxVisibilityQueryOffset() const { return mMaxVisibilityQueryOffset; }
     bool hasFragmentMemoryBarriers() const { return mHasFragmentMemoryBarriers; }
 
     id<MTLLibrary> getDefaultShadersLib();
@@ -176,9 +175,8 @@ class DisplayMtl : public DisplayImpl
     {
         return mFormatTable.getVertexFormat(angleFormatId, tightlyPacked);
     }
-#if ANGLE_MTL_EVENT_AVAILABLE
-    mtl::AutoObjCObj<MTLSharedEventListener> getOrCreateSharedEventListener();
-#endif
+
+    angle::ObjCPtr<MTLSharedEventListener> getOrCreateSharedEventListener();
 
   protected:
     void generateExtensions(egl::DisplayExtensions *outExtensions) const override;
@@ -191,15 +189,13 @@ class DisplayMtl : public DisplayImpl
     void initializeExtensions() const;
     void initializeTextureCaps() const;
     void initializeFeatures();
-    void initializeLimitations();
     EGLenum EGLDrawingBufferTextureTarget();
-    mtl::AutoObjCPtr<id<MTLDevice>> getMetalDeviceMatchingAttribute(
-        const egl::AttributeMap &attribs);
+    angle::ObjCPtr<id<MTLDevice>> getMetalDeviceMatchingAttribute(const egl::AttributeMap &attribs);
     angle::Result initializeShaderLibrary();
 
     egl::Display *mDisplay;
 
-    mtl::AutoObjCPtr<id<MTLDevice>> mMetalDevice = nil;
+    angle::ObjCPtr<id<MTLDevice>> mMetalDevice   = nil;
     uint32_t mMetalDeviceVendorId                = 0;
 
     // Expensive-to-compute AMD Bronze driver detection
@@ -214,10 +210,8 @@ class DisplayMtl : public DisplayImpl
     std::unique_ptr<mtl::RenderUtils> mUtils;
 
     // Built-in Shaders
-    mtl::AutoObjCPtr<id<MTLLibrary>> mDefaultShaders;
-#if ANGLE_MTL_EVENT_AVAILABLE
-    mtl::AutoObjCObj<MTLSharedEventListener> mSharedEventListener;
-#endif
+    angle::ObjCPtr<id<MTLLibrary>> mDefaultShaders;
+    angle::ObjCPtr<MTLSharedEventListener> mSharedEventListener;
 
     mutable bool mCapsInitialized;
     mutable gl::TextureCapsMap mNativeTextureCaps;
@@ -226,6 +220,7 @@ class DisplayMtl : public DisplayImpl
     mutable gl::Limitations mNativeLimitations;
     mutable ShPixelLocalStorageOptions mNativePLSOptions;
     mutable uint32_t mMaxColorTargetBits = 0;
+    mutable uint32_t mMaxVisibilityQueryOffset = 0;
     mutable bool mHasFragmentMemoryBarriers;
 
     angle::FeaturesMtl mFeatures;
