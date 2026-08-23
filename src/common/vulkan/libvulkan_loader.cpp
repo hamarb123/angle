@@ -31,12 +31,20 @@ void *OpenLibVulkan()
     };
 
     constexpr SearchType kSearchTypes[] = {
+// If it's already loaded, allow that always.
+        SearchType::AlreadyLoaded,
+
 // On Android, Fuchsia and GGP we use the system libvulkan.
 #if defined(ANGLE_USE_CUSTOM_LIBVULKAN)
         SearchType::ModuleDir,
 #else
         SearchType::SystemDir,
 #endif  // defined(ANGLE_USE_CUSTOM_LIBVULKAN)
+
+// On Windows, we want to be able to load the system vulkan as well, so include a fallback for that.
+#if defined(ANGLE_PLATFORM_WINDOWS)
+        SearchType::SystemDir,
+#endif  // defined(ANGLE_PLATFORM_WINDOWS)
     };
 
     for (angle::SearchType searchType : kSearchTypes)
