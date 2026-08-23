@@ -1717,6 +1717,7 @@ if (angle_standalone || build_with_chromium ||
       ldflags = [
         "-install_name",
         "@rpath/${output_name}.dylib",
+        "-Wl,-headerpad_max_install_names",
       ]
     }
 
