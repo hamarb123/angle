@@ -15,7 +15,7 @@ gn args out/Debug_x86 && gn args out/Checked_x86 && gn args out/Release_x86 && g
 
 Can set up VS solutions with: `gn gen out/Debug_x86 --sln=angle --ide=vs2022 && gn gen out/Checked_x86 --sln=angle --ide=vs2022 && gn gen out/Release_x86 --sln=angle --ide=vs2022 && gn gen out/Debug_x64 --sln=angle --ide=vs2022 && gn gen out/Checked_x64 --sln=angle --ide=vs2022 && gn gen out/Release_x64 --sln=angle --ide=vs2022 && gn gen out/Debug_arm64 --sln=angle --ide=vs2022 && gn gen out/Checked_arm64 --sln=angle --ide=vs2022 && gn gen out/Release_arm64 --sln=angle --ide=vs2022`
 
-Can build all configs like so: `autoninja -C out/Debug_x86 && autoninja -C out/Checked_x86 && autoninja -C out/Release_x86 && autoninja -C out/Debug_x64 && autoninja -C out/Checked_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -c out/Checked_arm64 && autoninja -C out/Release_arm64 && .\make_win_files.ps1`
+Can build all configs like so: `autoninja -C out/Debug_x86 && autoninja -C out/Checked_x86 && autoninja -C out/Release_x86 && autoninja -C out/Debug_x64 && autoninja -C out/Checked_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -C out/Checked_arm64 && autoninja -C out/Release_arm64 && .\make_win_files.ps1`
 
 # How to move from one chromium feature branch base to another
 
