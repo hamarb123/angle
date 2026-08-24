@@ -91,11 +91,6 @@ UWP fixes, modification to `src/common/platform.h`:
 
 WinUI 3 fixes, modification to `BUILD.gn`
 ```diff
--
--  if (is_win && build_with_chromium) {
--    defines += [ "ANGLE_WINDOWS_NO_FUTEX=1" ]
--  }
- ...
 -  if (is_win && !angle_is_winuwp && !build_with_chromium) {
 +  if (is_win && !build_with_chromium) {
      # Needed for futex support
