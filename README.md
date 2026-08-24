@@ -89,6 +89,20 @@ UWP fixes, modification to `src/common/platform.h`:
  #    endif
 ```
 
+WinUI 3 fixes, modification to `BUILD.gn`
+```diff
+-
+-  if (is_win && build_with_chromium) {
+-    defines += [ "ANGLE_WINDOWS_NO_FUTEX=1" ]
+-  }
+ ...
+-  if (is_win && !angle_is_winuwp && !build_with_chromium) {
++  if (is_win && !build_with_chromium) {
+     # Needed for futex support
+     libs += [ "synchronization.lib" ]
+   }
+```
+
 # Note - To build UWP on Windows:
 
 Change:
@@ -96,6 +110,21 @@ Change:
 target_os = "winuwp"
 use_custom_libcxx = false
 is_clang = false
+```
+
+# Note - To build WinUI 3 on Windows:
+
+Run:
+```
+python scripts/winappsdk_setup.py --output winappsdkheaders # MUST BE RUN IN VS DEVELOPER CMD
+```
+
+Change:
+```
+is_clang = false
+use_custom_libcxx = false
+angle_is_winappsdk = true
+winappsdk_dir = "C:\path\to\angle\winappsdkheaders"
 ```
 
 # macOS additional info
