@@ -17,6 +17,8 @@ Can set up VS solutions with: `gn gen out/Debug_x86 --sln=angle --ide=vs2022 && 
 
 Can build all configs like so: `autoninja -C out/Debug_x86 && autoninja -C out/Checked_x86 && autoninja -C out/Release_x86 && autoninja -C out/Debug_x64 && autoninja -C out/Checked_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -C out/Checked_arm64 && autoninja -C out/Release_arm64 && .\make_win_files.ps1`
 
+Windows additional info: ensure running in `cmd`, set DEPOT_TOOLS_WIN_TOOLCHAIN=0, install Windows SDK From https://learn.microsoft.com/en-us/windows/apps/windows-sdk/downloads, ensure all ATL options are enabled in VS Installer.
+
 # How to move from one chromium feature branch base to another
 
 To move from `4692` to `4951`:
