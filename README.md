@@ -154,6 +154,21 @@ Mac Catalyst fixes, modification to `src/common/apple_platform_utils.mm`:
  bool GetMacosMachineModel(std::string *outMachineModel)
 ```
 
+Mac Catalyst fixes, modification to `src/gpu_info_util/SystemInfo_apple.mm`:
+```diff
+ bool GetSystemInfo(SystemInfo *info)
+ {
+-#if defined(ANGLE_PLATFORM_MACOS) || defined(ANGLE_PLATFORM_MACCATALYST)
++#if defined(ANGLE_PLATFORM_MACOS)
+```
+
+Mac Catalyst fixes, modification to `src/gpu_info_util/SystemInfo_internal.h`:
+```diff
+-#if defined(ANGLE_PLATFORM_MACOS) || defined(ANGLE_PLATFORM_MACCATALYST)
++#if defined(ANGLE_PLATFORM_MACOS)
+ bool GetSystemInfo_mac(SystemInfo *info);
+```
+
 # Note - To build UWP on Windows:
 
 Change:
