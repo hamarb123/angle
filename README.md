@@ -54,6 +54,7 @@ is_clang = true
 is_debug = true
 is_official_build = false
 angle_enable_null = true
+angle_build_tests = false
 ```
 
 or `target_cpu = "x64"` / `target_cpu = "arm64"` for those processors
@@ -63,6 +64,8 @@ or `is_debug = false` for Checked/Release mode
 or `is_official_build = true` for Release mode
 
 `is_component_build = false` allows only needing to distribute `libEGL.dll`, `libGLESv2.dll`, and (for &lt; Win 8.1) `d3dcompiler_47.dll`
+
+`angle_build_tests = false` skips the tests, which makes the out folder much smaller
 
 Windows fixes, modification to `build/compute_build_timestamp.py`:
 ```diff
