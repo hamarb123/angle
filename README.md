@@ -76,16 +76,6 @@ Windows and macOS fixes, modification to `build/config/compiler/pgo/pgo.gni`:
 +    chrome_pgo_phase = 0
 ```
 
-Windows fixes, modification to `third_party/VK-GL-CTS/src/framework/opengl/wrapper/glwTypes.inl`:
-```diff
- typedef void				GLvoid;
- 
--#if (DE_OS == DE_OS_WIN32 && DE_CPU == DE_CPU_X86_64)
-+#if (DE_OS == DE_OS_WIN32 && (DE_CPU == DE_CPU_X86_64 || defined(_M_ARM64) || defined(__aarch64__)))
- 	typedef signed long long int	GLintptr;
- 	typedef signed long long int	GLsizeiptr;
-```
-
 Windows fixes, modification to `third_party\libpng\BUILD.gn`:
 ```diff
      ]
