@@ -98,6 +98,62 @@ WinUI 3 fixes, modification to `BUILD.gn`
    }
 ```
 
+Mac Catalyst fixes, modification to `src/libANGLE/renderer/metal/mtl_utils.mm`:
+```diff
+-#if TARGET_OS_OSX || TARGET_OS_MACCATALYST
++#if TARGET_OS_OSX
+ uint32_t GetDeviceVendorIdFromIOKit(id<MTLDevice> device)
+ {
+     return angle::GetVendorIDFromMetalDeviceRegistryID(device.registryID);
+ }
+ #endif
+ ...
+-#if TARGET_OS_OSX || TARGET_OS_MACCATALYST
++#if TARGET_OS_OSX
+     vendorId = GetDeviceVendorIdFromIOKit(metalDevice);
+ #endif
+```
+
+Mac Catalyst fixes, modification to `src/common/apple_platform_utils.mm`:
+```diff
+ bool IsMetalRendererAvailable()
+ {
+-#if defined(ANGLE_PLATFORM_MACOS) || defined(ANGLE_PLATFORM_MACCATALYST)
++#if defined(ANGLE_PLATFORM_MACCATALYST)
++     return true;
++#endif
++#if defined(ANGLE_PLATFORM_MACOS)
+ ...
++#if !defined(ANGLE_PLATFORM_MACCATALYST)
+     static bool gpuFamilySufficient = []() -> bool {
+         ANGLE_APPLE_OBJC_SCOPE
+         {
+             auto device = [MTLCreateSystemDefaultDevice() ANGLE_APPLE_AUTORELEASE];
+             if (!device)
+             {
+                 return false;
+             }
+ #if TARGET_OS_MACCATALYST && __IPHONE_OS_VERSION_MIN_REQUIRED < 160000
+             // Devices in family 1, such as MacBookPro11,4, cannot use ANGLE's Metal backend.
+             return [device supportsFamily:MTLGPUFamilyMacCatalyst2];
+ #elif TARGET_OS_MACCATALYST || TARGET_OS_OSX
+             // Devices in family 1, such as MacBookPro11,4, cannot use ANGLE's Metal backend.
+             return [device supportsFamily:MTLGPUFamilyMac2];
+ #else
+             // Devices starting with A9 onwards are supported. Simulator is supported as per
+             // definition that running simulator on Mac Family 1 devices is not supported.
+             return true;
+ #endif
+         }
+     }();
+     return gpuFamilySufficient;
++#endif
+ ...
+-#if defined(ANGLE_PLATFORM_MACOS) || defined(ANGLE_PLATFORM_MACCATALYST)
++#if defined(ANGLE_PLATFORM_MACOS)
+ bool GetMacosMachineModel(std::string *outMachineModel)
+```
+
 # Note - To build UWP on Windows:
 
 Change:
@@ -132,6 +188,41 @@ gn args out/Debug_x64 && gn args out/Checked_x64 && gn args out/Release_x64 && g
 ```
 
 Can build all configs like so: `autoninja -C out/Debug_x64 && autoninja -C out/Checked_x64 && autoninja -C out/Release_x64 && autoninja -C out/Debug_arm64 && autoninja -C out/Checked_arm64 && autoninja -C out/Release_arm64 && ./make_mac_files.command`
+
+# iOS Builds:
+```
+gn args out/Debug_ios_arm64 && gn args out/Checked_ios_arm64 && gn args out/Release_ios_arm64 && gn args out/Debug_simulator_arm64 && gn args out/Checked_simulator_arm64 && gn args out/Release_simulator_arm64 && gn args out/Debug_simulator_x64 && gn args out/Checked_simulator_x64 && gn args out/Release_simulator_x64 && gn args out/Debug_catalyst_arm64 && gn args out/Checked_catalyst_arm64 && gn args out/Release_catalyst_arm64 && gn args out/Debug_catalyst_x64 && gn args out/Checked_catalyst_x64 && gn args out/Release_catalyst_x64
+autoninja -C out/Debug_ios_arm64 && autoninja -C out/Checked_ios_arm64 && autoninja -C out/Release_ios_arm64 && autoninja -C out/Debug_simulator_arm64 && autoninja -C out/Checked_simulator_arm64 && autoninja -C out/Release_simulator_arm64 && autoninja -C out/Debug_simulator_x64 && autoninja -C out/Checked_simulator_x64 && autoninja -C out/Release_simulator_x64 && autoninja -C out/Debug_catalyst_arm64 && autoninja -C out/Checked_catalyst_arm64 && autoninja -C out/Release_catalyst_arm64 && autoninja -C out/Debug_catalyst_x64 && autoninja -C out/Checked_catalyst_x64 && autoninja -C out/Release_catalyst_x64
+```
+
+With arguments:
+```
+target_os = "ios"
+target_environment = "device"
+```
+
+or
+```
+target_os = "ios"
+target_environment = "simulator"
+```
+
+or
+```
+target_os = "ios"
+target_environment = "catalyst"
+```
+
+# Note - To build Mac Catalyst on MacOS:
+
+Run
+```bash
+# Temporary
+sudo ln -s /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Xcode/Agents/XCTRunner.app/Contents/MacOS/XCTRunner /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Xcode/Agents/XCTRunner.app/XCTRunner
+
+# Revert
+sudo rm /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Xcode/Agents/XCTRunner.app/XCTRunner
+```
 
 # ANGLE - Almost Native Graphics Layer Engine
 
