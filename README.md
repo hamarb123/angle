@@ -79,25 +79,6 @@ Windows and macOS fixes, modification to `build/config/compiler/pgo/pgo.gni`:
 +    chrome_pgo_phase = 0
 ```
 
-Windows fixes, modification to `third_party\libpng\BUILD.gn`:
-```diff
-     ]
-     defines = [ "PNG_INTEL_SSE_OPT=1" ]
-   } else if (target_cpu == "arm" || target_cpu == "arm64") {
--    sources += [
--      "src/arm/arm_init.c",
--      "src/arm/filter_neon_intrinsics.c",
--      "src/arm/palette_neon_intrinsics.c",
--    ]
-     defines = [
--      "PNG_ARM_NEON_OPT=2",
--      "PNG_ARM_NEON_IMPLEMENTATION=1",
-+      "PNG_ARM_NEON_OPT=0",
-+      "PNG_ARM_NEON_IMPLEMENTATION=0",
-     ]
-   }
-```
-
 UWP fixes, modification to `src/common/platform.h`:
 ```diff
 +#    include "winapifamily.h"
