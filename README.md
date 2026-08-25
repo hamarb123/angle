@@ -69,13 +69,13 @@ or `is_official_build = true` for Release mode
 
 `angle_build_tests = false` skips the tests, which makes the out folder much smaller
 
-Windows fixes, modification to `build/compute_build_timestamp.py`:
+All windows fixes, modification to `build/compute_build_timestamp.py`:
 ```diff
 -    if os.name == 'nt':
 +    if os.name == 'nt_NEVER':
 ```
 
-Windows and macOS fixes, modification to `build/config/compiler/pgo/pgo.gni`:
+All platforms fixes, modification to `build/config/compiler/pgo/pgo.gni`:
 ```diff
 -    chrome_pgo_phase = 2
 +    chrome_pgo_phase = 0
