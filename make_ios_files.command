@@ -254,118 +254,118 @@ xcodebuild -create-xcframework -framework ./out/upload/ios_arm64_debug/libGLESv2
 xcodebuild -create-xcframework -framework ./out/upload/ios_arm64_debug/libGLESv1_CM.framework -framework ./out/upload/iossimulator_combined_debug/libGLESv1_CM.framework -framework ./out/upload/maccatalyst_combined_debug/libGLESv1_CM.framework -output ./out/upload/ioslike_combined_debug/libGLESv1_CM.xcframework
 
 pushd ./out/upload/ios_arm64
-zip -r ../ios_arm64.zip libEGL.framework libGLESv2.framework
-zip -r ../ios_arm64_extra_gles1.zip libGLESv1_CM.framework
+zip -yr ../ios_arm64.zip libEGL.framework libGLESv2.framework
+zip -yr ../ios_arm64_extra_gles1.zip libGLESv1_CM.framework
 pushd symbols
-zip -r ../../ios_arm64_symbols.zip libEGL.framework.dSYM libGLESv2.framework.dSYM libGLESv1_CM.framework.dSYM
+zip -yr ../../ios_arm64_symbols.zip libEGL.framework.dSYM libGLESv2.framework.dSYM libGLESv1_CM.framework.dSYM
 popd
 popd
 
 pushd ./out/upload/ios_arm64_checked
-zip -r ../ios_arm64_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../ios_arm64_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/ios_arm64_debug
-zip -r ../ios_arm64_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../ios_arm64_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/iossimulator_arm64
-zip -r ../iossimulator_arm64.zip libEGL.framework libGLESv2.framework
-zip -r ../iossimulator_arm64_extra_gles1.zip libGLESv1_CM.framework
+zip -yr ../iossimulator_arm64.zip libEGL.framework libGLESv2.framework
+zip -yr ../iossimulator_arm64_extra_gles1.zip libGLESv1_CM.framework
 pushd symbols
-zip -r ../../iossimulator_arm64_symbols.zip libEGL.framework.dSYM libGLESv2.framework.dSYM libGLESv1_CM.framework.dSYM
+zip -yr ../../iossimulator_arm64_symbols.zip libEGL.framework.dSYM libGLESv2.framework.dSYM libGLESv1_CM.framework.dSYM
 popd
 popd
 
 pushd ./out/upload/iossimulator_x64
-zip -r ../iossimulator_x64.zip libEGL.framework libGLESv2.framework
-zip -r ../iossimulator_x64_extra_gles1.zip libGLESv1_CM.framework
+zip -yr ../iossimulator_x64.zip libEGL.framework libGLESv2.framework
+zip -yr ../iossimulator_x64_extra_gles1.zip libGLESv1_CM.framework
 pushd symbols
-zip -r ../../iossimulator_x64_symbols.zip libEGL.framework.dSYM libGLESv2.framework.dSYM libGLESv1_CM.framework.dSYM
+zip -yr ../../iossimulator_x64_symbols.zip libEGL.framework.dSYM libGLESv2.framework.dSYM libGLESv1_CM.framework.dSYM
 popd
 popd
 
 pushd ./out/upload/iossimulator_combined
-zip -r ../iossimulator_combined.zip libEGL.framework libGLESv2.framework
-zip -r ../iossimulator_combined_extra_gles1.zip libGLESv1_CM.framework
+zip -yr ../iossimulator_combined.zip libEGL.framework libGLESv2.framework
+zip -yr ../iossimulator_combined_extra_gles1.zip libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/iossimulator_arm64_checked
-zip -r ../iossimulator_arm64_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../iossimulator_arm64_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/iossimulator_x64_checked
-zip -r ../iossimulator_x64_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../iossimulator_x64_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/iossimulator_combined_checked
-zip -r ../iossimulator_combined_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../iossimulator_combined_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/iossimulator_arm64_debug
-zip -r ../iossimulator_arm64_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../iossimulator_arm64_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/iossimulator_x64_debug
-zip -r ../iossimulator_x64_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../iossimulator_x64_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/iossimulator_combined_debug
-zip -r ../iossimulator_combined_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../iossimulator_combined_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/maccatalyst_arm64
-zip -r ../maccatalyst_arm64.zip libEGL.framework libGLESv2.framework
-zip -r ../maccatalyst_arm64_extra_gles1.zip libGLESv1_CM.framework
+zip -yr ../maccatalyst_arm64.zip libEGL.framework libGLESv2.framework
+zip -yr ../maccatalyst_arm64_extra_gles1.zip libGLESv1_CM.framework
 pushd symbols
-zip -r ../../maccatalyst_arm64_symbols.zip libEGL.framework.dSYM libGLESv2.framework.dSYM libGLESv1_CM.framework.dSYM
+zip -yr ../../maccatalyst_arm64_symbols.zip libEGL.framework.dSYM libGLESv2.framework.dSYM libGLESv1_CM.framework.dSYM
 popd
 popd
 
 pushd ./out/upload/maccatalyst_x64
-zip -r ../maccatalyst_x64.zip libEGL.framework libGLESv2.framework
-zip -r ../maccatalyst_x64_extra_gles1.zip libGLESv1_CM.framework
+zip -yr ../maccatalyst_x64.zip libEGL.framework libGLESv2.framework
+zip -yr ../maccatalyst_x64_extra_gles1.zip libGLESv1_CM.framework
 pushd symbols
-zip -r ../../maccatalyst_x64_symbols.zip libEGL.framework.dSYM libGLESv2.framework.dSYM libGLESv1_CM.framework.dSYM
+zip -yr ../../maccatalyst_x64_symbols.zip libEGL.framework.dSYM libGLESv2.framework.dSYM libGLESv1_CM.framework.dSYM
 popd
 popd
 
 pushd ./out/upload/maccatalyst_combined
-zip -r ../maccatalyst_combined.zip libEGL.framework libGLESv2.framework
-zip -r ../maccatalyst_combined_extra_gles1.zip libGLESv1_CM.framework
+zip -yr ../maccatalyst_combined.zip libEGL.framework libGLESv2.framework
+zip -yr ../maccatalyst_combined_extra_gles1.zip libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/maccatalyst_arm64_checked
-zip -r ../maccatalyst_arm64_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../maccatalyst_arm64_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/maccatalyst_x64_checked
-zip -r ../maccatalyst_x64_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../maccatalyst_x64_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/maccatalyst_combined_checked
-zip -r ../maccatalyst_combined_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../maccatalyst_combined_checked.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/maccatalyst_arm64_debug
-zip -r ../maccatalyst_arm64_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../maccatalyst_arm64_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/maccatalyst_x64_debug
-zip -r ../maccatalyst_x64_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../maccatalyst_x64_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/maccatalyst_combined_debug
-zip -r ../maccatalyst_combined_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
+zip -yr ../maccatalyst_combined_debug.zip libEGL.framework libGLESv2.framework libGLESv1_CM.framework
 popd
 
 pushd ./out/upload/ioslike_combined
-zip -r ../ioslike_combined.zip libEGL.xcframework libGLESv2.xcframework
-zip -r ../ioslike_combined_extra_gles1.zip libGLESv1_CM.xcframework
+zip -yr ../ioslike_combined.zip libEGL.xcframework libGLESv2.xcframework
+zip -yr ../ioslike_combined_extra_gles1.zip libGLESv1_CM.xcframework
 popd
 
 pushd ./out/upload/ioslike_combined_checked
-zip -r ../ioslike_combined_checked.zip libEGL.xcframework libGLESv2.xcframework libGLESv1_CM.xcframework
+zip -yr ../ioslike_combined_checked.zip libEGL.xcframework libGLESv2.xcframework libGLESv1_CM.xcframework
 popd
 
 pushd ./out/upload/ioslike_combined_debug
