@@ -199,6 +199,7 @@ winappsdk_dir = "C:\path\to\angle\winappsdkheaders"
 
 To set up building:
 ```
+xcodebuild -downloadComponent MetalToolchain
 python scripts/bootstrap.py
 gclient sync
 gn args out/Debug_x64 && gn args out/Checked_x64 && gn args out/Release_x64 && gn args out/Debug_arm64 && gn args out/Checked_arm64 && gn args out/Release_arm64
