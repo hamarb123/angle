@@ -242,6 +242,12 @@ sudo ln -s /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/
 sudo rm /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Xcode/Agents/XCTRunner.app/XCTRunner
 ```
 
+# Note - To build Android on Linux:
+
+```
+target_os = "android"
+```
+
 # ANGLE - Almost Native Graphics Layer Engine
 
 The goal of ANGLE is to allow users of multiple operating systems to seamlessly run WebGL and other
