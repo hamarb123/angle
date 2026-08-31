@@ -171,6 +171,25 @@ Mac Catalyst fixes, modification to `src/gpu_info_util/SystemInfo_internal.h`:
  bool GetSystemInfo_mac(SystemInfo *info);
 ```
 
+Mac Catalyst fixes, modification to `src/common/system_utils_ios.mm`:
+```diff
+ std::string GetExecutableDirectory()
+ {
+     std::string executablePath = GetExecutablePath();
+     size_t lastPathSepLoc      = executablePath.find_last_of("/");
+-    return (lastPathSepLoc != std::string::npos) ? executablePath.substr(0, lastPathSepLoc) : "";
++    std::string result = (lastPathSepLoc != std::string::npos) ? executablePath.substr(0, lastPathSepLoc) : "";
++
++#if defined(ANGLE_PLATFORM_MACCATALYST)
++    lastPathSepLoc = result.find_last_of("/");
++    if (lastPathSepLoc != std::string::npos)
++       result = directory.substr(0, lastPathSepLoc);
++#endif
++
++    return result;
+ }
+```
+
 # Note - To build UWP on Windows:
 
 Change:
