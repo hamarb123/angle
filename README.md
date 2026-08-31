@@ -183,7 +183,9 @@ Mac Catalyst fixes, modification to `src/common/system_utils_ios.mm`:
 +#if defined(ANGLE_PLATFORM_MACCATALYST)
 +    lastPathSepLoc = result.find_last_of("/");
 +    if (lastPathSepLoc != std::string::npos)
-+       result = directory.substr(0, lastPathSepLoc);
++        result = directory.substr(0, lastPathSepLoc);
++    else
++        result = "";
 +#endif
 +
 +    return result;
