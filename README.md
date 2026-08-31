@@ -171,7 +171,7 @@ Mac Catalyst fixes, modification to `src/gpu_info_util/SystemInfo_internal.h`:
  bool GetSystemInfo_mac(SystemInfo *info);
 ```
 
-Mac Catalyst fixes, modification to `src/common/system_utils_ios.mm`:
+Mac Catalyst fixes, modification to `src/common/system_utils_apple.cpp`:
 ```diff
  std::string GetExecutableDirectory()
  {
