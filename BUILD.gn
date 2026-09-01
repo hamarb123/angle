@@ -1665,6 +1665,7 @@ template("libEGL_shared_template") {
 
       ldflags += [
         "-Wl,-install_name,@loader_path/${output_name}.dylib",
+        "-Wl,-headerpad_max_install_names",
       ]
     }
   }
