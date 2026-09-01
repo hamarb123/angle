@@ -304,7 +304,10 @@ if (is_win || is_linux || is_chromeos || is_android || is_fuchsia || is_apple) {
         "CoreFoundation.framework",
         "IOSurface.framework",
       ]
-      ldflags = [
+      if (!defined(ldflags)) {
+        ldflags = []
+      }
+      ldflags += [
         "-weak_framework",
         "Metal",
       ]
@@ -1796,7 +1799,10 @@ if (build_angle_deqp_tests && !is_fuchsia) {
       ]
 
       if ((is_mac || is_ios) && !is_component_build) {
-        ldflags = [
+        if (!defined(ldflags)) {
+          ldflags = []
+        }
+        ldflags += [
           "-install_name",
           "@rpath/lib${shared_library_name}.dylib",
         ]

@@ -2339,7 +2339,10 @@ clspv_llvm_static_lib("clspv_llvm_lib_support") {
       "delayimp.lib",
       "ntdll.lib",
     ]
-    ldflags = [
+    if (!defined(ldflags)) {
+      ldflags = []
+    }
+    ldflags += [
       "-delayload:ole32.dll",
       "-delayload:shell32.dll",
     ]

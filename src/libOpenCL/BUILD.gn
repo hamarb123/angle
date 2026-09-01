@@ -39,7 +39,10 @@ angle_shared_library("OpenCL_ANGLE") {
 
   if (is_linux) {
     inputs = [ "libOpenCL_autogen.map" ]
-    ldflags = [
+    if (!defined(ldflags)) {
+      ldflags = []
+    }
+    ldflags += [
       "-Wl,--version-script=" +
           rebase_path("libOpenCL_autogen.map", root_build_dir),
       "-Wl,-rpath=" + glesv2_path,

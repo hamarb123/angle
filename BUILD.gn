@@ -424,7 +424,11 @@ config("opencl_no_pragma_messages") {
 # library. The build-id makes it possible for a debugger to find the right
 # symbol file to use.
 config("build_id_config") {
-  ldflags = [ "-Wl,--build-id" ]
+  if (!defined(ldflags)) {
+    ldflags = []
+  }
+
+  ldflags += [ "-Wl,--build-id" ]
 }
 
 _use_copy_compiler_dll = angle_has_build && is_win
@@ -1034,7 +1038,9 @@ config("libANGLE_config") {
   cflags = []
   defines = []
   libs = []
-  ldflags = []
+  if (!defined(ldflags)) {
+    ldflags = []
+  }
   defines += [ "LIBANGLE_IMPLEMENTATION" ]
 
   if (is_win) {
@@ -1405,7 +1411,10 @@ config("shared_library_public_config") {
   if (is_mac && !is_component_build) {
     # Executable targets that depend on the shared libraries below need to have
     # the rpath setup in non-component build configurations.
-    ldflags = [
+    if (!defined(ldflags)) {
+      ldflags = []
+    }
+    ldflags += [
       "-rpath",
       "@executable_path/",
     ]
@@ -1422,7 +1431,7 @@ config("shared_library_public_config") {
   }
 
   if (angle_is_winuwp && !angle_is_winappsdk) {
-    ldflags = [
+    ldflags += [
       "/APPCONTAINER",
 
       # Disable warning about invalid subsystem number.
@@ -1714,10 +1723,13 @@ if (angle_standalone || build_with_chromium ||
     ]
 
     if (is_apple && !is_component_build) {
-      ldflags = [
+      if (!defined(ldflags)) {
+        ldflags = []
+      }
+
+      ldflags += [
         "-install_name",
         "@rpath/${output_name}.dylib",
-        "-Wl,-headerpad_max_install_names",
       ]
     }
 
@@ -1739,7 +1751,10 @@ if (angle_enable_cgl) {
     # https://bugs.chromium.org/p/chromium/issues/detail?id=781858
     _plist_file = "util/osx/supports_automatic_graphics_switching.plist"
     inputs = [ _plist_file ]
-    ldflags = [
+    if (!defined(ldflags)) {
+      ldflags = []
+    }
+    ldflags += [
       "-sectcreate",
       "__TEXT",
       "__info_plist",

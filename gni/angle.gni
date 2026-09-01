@@ -472,6 +472,14 @@ set_defaults("angle_shared_library") {
   configs = angle_common_configs
   public_configs = []
   suppressed_configs = angle_remove_configs
+
+  if (!defined(ldflags)) {
+    ldflags = []
+  }
+
+  if (is_mac) {
+    ldflags += ["-Wl,-headerpad_max_install_names",]
+  }
 }
 
 set_defaults("angle_source_set") {
@@ -753,7 +761,10 @@ if (angle_standalone || build_with_chromium ||
       if (is_ios) {
         # We use a special main function on iOS to initialize UIKit before the
         # normal main runs.
-        ldflags = [
+        if (!defined(ldflags)) {
+          ldflags = []
+        }
+        ldflags += [
           "-e",
           "_ios_main",
         ]
