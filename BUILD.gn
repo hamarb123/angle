@@ -1506,6 +1506,12 @@ template("angle_libGLESv2") {
       sources += [ "src/libGLESv2/libGLESv2.rc" ]
       deps += [ ":angle_version" ]
     }
+
+    if (is_mac) {
+      ldflags += [
+        "-Wl,-install_name,@loader_path/${output_name}.dylib",
+      ]
+    }
   }
 }
 
@@ -1579,6 +1585,12 @@ angle_shared_library("libGLESv1_CM") {
     sources += [ "src/libGLESv1_CM/libGLESv1_CM.def" ]
     deps += [ ":angle_version" ]
   }
+
+  if (is_mac) {
+    ldflags += [
+      "-Wl,-install_name,@loader_path/${output_name}.dylib",
+    ]
+  }
 }
 
 config("libEGL_egl_loader_config") {
@@ -1645,6 +1657,16 @@ template("libEGL_shared_template") {
     }
 
     data_deps = [ ":${invoker.gles_library}" ]
+
+    if (is_mac) {
+      if (!defined(ldflags)) {
+        ldflags = []
+      }
+
+      ldflags += [
+        "-Wl,-install_name,@loader_path/${output_name}.dylib",
+      ]
+    }
   }
 }
 
