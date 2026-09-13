@@ -1431,6 +1431,9 @@ config("shared_library_public_config") {
   }
 
   if (angle_is_winuwp && !angle_is_winappsdk) {
+    if (!defined(ldflags)) {
+      ldflags = []
+    }
     ldflags += [
       "/APPCONTAINER",
 
