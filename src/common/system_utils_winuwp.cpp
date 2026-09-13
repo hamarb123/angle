@@ -46,20 +46,38 @@ void *OpenSystemLibraryWithExtensionAndGetError(const char *libraryName,
     switch (searchType)
     {
         case SearchType::ModuleDir:
-            if (errorOut)
-            {
-                *errorOut = libraryName;
-            }
+        {
+            // Preserve original google/angle logic, before we fall back to LoadLibraryW:
             libraryModule = LoadPackagedLibrary(Widen(libraryName).c_str(), 0);
+            if (libraryModule != nullptr)
+            {
+                break;
+            }
+
+            std::string moduleRelativePath = ConcatenatePath(GetModuleDirectory(), libraryName);
+            libraryModule                  = LoadLibraryW(Widen(moduleRelativePath).c_str());
+            if (libraryModule == nullptr && errorOut)
+            {
+                *errorOut = std::string("failed to load library (SearchType::ModuleDir) ") +
+                            moduleRelativePath;
+            }
             break;
+        }
 
         case SearchType::SystemDir:
-            // Not supported in UWP
+        {
+            libraryModule =
+                LoadLibraryExW(Widen(libraryName).c_str(), nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+            if (libraryModule == nullptr && errorOut)
+            {
+                *errorOut =
+                    std::string("failed to load library (SearchType::SystemDir) ") + libraryName;
+            }
             break;
+        }
 
         case SearchType::AlreadyLoaded:
         {
-            // Copied from Win32 - the GetModuleHandleW api is available in app, system, and games partition.
             libraryModule = GetModuleHandleW(Widen(libraryName).c_str());
             if (libraryModule == nullptr && errorOut)
             {
