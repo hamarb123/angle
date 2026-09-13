@@ -52,10 +52,22 @@ void *OpenSystemLibraryWithExtensionAndGetError(const char *libraryName,
             }
             libraryModule = LoadPackagedLibrary(Widen(libraryName).c_str(), 0);
             break;
+
         case SearchType::SystemDir:
-        case SearchType::AlreadyLoaded:
             // Not supported in UWP
             break;
+
+        case SearchType::AlreadyLoaded:
+        {
+            // Copied from Win32 - the GetModuleHandleW api is available in app, system, and games partition.
+            libraryModule = GetModuleHandleW(Widen(libraryName).c_str());
+            if (libraryModule == nullptr && errorOut)
+            {
+                *errorOut = std::string("failed to load library (SearchType::AlreadyLoaded) ") +
+                            libraryName;
+            }
+            break;
+        }
     }
 
     return reinterpret_cast<void *>(libraryModule);
