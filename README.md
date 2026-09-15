@@ -7,6 +7,7 @@ Download depot_tools from [here](https://commondatastorage.googleapis.com/chrome
 To set up powershell building, do the following:
 ```ps1
 $Env:PATH = "<path to depot_tools>;"+$Env:PATH
+$Env:DEPOT_TOOLS_WIN_TOOLCHAIN = "0"
 python scripts/bootstrap.py
 gclient sync
 cmd /c mklink /D out "<path to out directory>"
